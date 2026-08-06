@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { assets } from "@/db/schema";
+import { portfolios } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
 export async function PUT(
@@ -11,19 +11,9 @@ export async function PUT(
   const body = await req.json();
 
   const [updated] = await db
-    .update(assets)
-    .set({
-      name: body.name,
-      type: body.type,
-      ticker: body.ticker || null,
-      quantity: body.quantity ?? null,
-      avgBuyPrice: body.avgBuyPrice ?? null,
-      manualValue: body.manualValue ?? null,
-      currency: body.currency || "EUR",
-      portfolioId: body.portfolioId ?? null,
-      updatedAt: new Date(),
-    })
-    .where(eq(assets.id, Number(id)))
+    .update(portfolios)
+    .set({ name: body.name, color: body.color || "#C9A227" })
+    .where(eq(portfolios.id, Number(id)))
     .returning();
 
   return NextResponse.json(updated);
@@ -34,6 +24,6 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  await db.delete(assets).where(eq(assets.id, Number(id)));
+  await db.delete(portfolios).where(eq(portfolios.id, Number(id)));
   return NextResponse.json({ ok: true });
 }

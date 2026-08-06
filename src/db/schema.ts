@@ -8,6 +8,14 @@ import {
   integer,
 } from "drizzle-orm/pg-core";
 
+// Portefeuille (PEA, CTO, Assurance-vie, Crypto...) qui regroupe des actifs
+export const portfolios = pgTable("portfolios", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  color: text("color").notNull().default("#C9A227"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // Un actif détenu : action/ETF (avec ticker => cours en direct),
 // ou un actif "manuel" (immobilier, cash, autre) dont on saisit la valeur à la main.
 export const assets = pgTable("assets", {
@@ -19,6 +27,9 @@ export const assets = pgTable("assets", {
   avgBuyPrice: numeric("avg_buy_price"), // prix de revient moyen, pour calculer la plus-value
   manualValue: numeric("manual_value"), // pour immobilier / cash / autre
   currency: text("currency").notNull().default("EUR"),
+  portfolioId: integer("portfolio_id").references(() => portfolios.id, {
+    onDelete: "set null",
+  }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

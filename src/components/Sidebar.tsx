@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Wallet, Target, Receipt, LineChart } from "lucide-react";
+import { LayoutDashboard, Wallet, Target, Receipt, LineChart, Atom } from "lucide-react";
 
 const links = [
   { href: "/", label: "Vue d'ensemble", icon: LayoutDashboard },
   { href: "/assets", label: "Actifs", icon: Wallet },
+  { href: "/galaxy", label: "Galaxie", icon: Atom },
   { href: "/goals", label: "Objectifs", icon: Target },
   { href: "/budget", label: "Budget", icon: Receipt },
   { href: "/projection", label: "Projection", icon: LineChart },

@@ -14,7 +14,10 @@ type Asset = {
   avgBuyPrice: string | null;
   manualValue: string | null;
   currency: string;
+  portfolioId: number | null;
 };
+
+type Portfolio = { id: number; name: string; color: string };
 
 type Quote = { price: number; currency: string } | null;
 
@@ -29,18 +32,25 @@ const emptyForm = {
   avgBuyPrice: "",
   manualValue: "",
   currency: "EUR",
+  portfolioId: "" as string,
 };
 
 export default function AssetsPage() {
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
   const [quotes, setQuotes] = useState<Record<string, Quote>>({});
   const [form, setForm] = useState(emptyForm);
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [newPortfolioName, setNewPortfolioName] = useState("");
 
   const load = useCallback(async () => {
-    const data: Asset[] = await fetch("/api/assets").then((r) => r.json());
+    const [data, portfoliosData]: [Asset[], Portfolio[]] = await Promise.all([
+      fetch("/api/assets").then((r) => r.json()),
+      fetch("/api/portfolios").then((r) => r.json()),
+    ]);
     setAssets(data);
+    setPortfolios(portfoliosData);
     const tickers = data.map((a) => a.ticker).filter((t): t is string => !!t);
     if (tickers.length > 0) {
       const q = await fetch(`/api/prices?tickers=${tickers.join(",")}`).then((r) =>
@@ -70,8 +80,25 @@ export default function AssetsPage() {
       avgBuyPrice: a.avgBuyPrice ?? "",
       manualValue: a.manualValue ?? "",
       currency: a.currency,
+      portfolioId: a.portfolioId ? String(a.portfolioId) : "",
     });
     setShowForm(true);
+  };
+
+  const createPortfolio = async () => {
+    if (!newPortfolioName.trim()) return;
+    const colors = ["#C9A227", "#3FA796", "#6E7BAE", "#C97B4A", "#8A92A3"];
+    const created = await fetch("/api/portfolios", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: newPortfolioName.trim(),
+        color: colors[portfolios.length % colors.length],
+      }),
+    }).then((r) => r.json());
+    setPortfolios([created, ...portfolios]);
+    setForm({ ...form, portfolioId: String(created.id) });
+    setNewPortfolioName("");
   };
 
   const submit = async (e: React.FormEvent) => {
@@ -84,6 +111,7 @@ export default function AssetsPage() {
       avgBuyPrice: TYPES_WITH_TICKER.includes(form.type) ? form.avgBuyPrice : null,
       manualValue: TYPES_WITH_TICKER.includes(form.type) ? null : form.manualValue,
       currency: form.currency,
+      portfolioId: form.portfolioId ? Number(form.portfolioId) : null,
     };
 
     if (form.id) {
@@ -239,6 +267,37 @@ export default function AssetsPage() {
                 <option value="CHF">CHF</option>
               </select>
             </div>
+
+            <div className="md:col-span-2">
+              <label className="text-xs text-text-muted">Portefeuille (optionnel)</label>
+              <div className="flex gap-2 mt-1">
+                <select
+                  value={form.portfolioId}
+                  onChange={(e) => setForm({ ...form, portfolioId: e.target.value })}
+                  className="flex-1 bg-bg border border-border rounded-md px-3 py-2 text-sm"
+                >
+                  <option value="">Sans portefeuille</option>
+                  {portfolios.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  value={newPortfolioName}
+                  onChange={(e) => setNewPortfolioName(e.target.value)}
+                  placeholder="Nouveau : ex. PEA"
+                  className="w-40 bg-bg border border-border rounded-md px-3 py-2 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={createPortfolio}
+                  className="text-sm px-3 py-2 rounded-md border border-border text-text-muted hover:text-text hover:bg-surface-hover whitespace-nowrap"
+                >
+                  Créer
+                </button>
+              </div>
+            </div>
           </div>
 
           <button
@@ -272,6 +331,8 @@ export default function AssetsPage() {
                   {ASSET_TYPE_LABELS[a.type]}
                   {a.ticker && ` · ${a.ticker}`}
                   {a.quantity && ` · ${a.quantity} unités`}
+                  {a.portfolioId &&
+                    ` · ${portfolios.find((p) => p.id === a.portfolioId)?.name ?? ""}`}
                 </p>
               </div>
               <div className="flex items-center gap-6">
