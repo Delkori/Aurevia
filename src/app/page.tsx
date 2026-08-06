@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState, useMemo, useCallback } from "react";
-import { RefreshCw, TrendingUp, TrendingDown } from "lucide-react";
+import { RefreshCw, TrendingUp, TrendingDown, AlertTriangle, X } from "lucide-react";
 import NetWorthChart from "@/components/NetWorthChart";
 import AllocationChart from "@/components/AllocationChart";
 import { formatMoney, formatPercent } from "@/lib/format";
 import { currentValue, gain, costBasis } from "@/lib/networth";
+import { apiFetch, ApiError } from "@/lib/api";
 
 type Asset = {
   id: number;
@@ -36,27 +37,32 @@ export default function DashboardPage() {
   const [quotes, setQuotes] = useState<Record<string, Quote>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const loadAll = useCallback(async () => {
-    const [assetsRes, goalsRes, snapshotsRes] = await Promise.all([
-      fetch("/api/assets").then((r) => r.json()),
-      fetch("/api/goals").then((r) => r.json()),
-      fetch("/api/snapshot").then((r) => r.json()),
-    ]);
-    setAssets(assetsRes);
-    setGoals(goalsRes);
-    setSnapshots(snapshotsRes);
+    setError(null);
+    try {
+      const [assetsRes, goalsRes, snapshotsRes] = await Promise.all([
+        apiFetch("/api/assets"),
+        apiFetch("/api/goals"),
+        apiFetch("/api/snapshot"),
+      ]);
+      setAssets(assetsRes as Asset[]);
+      setGoals(goalsRes as Goal[]);
+      setSnapshots(snapshotsRes as Snapshot[]);
 
-    const tickers = assetsRes
-      .map((a: Asset) => a.ticker)
-      .filter((t: string | null): t is string => !!t);
-    if (tickers.length > 0) {
-      const q = await fetch(`/api/prices?tickers=${tickers.join(",")}`).then((r) =>
-        r.json()
-      );
-      setQuotes(q);
+      const tickers = (assetsRes as Asset[])
+        .map((a) => a.ticker)
+        .filter((t): t is string => !!t);
+      if (tickers.length > 0) {
+        const q = await apiFetch(`/api/prices?tickers=${tickers.join(",")}`);
+        setQuotes(q as Record<string, Quote>);
+      }
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Erreur de chargement.");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -96,6 +102,18 @@ export default function DashboardPage() {
 
   return (
     <div className="p-8 md:p-10 max-w-5xl mx-auto space-y-10">
+      {error && (
+        <div className="flex items-start gap-3 bg-negative/10 border border-negative/40 rounded-lg px-4 py-3 text-sm text-negative">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <p className="font-medium">Un problème est survenu</p>
+            <p className="text-xs mt-1 opacity-90">{error}</p>
+          </div>
+          <button onClick={() => setError(null)} className="text-negative/70 hover:text-negative">
+            <X size={16} />
+          </button>
+        </div>
+      )}
       <header className="flex items-start justify-between">
         <div>
           <p className="text-xs uppercase tracking-widest text-text-muted mb-2">

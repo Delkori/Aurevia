@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { AlertTriangle, X } from "lucide-react";
 import GalaxyView from "@/components/GalaxyView";
+import { apiFetch, ApiError } from "@/lib/api";
 
 type Asset = {
   id: number;
@@ -23,25 +25,53 @@ export default function GalaxyPage() {
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
   const [quotes, setQuotes] = useState<Record<string, Quote>>({});
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const [assetsData, portfoliosData]: [Asset[], Portfolio[]] = await Promise.all([
-      fetch("/api/assets").then((r) => r.json()),
-      fetch("/api/portfolios").then((r) => r.json()),
-    ]);
-    setAssets(assetsData);
-    setPortfolios(portfoliosData);
+    setError(null);
+    try {
+      const [assetsResult, portfoliosResult] = await Promise.allSettled([
+        apiFetch("/api/assets"),
+        apiFetch("/api/portfolios"),
+      ]);
 
-    const tickers = assetsData
-      .map((a) => a.ticker)
-      .filter((t): t is string => !!t);
-    if (tickers.length > 0) {
-      const q = await fetch(`/api/prices?tickers=${tickers.join(",")}`).then((r) =>
-        r.json()
+      const assetsData =
+        assetsResult.status === "fulfilled" ? (assetsResult.value as Asset[]) : [];
+      setAssets(assetsData);
+
+      if (portfoliosResult.status === "fulfilled") {
+        setPortfolios(portfoliosResult.value as Portfolio[]);
+      } else {
+        setPortfolios([]);
+        setError(
+          `Les portefeuilles n'ont pas pu être chargés : ${
+            portfoliosResult.reason instanceof Error
+              ? portfoliosResult.reason.message
+              : "erreur inconnue"
+          }`
+        );
+      }
+
+      if (assetsResult.status === "rejected") {
+        throw assetsResult.reason;
+      }
+
+      const tickers = assetsData.map((a) => a.ticker).filter((t): t is string => !!t);
+      if (tickers.length > 0) {
+        try {
+          const q = await apiFetch(`/api/prices?tickers=${tickers.join(",")}`);
+          setQuotes(q as Record<string, Quote>);
+        } catch {
+          // pas critique
+        }
+      }
+    } catch (err) {
+      setError((prev) =>
+        prev ?? (err instanceof ApiError ? err.message : "Erreur de chargement.")
       );
-      setQuotes(q);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -61,6 +91,19 @@ export default function GalaxyPage() {
           leur poids.
         </p>
       </header>
+
+      {error && (
+        <div className="flex items-start gap-3 bg-negative/10 border border-negative/40 rounded-lg px-4 py-3 text-sm text-negative">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <p className="font-medium">Un problème est survenu</p>
+            <p className="text-xs mt-1 opacity-90">{error}</p>
+          </div>
+          <button onClick={() => setError(null)} className="text-negative/70 hover:text-negative">
+            <X size={16} />
+          </button>
+        </div>
+      )}
 
       {assets.length === 0 ? (
         <p className="text-sm text-text-muted border border-dashed border-border rounded-lg p-8 text-center">

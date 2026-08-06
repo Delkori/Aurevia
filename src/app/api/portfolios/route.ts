@@ -2,21 +2,38 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { portfolios } from "@/db/schema";
 import { desc } from "drizzle-orm";
+import { handleApiError } from "@/lib/apiError";
 
 export async function GET() {
-  const rows = await db.select().from(portfolios).orderBy(desc(portfolios.createdAt));
-  return NextResponse.json(rows);
+  try {
+    const rows = await db
+      .select()
+      .from(portfolios)
+      .orderBy(desc(portfolios.createdAt));
+    return NextResponse.json(rows);
+  } catch (err) {
+    return handleApiError(err);
+  }
 }
 
 export async function POST(req: NextRequest) {
-  const body = await req.json();
-  const [created] = await db
-    .insert(portfolios)
-    .values({
-      name: body.name,
-      color: body.color || "#C9A227",
-    })
-    .returning();
+  try {
+    const body = await req.json();
 
-  return NextResponse.json(created, { status: 201 });
+    if (!body.name) {
+      return NextResponse.json({ error: "Le nom est obligatoire." }, { status: 400 });
+    }
+
+    const [created] = await db
+      .insert(portfolios)
+      .values({
+        name: body.name,
+        color: body.color || "#C9A227",
+      })
+      .returning();
+
+    return NextResponse.json(created, { status: 201 });
+  } catch (err) {
+    return handleApiError(err);
+  }
 }

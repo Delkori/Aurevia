@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { formatMoney, formatPercent } from "@/lib/format";
 import { currentValue, gain, gainPercent, ASSET_TYPE_LABELS } from "@/lib/networth";
 
@@ -20,15 +20,47 @@ type Portfolio = { id: number; name: string; color: string };
 type Quote = { price: number; currency: string } | null;
 
 const CENTER = { x: 500, y: 330 };
-const PLANET_MIN = 30;
-const PLANET_MAX = 88;
-const MOON_MIN = 10;
-const MOON_MAX = 38;
+const PLANET_ORBIT_R = 230;
+const PLANET_MIN = 28;
+const PLANET_MAX = 82;
+const MOON_MIN = 9;
+const MOON_MAX = 34;
 
 function scaledRadius(value: number, maxValue: number, min: number, max: number) {
   if (maxValue <= 0) return min;
   const ratio = Math.max(0, Math.min(1, value / maxValue));
   return min + (max - min) * Math.sqrt(ratio);
+}
+
+// PRNG déterministe (même résultat serveur/client, pas de mismatch d'hydratation)
+function seeded(seed: number) {
+  let s = seed;
+  return () => {
+    s = (s * 16807) % 2147483647;
+    return (s - 1) / 2147483646;
+  };
+}
+
+function useAnimationClock(active: boolean) {
+  const [t, setT] = useState(0);
+  const raf = useRef<number | null>(null);
+  const start = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!active) return;
+    const tick = (ts: number) => {
+      if (start.current === null) start.current = ts;
+      setT((ts - start.current) / 1000);
+      raf.current = requestAnimationFrame(tick);
+    };
+    raf.current = requestAnimationFrame(tick);
+    return () => {
+      if (raf.current) cancelAnimationFrame(raf.current);
+      start.current = null;
+    };
+  }, [active]);
+
+  return t;
 }
 
 export default function GalaxyView({
@@ -42,10 +74,24 @@ export default function GalaxyView({
 }) {
   const [expanded, setExpanded] = useState<Set<number | "unassigned">>(new Set());
   const [selected, setSelected] = useState<
+    | { kind: "total"; total: number }
     | { kind: "portfolio"; id: number | "unassigned"; name: string; color: string; total: number; count: number }
     | { kind: "asset"; asset: Asset; value: number; gain: number; gainPct: number; portfolioName: string }
     | null
   >(null);
+
+  const t = useAnimationClock(true);
+
+  const stars = useMemo(() => {
+    const rand = seeded(42);
+    return Array.from({ length: 90 }, (_, i) => ({
+      x: rand() * 1000,
+      y: rand() * 660,
+      r: 0.5 + rand() * 1.3,
+      delay: rand() * 6,
+      dur: 3 + rand() * 4,
+    }));
+  }, []);
 
   const groups = useMemo(() => {
     const byPortfolio = new Map<number | "unassigned", Asset[]>();
@@ -75,19 +121,21 @@ export default function GalaxyView({
     return list.sort((a, b) => b.total - a.total);
   }, [assets, portfolios, quotes]);
 
+  const grandTotal = groups.reduce((s, g) => s + g.total, 0);
   const maxPortfolioValue = Math.max(1, ...groups.map((g) => g.total));
 
   const positioned = useMemo(() => {
     const n = groups.length;
-    const orbitRadius = n <= 1 ? 0 : 250;
     return groups.map((g, i) => {
-      const angle = n <= 1 ? 0 : (i / n) * Math.PI * 2 - Math.PI / 2;
-      const x = CENTER.x + orbitRadius * Math.cos(angle);
-      const y = CENTER.y + orbitRadius * Math.sin(angle);
+      const baseAngle = n <= 1 ? -Math.PI / 2 : (i / n) * Math.PI * 2 - Math.PI / 2;
+      const period = 150 + i * 35; // secondes par révolution : lent, élégant
+      const angle = baseAngle + (t / period) * Math.PI * 2;
+      const x = CENTER.x + PLANET_ORBIT_R * Math.cos(angle);
+      const y = CENTER.y + PLANET_ORBIT_R * Math.sin(angle);
       const r = scaledRadius(g.total, maxPortfolioValue, PLANET_MIN, PLANET_MAX);
-      return { ...g, x, y, r };
+      return { ...g, x, y, r, index: i };
     });
-  }, [groups, maxPortfolioValue]);
+  }, [groups, maxPortfolioValue, t]);
 
   const toggle = (key: number | "unassigned") => {
     setExpanded((prev) => {
@@ -100,8 +148,117 @@ export default function GalaxyView({
 
   return (
     <div className="grid lg:grid-cols-3 gap-6">
-      <div className="lg:col-span-2 bg-surface border border-border rounded-lg overflow-hidden">
+      <div
+        className="lg:col-span-2 rounded-lg overflow-hidden border border-border relative"
+        style={{
+          background:
+            "radial-gradient(ellipse at 50% 40%, #141924 0%, #0a0c10 70%)",
+        }}
+      >
         <svg viewBox="0 0 1000 660" className="w-full h-auto select-none">
+          <defs>
+            <filter id="glow-soft" x="-100%" y="-100%" width="300%" height="300%">
+              <feGaussianBlur stdDeviation="6" result="blur" />
+              <feMerge>
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+            <filter id="glow-strong" x="-150%" y="-150%" width="400%" height="400%">
+              <feGaussianBlur stdDeviation="12" result="blur" />
+              <feMerge>
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+            <radialGradient id="sunGradient" cx="35%" cy="30%" r="70%">
+              <stop offset="0%" stopColor="#F3D77A" />
+              <stop offset="55%" stopColor="#C9A227" />
+              <stop offset="100%" stopColor="#8A6B15" />
+            </radialGradient>
+            {positioned.map((g) => (
+              <radialGradient
+                key={`grad-${String(g.key)}`}
+                id={`grad-${String(g.key)}`}
+                cx="35%"
+                cy="30%"
+                r="70%"
+              >
+                <stop offset="0%" stopColor={g.portfolio.color} stopOpacity={1} />
+                <stop offset="60%" stopColor={g.portfolio.color} stopOpacity={0.85} />
+                <stop offset="100%" stopColor={g.portfolio.color} stopOpacity={0.55} />
+              </radialGradient>
+            ))}
+          </defs>
+
+          {/* étoiles de fond */}
+          {stars.map((s, i) => (
+            <circle
+              key={i}
+              cx={s.x}
+              cy={s.y}
+              r={s.r}
+              fill="#EDEFF2"
+              opacity={0.35}
+              style={{
+                animation: `aurevia-twinkle ${s.dur}s ease-in-out ${s.delay}s infinite`,
+              }}
+            />
+          ))}
+
+          {/* anneau d'orbite général */}
+          {positioned.length > 1 && (
+            <circle
+              cx={CENTER.x}
+              cy={CENTER.y}
+              r={PLANET_ORBIT_R}
+              fill="none"
+              stroke="#2A3140"
+              strokeWidth={1}
+              strokeDasharray="2 6"
+            />
+          )}
+
+          {/* soleil central = patrimoine total */}
+          <g
+            className="cursor-pointer"
+            onClick={() => setSelected({ kind: "total", total: grandTotal })}
+          >
+            <circle
+              cx={CENTER.x}
+              cy={CENTER.y}
+              r={30}
+              fill="url(#sunGradient)"
+              filter="url(#glow-strong)"
+              style={{
+                animation: "aurevia-pulse 4s ease-in-out infinite",
+                transformBox: "fill-box",
+                transformOrigin: "center",
+              }}
+            />
+            <text
+              x={CENTER.x}
+              y={CENTER.y + 50}
+              textAnchor="middle"
+              fontSize={11}
+              fill="#8A92A3"
+              letterSpacing={0.5}
+            >
+              PATRIMOINE TOTAL
+            </text>
+            <text
+              x={CENTER.x}
+              y={CENTER.y + 68}
+              textAnchor="middle"
+              fontSize={14}
+              fontWeight={600}
+              fill="#EDEFF2"
+              className="tabular"
+            >
+              {formatMoney(grandTotal)}
+            </text>
+          </g>
+
           {positioned.map((g) => {
             const isExpanded = expanded.has(g.key);
             const maxAssetValue = Math.max(1, ...g.valued.map((v) => v.value));
@@ -109,19 +266,15 @@ export default function GalaxyView({
 
             return (
               <g key={String(g.key)}>
-                {/* trait reliant au centre si plusieurs portefeuilles */}
-                {positioned.length > 1 && (
-                  <line
-                    x1={CENTER.x}
-                    y1={CENTER.y}
-                    x2={g.x}
-                    y2={g.y}
-                    stroke="#262B33"
-                    strokeWidth={1}
-                  />
-                )}
+                <line
+                  x1={CENTER.x}
+                  y1={CENTER.y}
+                  x2={g.x}
+                  y2={g.y}
+                  stroke={g.portfolio.color}
+                  strokeOpacity={0.15}
+                />
 
-                {/* anneau d'orbite des lunes */}
                 {isExpanded && g.valued.length > 0 && (
                   <circle
                     cx={g.x}
@@ -129,16 +282,17 @@ export default function GalaxyView({
                     r={moonOrbitR}
                     fill="none"
                     stroke={g.portfolio.color}
-                    strokeOpacity={0.25}
-                    strokeDasharray="3 5"
+                    strokeOpacity={0.3}
+                    strokeDasharray="2 5"
                   />
                 )}
 
-                {/* lunes (actifs) */}
                 {isExpanded &&
                   g.valued.map((v, i) => {
                     const count = g.valued.length;
-                    const angle = (i / count) * Math.PI * 2 - Math.PI / 2;
+                    const baseAngle = (i / count) * Math.PI * 2 - Math.PI / 2;
+                    const period = 22 + i * 6;
+                    const angle = baseAngle + (t / period) * Math.PI * 2;
                     const mx = g.x + moonOrbitR * Math.cos(angle);
                     const my = g.y + moonOrbitR * Math.sin(angle);
                     const mr = scaledRadius(v.value, maxAssetValue, MOON_MIN, MOON_MAX);
@@ -150,8 +304,9 @@ export default function GalaxyView({
                     return (
                       <g
                         key={v.asset.id}
-                        className="cursor-pointer"
-                        onClick={() =>
+                        className="cursor-pointer group"
+                        onClick={(e) => {
+                          e.stopPropagation();
                           setSelected({
                             kind: "asset",
                             asset: v.asset,
@@ -159,8 +314,8 @@ export default function GalaxyView({
                             gain: gn,
                             gainPct: gnPct,
                             portfolioName: g.portfolio.name,
-                          })
-                        }
+                          });
+                        }}
                       >
                         <line
                           x1={g.x}
@@ -168,36 +323,37 @@ export default function GalaxyView({
                           x2={mx}
                           y2={my}
                           stroke={g.portfolio.color}
-                          strokeOpacity={0.18}
+                          strokeOpacity={0.2}
                         />
                         <circle
                           cx={mx}
                           cy={my}
                           r={mr}
                           fill={g.portfolio.color}
-                          fillOpacity={0.75}
+                          fillOpacity={0.8}
                           stroke={g.portfolio.color}
-                          strokeWidth={1.5}
-                          className="transition-all hover:fill-opacity-100"
+                          strokeWidth={1.2}
+                          filter="url(#glow-soft)"
+                          className="transition-transform duration-200 group-hover:scale-125"
+                          style={{ transformBox: "fill-box", transformOrigin: "center" }}
                         />
                         <text
                           x={mx}
-                          y={my + mr + 14}
+                          y={my + mr + 13}
                           textAnchor="middle"
-                          fontSize={10.5}
-                          fill="#8A92A3"
+                          fontSize={10}
+                          fill="#9BA3B4"
                         >
-                          {v.asset.name.length > 14
-                            ? v.asset.name.slice(0, 13) + "…"
+                          {v.asset.name.length > 13
+                            ? v.asset.name.slice(0, 12) + "…"
                             : v.asset.name}
                         </text>
                       </g>
                     );
                   })}
 
-                {/* planète (portefeuille) */}
                 <g
-                  className="cursor-pointer"
+                  className="cursor-pointer group"
                   onClick={() => {
                     toggle(g.key);
                     setSelected({
@@ -214,19 +370,20 @@ export default function GalaxyView({
                     cx={g.x}
                     cy={g.y}
                     r={g.r}
-                    fill={g.portfolio.color}
-                    fillOpacity={isExpanded ? 0.95 : 0.85}
+                    fill={`url(#grad-${String(g.key)})`}
                     stroke={g.portfolio.color}
-                    strokeWidth={2}
-                    className="transition-all"
+                    strokeWidth={isExpanded ? 2 : 1.2}
+                    filter="url(#glow-soft)"
+                    className="transition-transform duration-300 group-hover:scale-105"
+                    style={{ transformBox: "fill-box", transformOrigin: "center" }}
                   />
                   <text
                     x={g.x}
                     y={g.y - 2}
                     textAnchor="middle"
                     fontSize={13}
-                    fontWeight={600}
-                    fill="#0E1116"
+                    fontWeight={700}
+                    fill="#0B0D11"
                   >
                     {g.portfolio.name}
                   </text>
@@ -234,8 +391,8 @@ export default function GalaxyView({
                     x={g.x}
                     y={g.y + 15}
                     textAnchor="middle"
-                    fontSize={11}
-                    fill="#0E1116"
+                    fontSize={10.5}
+                    fill="#0B0D11"
                     className="tabular"
                   >
                     {formatMoney(g.total)}
@@ -257,17 +414,41 @@ export default function GalaxyView({
             </text>
           )}
         </svg>
-        <p className="text-xs text-text-muted text-center pb-4 -mt-2">
-          Clique une planète pour voir ses actifs · la taille reflète le poids relatif
+        <p className="text-xs text-text-muted text-center pb-4 -mt-2 relative">
+          Clique une planète pour révéler ses actifs · la taille reflète le poids relatif
         </p>
+        <style>{`
+          @keyframes aurevia-twinkle {
+            0%, 100% { opacity: 0.15; }
+            50% { opacity: 0.75; }
+          }
+          @keyframes aurevia-pulse {
+            0%, 100% { filter: url(#glow-strong) brightness(1); }
+            50% { filter: url(#glow-strong) brightness(1.25); }
+          }
+        `}</style>
       </div>
 
       <div className="bg-surface border border-border rounded-lg p-5">
         {!selected && (
           <p className="text-sm text-text-muted">
-            Clique une planète (portefeuille) ou une lune (actif) pour voir le détail
-            ici.
+            Clique le soleil (patrimoine total), une planète (portefeuille) ou une
+            lune (actif) pour voir le détail ici.
           </p>
+        )}
+        {selected?.kind === "total" && (
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full bg-accent" />
+              <h3 className="font-medium">Patrimoine total</h3>
+            </div>
+            <p className="text-2xl font-[family-name:var(--font-mono-num)] tabular mt-3">
+              {formatMoney(selected.total)}
+            </p>
+            <p className="text-xs text-text-muted mt-1">
+              {groups.length} portefeuille{groups.length > 1 ? "s" : ""}
+            </p>
+          </div>
         )}
         {selected?.kind === "portfolio" && (
           <div>
@@ -283,6 +464,8 @@ export default function GalaxyView({
             </p>
             <p className="text-xs text-text-muted mt-1">
               {selected.count} actif{selected.count > 1 ? "s" : ""}
+              {grandTotal > 0 &&
+                ` · ${((selected.total / grandTotal) * 100).toFixed(0)}% du patrimoine`}
             </p>
           </div>
         )}
