@@ -28,6 +28,10 @@ export async function PUT(
       .where(eq(assets.id, Number(id)))
       .returning();
 
+    if (!updated) {
+      return NextResponse.json({ error: "Élément introuvable." }, { status: 404 });
+    }
+
     return NextResponse.json(updated);
   } catch (err) {
     return handleApiError(err);

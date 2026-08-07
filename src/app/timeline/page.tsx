@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { AlertTriangle, X } from "lucide-react";
 import { formatMoney } from "@/lib/format";
-import { currentValue } from "@/lib/networth";
+import { currentValue, totalDebt } from "@/lib/networth";
 import { monthsToReach } from "@/lib/projection";
 import { apiFetch, ApiError } from "@/lib/api";
 
@@ -32,6 +32,7 @@ export default function TimelinePage() {
         apiFetch("/api/assets"),
         apiFetch("/api/goals"),
       ])) as [Asset[], Goal[]];
+      const loansData = (await apiFetch("/api/loans")) as { remainingBalance: string }[];
 
       const tickers = (assetsData as (Asset & { ticker: string | null })[])
         .map((a) => a.ticker)
@@ -46,7 +47,7 @@ export default function TimelinePage() {
         (sum, a) => sum + currentValue(a, "ticker" in a && a.ticker ? quotes[a.ticker as string] : null),
         0
       );
-      setCurrent(total);
+      setCurrent(total - totalDebt(loansData));
       setGoals(goalsData);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Erreur de chargement.");

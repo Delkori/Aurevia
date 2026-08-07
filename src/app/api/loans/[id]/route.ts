@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { budgetCategories } from "@/db/schema";
+import { loans } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { handleApiError } from "@/lib/apiError";
 
@@ -13,14 +13,20 @@ export async function PUT(
     const body = await req.json();
 
     const [updated] = await db
-      .update(budgetCategories)
+      .update(loans)
       .set({
         name: body.name,
-        kind: body.kind,
-        monthlyTarget: body.monthlyTarget ?? null,
-        color: body.color || "#999999",
+        assetId: body.assetId ?? null,
+        principal: body.principal,
+        remainingBalance: body.remainingBalance,
+        interestRate: body.interestRate || null,
+        monthlyPayment: body.monthlyPayment || null,
+        startDate: body.startDate || null,
+        endDate: body.endDate || null,
+        currency: body.currency || "EUR",
+        updatedAt: new Date(),
       })
-      .where(eq(budgetCategories.id, Number(id)))
+      .where(eq(loans.id, Number(id)))
       .returning();
 
     if (!updated) {
@@ -39,7 +45,7 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    await db.delete(budgetCategories).where(eq(budgetCategories.id, Number(id)));
+    await db.delete(loans).where(eq(loans.id, Number(id)));
     return NextResponse.json({ ok: true });
   } catch (err) {
     return handleApiError(err);

@@ -42,6 +42,14 @@ export function gainPercent(asset: AssetLike, quote: Quote): number {
   return (gain(asset, quote) / cost) * 100;
 }
 
+export type LoanLike = {
+  remainingBalance: string;
+};
+
+export function totalDebt(loans: LoanLike[]): number {
+  return loans.reduce((sum, l) => sum + Number(l.remainingBalance || 0), 0);
+}
+
 export const ASSET_TYPE_LABELS: Record<string, string> = {
   stock: "Action",
   etf: "ETF",

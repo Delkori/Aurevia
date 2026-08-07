@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { assets, netWorthSnapshots } from "@/db/schema";
+import { assets, loans, netWorthSnapshots } from "@/db/schema";
 import { asc, eq } from "drizzle-orm";
 import { getQuotes } from "@/lib/prices";
-import { currentValue } from "@/lib/networth";
+import { currentValue, totalDebt } from "@/lib/networth";
 import { handleApiError } from "@/lib/apiError";
 
 export async function GET() {
@@ -20,14 +20,18 @@ export async function GET() {
 
 export async function POST() {
   try {
-    const allAssets = await db.select().from(assets);
+    const [allAssets, allLoans] = await Promise.all([
+      db.select().from(assets),
+      db.select().from(loans),
+    ]);
     const tickers = allAssets.map((a) => a.ticker).filter((t): t is string => !!t);
     const quotes = await getQuotes(tickers);
 
-    const total = allAssets.reduce((sum, a) => {
+    const assetsTotal = allAssets.reduce((sum, a) => {
       const quote = a.ticker ? quotes[a.ticker] : null;
       return sum + currentValue(a, quote);
     }, 0);
+    const total = assetsTotal - totalDebt(allLoans);
 
     const today = new Date().toISOString().slice(0, 10);
 

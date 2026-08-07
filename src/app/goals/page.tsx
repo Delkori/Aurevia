@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { Plus, Trash2, X, AlertTriangle } from "lucide-react";
 import { formatMoney } from "@/lib/format";
-import { currentValue } from "@/lib/networth";
+import { currentValue, totalDebt } from "@/lib/networth";
 import { apiFetch, ApiError } from "@/lib/api";
 
 type Goal = {
@@ -37,10 +37,11 @@ export default function GoalsPage() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [goalsData, assetsData] = (await Promise.all([
+      const [goalsData, assetsData, loansData] = (await Promise.all([
         apiFetch("/api/goals"),
         apiFetch("/api/assets"),
-      ])) as [Goal[], Asset[]];
+        apiFetch("/api/loans"),
+      ])) as [Goal[], Asset[], { remainingBalance: string }[]];
       setGoals(goalsData);
 
       const tickers = assetsData
@@ -56,7 +57,7 @@ export default function GoalsPage() {
         (sum, a) => sum + currentValue(a, a.ticker ? quotes[a.ticker] : null),
         0
       );
-      setCurrentTotal(total);
+      setCurrentTotal(total - totalDebt(loansData));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Erreur de chargement.");
     }

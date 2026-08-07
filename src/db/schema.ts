@@ -65,6 +65,22 @@ export const budgetEntries = pgTable("budget_entries", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// Crédit / prêt (ex: emprunt immobilier), rattaché optionnellement à un actif
+export const loans = pgTable("loans", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  assetId: integer("asset_id").references(() => assets.id, { onDelete: "set null" }),
+  principal: numeric("principal").notNull(), // montant emprunté initial
+  remainingBalance: numeric("remaining_balance").notNull(), // capital restant dû
+  interestRate: numeric("interest_rate"), // taux annuel, en %
+  monthlyPayment: numeric("monthly_payment"), // mensualité
+  startDate: date("start_date"),
+  endDate: date("end_date"),
+  currency: text("currency").notNull().default("EUR"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // Historique du patrimoine net, pour tracer la courbe dans le temps
 export const netWorthSnapshots = pgTable("net_worth_snapshots", {
   id: serial("id").primaryKey(),

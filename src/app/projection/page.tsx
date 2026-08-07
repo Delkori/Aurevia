@@ -10,8 +10,10 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { formatMoney } from "@/lib/format";
-import { currentValue } from "@/lib/networth";
+import { currentValue, totalDebt } from "@/lib/networth";
 import { projectNetWorth, monthsToReach } from "@/lib/projection";
+import { apiFetch, ApiError } from "@/lib/api";
+import { AlertTriangle, X } from "lucide-react";
 
 type Asset = {
   type: string;
@@ -30,26 +32,35 @@ export default function ProjectionPage() {
   const [annualRate, setAnnualRate] = useState("5");
   const [years, setYears] = useState("15");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const [assetsData, goalsData]: [Asset[], Goal[]] = await Promise.all([
-      fetch("/api/assets").then((r) => r.json()),
-      fetch("/api/goals").then((r) => r.json()),
-    ]);
-    const tickers = assetsData
-      .map((a) => a.ticker)
-      .filter((t): t is string => !!t);
-    const quotes =
-      tickers.length > 0
-        ? await fetch(`/api/prices?tickers=${tickers.join(",")}`).then((r) => r.json())
-        : {};
-    const total = assetsData.reduce(
-      (sum, a) => sum + currentValue(a, a.ticker ? quotes[a.ticker] : null),
-      0
-    );
-    setCurrent(total);
-    setGoals(goalsData);
-    setLoading(false);
+    setError(null);
+    try {
+      const [assetsData, goalsData, loansData] = (await Promise.all([
+        apiFetch("/api/assets"),
+        apiFetch("/api/goals"),
+        apiFetch("/api/loans"),
+      ])) as [Asset[], Goal[], { remainingBalance: string }[]];
+      const tickers = assetsData
+        .map((a) => a.ticker)
+        .filter((t): t is string => !!t);
+      const quotes = (
+        tickers.length > 0
+          ? await apiFetch(`/api/prices?tickers=${tickers.join(",")}`)
+          : {}
+      ) as Record<string, { price: number; currency: string } | null>;
+      const total = assetsData.reduce(
+        (sum, a) => sum + currentValue(a, a.ticker ? quotes[a.ticker] : null),
+        0
+      );
+      setCurrent(total - totalDebt(loansData));
+      setGoals(goalsData);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Erreur de chargement.");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -84,6 +95,18 @@ export default function ProjectionPage() {
 
   return (
     <div className="p-8 md:p-10 max-w-5xl mx-auto space-y-8">
+      {error && (
+        <div className="flex items-start gap-3 bg-negative/10 border border-negative/40 rounded-lg px-4 py-3 text-sm text-negative">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <p className="font-medium">Un problème est survenu</p>
+            <p className="text-xs mt-1 opacity-90">{error}</p>
+          </div>
+          <button onClick={() => setError(null)} className="text-negative/70 hover:text-negative">
+            <X size={16} />
+          </button>
+        </div>
+      )}
       <header>
         <h1 className="text-2xl font-semibold font-[family-name:var(--font-heading)]">Projection</h1>
         <p className="text-sm text-text-muted mt-1">

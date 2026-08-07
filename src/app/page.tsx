@@ -6,7 +6,7 @@ import NetWorthChart from "@/components/NetWorthChart";
 import AllocationChart from "@/components/AllocationChart";
 import { ToastStack, useToasts } from "@/components/Toast";
 import { formatMoney, formatPercent } from "@/lib/format";
-import { currentValue, gain, costBasis } from "@/lib/networth";
+import { currentValue, gain, costBasis, totalDebt } from "@/lib/networth";
 import { apiFetch, ApiError } from "@/lib/api";
 import {
   getNotifiedGoalIds,
@@ -38,11 +38,13 @@ type Goal = {
 
 type Snapshot = { date: string; totalValue: string };
 type Quote = { price: number; currency: string } | null;
+type Loan = { id: number; remainingBalance: string };
 
 export default function DashboardPage() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
+  const [loans, setLoans] = useState<Loan[]>([]);
   const [quotes, setQuotes] = useState<Record<string, Quote>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -54,14 +56,16 @@ export default function DashboardPage() {
   const loadAll = useCallback(async () => {
     setError(null);
     try {
-      const [assetsRes, goalsRes, snapshotsRes] = await Promise.all([
+      const [assetsRes, goalsRes, snapshotsRes, loansRes] = await Promise.all([
         apiFetch("/api/assets"),
         apiFetch("/api/goals"),
         apiFetch("/api/snapshot"),
+        apiFetch("/api/loans"),
       ]);
       setAssets(assetsRes as Asset[]);
       setGoals(goalsRes as Goal[]);
       setSnapshots(snapshotsRes as Snapshot[]);
+      setLoans(loansRes as Loan[]);
 
       const tickers = (assetsRes as Asset[])
         .map((a) => a.ticker)
@@ -89,7 +93,7 @@ export default function DashboardPage() {
     setRefreshing(false);
   };
 
-  const { total, totalGain, totalCost, allocation } = useMemo(() => {
+  const { total: grossTotal, totalGain, totalCost, allocation } = useMemo(() => {
     let total = 0;
     let totalCost = 0;
     const allocation: { type: string; value: number }[] = [];
@@ -104,6 +108,9 @@ export default function DashboardPage() {
 
     return { total, totalGain: total - totalCost, totalCost, allocation };
   }, [assets, quotes]);
+
+  const debt = totalDebt(loans);
+  const total = grossTotal - debt;
 
   const gainPercent = totalCost > 0 ? (totalGain / totalCost) * 100 : 0;
 
@@ -170,6 +177,11 @@ export default function DashboardPage() {
               {formatMoney(totalGain)} ({formatPercent(gainPercent)})
             </span>
           </div>
+          {debt > 0 && (
+            <p className="text-xs text-text-muted mt-2 tabular">
+              {formatMoney(grossTotal)} d&apos;actifs − {formatMoney(debt)} de crédits restants
+            </p>
+          )}
           <div className="h-px bg-border w-64 mt-4" />
         </div>
         <button

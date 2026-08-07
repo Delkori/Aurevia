@@ -5,6 +5,7 @@ import { Plus, Trash2, AlertTriangle, X } from "lucide-react";
 import { formatMoney } from "@/lib/format";
 import { currentValue, gain, ASSET_TYPE_LABELS } from "@/lib/networth";
 import { apiFetch, ApiError } from "@/lib/api";
+import LoansTable from "@/components/LoansTable";
 
 type Asset = {
   id: number;
@@ -516,6 +517,12 @@ export default function AssetsPage() {
         Astuce : quitte une case (Tab ou clique ailleurs) pour enregistrer. Les
         listes déroulantes s&apos;enregistrent immédiatement.
       </p>
+
+      <div className="pt-4 border-t border-border">
+        <LoansTable
+          realEstateAssets={assets.filter((a) => a.type === "real_estate").map((a) => ({ id: a.id, name: a.name }))}
+        />
+      </div>
     </div>
   );
 }
