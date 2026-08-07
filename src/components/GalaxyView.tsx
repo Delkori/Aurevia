@@ -28,7 +28,7 @@ function sr(v: number, mx: number, mn: number, mxx: number) {
 }
 
 interface GNode extends SimulationNodeDatum {
-  id: string; kind: "center" | "portfolio" | "asset" | "goal" | "member";
+  id: string; kind: "center" | "portfolio" | "asset" | "goal" | "member" | "salary" | "expenses" | "reste";
   label: string; r: number; color: string;
   portfolioKey?: number | "unassigned"; assetId?: number; goalId?: number; memberId?: number;
   gainVal?: number;
@@ -85,11 +85,42 @@ export default function GalaxyView({
   const maxGT = Math.max(1, ...goals.map(g => Number(g.targetAmount)));
 
   const { targetNodes, links, flowLinks } = useMemo(() => {
-    const nodes: GNode[] = [{ id: "center", kind: "center", label: "Patrimoine", r: CENTER_R, color: "#7c6af5" }];
+    const nodes: GNode[] = [];
     const links: GLink[] = [];
     const flowLinks: { source: string; target: string; label: string }[] = [];
 
-    // Members as wrapper nodes
+    // ── Nœud Salaire (source de tout) ───────────────────────────────
+    if (salary > 0) {
+      nodes.push({ id: "salary", kind: "salary" as GNode["kind"], label: "Salaire", r: 22, color: "#e2e2e6" });
+    }
+
+    // ── Nœud central Patrimoine ─────────────────────────────────────
+    nodes.push({ id: "center", kind: "center", label: "Patrimoine", r: CENTER_R, color: "#7c6af5" });
+    if (salary > 0) links.push({ source: "salary", target: "center" });
+
+    // ── Nœud Dépenses (budget categories "expense") ─────────────────
+    const totalExpenseFlows = flows.filter(f => f.targetType === "expense").reduce((s, f) => s + Number(f.amount), 0);
+    const investFlows = flows.filter(f => f.sourceType === "salary" && f.targetType === "portfolio");
+    const goalFlowsFromSalary = flows.filter(f => f.sourceType === "salary" && f.targetType === "goal");
+    const totalInvest = investFlows.reduce((s, f) => s + Number(f.amount), 0) + goalFlowsFromSalary.reduce((s, f) => s + Number(f.amount), 0);
+    const resteAInvestir = salary > 0 ? salary - totalInvest - totalExpenseFlows : 0;
+
+    if (totalExpenseFlows > 0 || salary > 0) {
+      nodes.push({ id: "expenses", kind: "expenses" as GNode["kind"], label: "Dépenses", r: 20, color: "#f87171" });
+      if (salary > 0) {
+        links.push({ source: "salary", target: "expenses" });
+        if (totalExpenseFlows > 0) flowLinks.push({ source: "salary", target: "expenses", label: formatMoney(totalExpenseFlows) });
+      }
+    }
+
+    // ── Nœud "Reste à investir" ─────────────────────────────────────
+    if (salary > 0 && resteAInvestir > 0) {
+      nodes.push({ id: "reste", kind: "reste" as GNode["kind"], label: "Reste", r: 16, color: "#9585ff" });
+      links.push({ source: "salary", target: "reste" });
+      flowLinks.push({ source: "salary", target: "reste", label: formatMoney(resteAInvestir) });
+    }
+
+    // ── Membres du foyer ────────────────────────────────────────────
     const memberIds = new Set<number>();
     portfolios.forEach(p => { if (p.memberId) memberIds.add(p.memberId); });
     goals.forEach(g => { if (g.memberId) memberIds.add(g.memberId); });
@@ -98,6 +129,7 @@ export default function GalaxyView({
       links.push({ source: "center", target: `m-${m.id}` });
     });
 
+    // ── Portefeuilles + actifs ───────────────────────────────────────
     for (const g of groups) {
       const pid = `p-${g.key}`;
       const memberNode = g.portfolio.memberId ? `m-${g.portfolio.memberId}` : null;
@@ -114,15 +146,16 @@ export default function GalaxyView({
       }
     }
 
+    // ── Objectifs ───────────────────────────────────────────────────
     for (const goal of goals) {
       const memberNode = goal.memberId ? `m-${goal.memberId}` : null;
       nodes.push({ id: `g-${goal.id}`, kind: "goal", label: goal.name, r: sr(Number(goal.targetAmount), maxGT, GL_MIN, GL_MAX), color: goal.color, goalId: goal.id });
       links.push({ source: memberNode ?? "center", target: `g-${goal.id}` });
     }
 
-    // Flow links
+    // ── Flux financiers (fusées) ─────────────────────────────────────
     flows.forEach(f => {
-      const sId = f.sourceType === "salary" ? "center" : f.sourceType === "portfolio" ? `p-${f.sourceId}` : null;
+      const sId = f.sourceType === "salary" ? "salary" : f.sourceType === "portfolio" ? `p-${f.sourceId}` : null;
       const tId = f.targetType === "portfolio" ? `p-${f.targetId}` : f.targetType === "goal" ? `g-${f.targetId}` : null;
       if (sId && tId && nodes.find(n => n.id === sId) && nodes.find(n => n.id === tId)) {
         flowLinks.push({ source: sId, target: tId, label: formatMoney(Number(f.amount)) });
@@ -130,7 +163,7 @@ export default function GalaxyView({
     });
 
     return { targetNodes: nodes, links, flowLinks };
-  }, [groups, maxPV, expanded, goals, maxGT, members, portfolios, flows, quotes]);
+  }, [groups, maxPV, expanded, goals, maxGT, members, portfolios, flows, quotes, salary]);
 
   useEffect(() => {
     const map = nodesMapRef.current;
@@ -146,6 +179,10 @@ export default function GalaxyView({
 
     const center = newMap.get("center");
     if (center) { center.fx = CX; center.fy = CY; }
+    const salaryNode = newMap.get("salary");
+    if (salaryNode) { salaryNode.fx = CX; salaryNode.fy = 70; }
+    const expNode = newMap.get("expenses");
+    if (expNode) { expNode.fx = CX + 280; expNode.fy = 160; }
 
     if (!simRef.current) {
       simRef.current = forceSimulation<GNode>(nodes)
@@ -239,7 +276,7 @@ export default function GalaxyView({
   };
 
   const onPointerDown = (id: string) => (e: React.PointerEvent) => {
-    if (id === "center") return;
+    if (id === "center" || id === "salary" || id === "expenses") return;
     e.stopPropagation();
     setDragId(id);
     simRef.current?.alphaTarget(0.3).restart();
@@ -248,6 +285,10 @@ export default function GalaxyView({
   const handleClick = (n: GNode) => {
     setCreateMode(null);
     if (n.kind === "center") { setSelected({ kind: "total", total: grandTotal, grossTotal, debt }); }
+    else if (n.kind === "salary" || n.kind === "reste" || n.kind === "expenses") {
+      setCreateMode(n.kind === "salary" ? "salary" : null);
+      setSelected({ kind: "total", total: grandTotal, grossTotal, debt });
+    }
     else if (n.kind === "portfolio" && n.portfolioKey !== undefined) {
       const g = groups.find(gr => gr.key === n.portfolioKey)!;
       toggle(n.portfolioKey);
@@ -404,20 +445,46 @@ export default function GalaxyView({
 
               return <g key={n.id} className="nd" transform={`translate(${n.x},${n.y})`} style={{ cursor: "pointer" }}
                 onPointerDown={onPointerDown(n.id)} onClick={e => { e.stopPropagation(); handleClick(n); }}>
-                {n.kind === "goal" ? <>
+
+                {/* Salary node */}
+                {(n.kind === "salary" || n.kind === "reste") && <>
+                  <circle r={n.r} fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.12)" strokeWidth={0.6} />
+                </>}
+
+                {/* Expenses node */}
+                {n.kind === "expenses" && <>
+                  <circle r={n.r} fill="rgba(248,113,113,0.06)" stroke="rgba(248,113,113,0.25)" strokeWidth={0.7} />
+                </>}
+
+                {/* Goal node */}
+                {n.kind === "goal" && <>
                   <circle r={n.r + 2} fill="none" stroke={n.color} strokeOpacity={0.1} strokeDasharray="2 3" />
                   <circle r={n.r} fill={n.color} fillOpacity={0.04 + (gp ?? 0) * 0.18} stroke={n.color} strokeOpacity={isSel ? 0.6 : 0.25} strokeWidth={isSel ? 1.5 : 0.6} />
                   {(gp ?? 0) >= 1 && <circle r={n.r + 5} fill="none" stroke="#34d399" strokeOpacity={0.3} strokeWidth={0.8} />}
-                </> : n.kind === "asset" ? <>
+                </>}
+
+                {/* Asset node (green = gain, red = loss) */}
+                {n.kind === "asset" && <>
                   <circle r={n.r} fill={(n.gainVal ?? 0) >= 0 ? "rgba(52,211,153,0.04)" : "rgba(251,113,133,0.04)"} stroke={(n.gainVal ?? 0) >= 0 ? "rgba(52,211,153,0.2)" : "rgba(251,113,133,0.2)"} strokeWidth={0.6} />
-                </> : n.kind === "member" ? <>
+                </>}
+
+                {/* Member node */}
+                {n.kind === "member" && <>
                   <circle r={n.r + 3} fill="none" stroke={n.color} strokeOpacity={0.08} strokeDasharray="3 3" />
                   <circle r={n.r} fill={n.color} fillOpacity={0.1} stroke={n.color} strokeOpacity={isSel ? 0.5 : 0.3} strokeWidth={0.7} />
-                </> : <>
-                  <circle r={n.r + 4} fill="none" stroke={n.color} strokeOpacity={0.04} />
-                  <circle r={n.r} fill={n.kind === "center" ? "url(#cg)" : n.color} fillOpacity={n.kind === "center" ? 1 : 0.1} stroke={n.color} strokeOpacity={isExp || isSel ? 0.5 : 0.3} strokeWidth={isExp || isSel ? 1.2 : 0.6} filter={n.kind === "center" ? "url(#gl)" : undefined} />
                 </>}
-                {n.kind !== "asset" && <text y={n.kind === "goal" ? -1 : -4} textAnchor="middle" fontSize={n.kind === "center" ? 11 : 10} fontWeight={500} fill="#d8d8dc" opacity={0.9}>{n.label.length > 13 ? n.label.slice(0, 12) + "…" : n.label}</text>}
+
+                {/* Center + Portfolio nodes */}
+                {(n.kind === "center" || n.kind === "portfolio") && <>
+                  <circle r={n.r + 4} fill="none" stroke={n.color} strokeOpacity={0.04} />
+                  <circle r={n.r} fill={n.kind === "center" ? "url(#cg)" : n.color} fillOpacity={n.kind === "center" ? 1 : 0.12} stroke={n.color} strokeOpacity={isExp || isSel ? 0.5 : 0.3} strokeWidth={isExp || isSel ? 1.2 : 0.6} filter={n.kind === "center" ? "url(#gl)" : undefined} />
+                </>}
+
+                {/* Labels */}
+                {n.kind !== "asset" && <text y={-4} textAnchor="middle" fontSize={n.kind === "center" ? 11 : 10} fontWeight={500} fill="#d8d8dc" opacity={0.9}>{n.label.length > 13 ? n.label.slice(0, 12) + "…" : n.label}</text>}
+                {n.kind === "salary" && <text y={10} textAnchor="middle" fontSize={8.5} fill="#8e8e96">{formatMoney(salary)}/mois</text>}
+                {n.kind === "reste" && <text y={10} textAnchor="middle" fontSize={8.5} fill="#9585ff">{formatMoney(Number(n.r))}</text>}
+                {n.kind === "expenses" && <text y={10} textAnchor="middle" fontSize={8.5} fill="#f87171">/mois</text>}
                 {n.kind === "portfolio" && <text y={10} textAnchor="middle" fontSize={8.5} fill="#6b6b72">{formatMoney(groups.find(g => g.key === n.portfolioKey)?.total ?? 0)}</text>}
                 {n.kind === "goal" && <text y={12} textAnchor="middle" fontSize={8.5} fill="#6b6b72">{((gp ?? 0) * 100).toFixed(0)}%</text>}
                 {n.kind === "asset" && <>
@@ -425,6 +492,7 @@ export default function GalaxyView({
                   <text y={8} textAnchor="middle" fontSize={7.5} fill={(n.gainVal ?? 0) >= 0 ? "#34d399" : "#fb7185"} opacity={0.8}>{(n.gainVal ?? 0) >= 0 ? "+" : ""}{formatMoney(n.gainVal ?? 0)}</text>
                 </>}
                 {n.kind === "center" && <text y={10} textAnchor="middle" fontSize={9} fill="#8e8e96">{formatMoney(grandTotal)}</text>}
+                {n.kind === "member" && <text y={10} textAnchor="middle" fontSize={8.5} fill="#8e8e96">{n.label}</text>}
               </g>;
             })}
           </g>
