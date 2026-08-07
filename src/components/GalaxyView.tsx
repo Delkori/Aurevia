@@ -91,7 +91,7 @@ export default function GalaxyView({
 
     // ── Nœud Salaire (source de tout) ───────────────────────────────
     if (salary > 0) {
-      nodes.push({ id: "salary", kind: "salary" as GNode["kind"], label: "Salaire", r: 22, color: "#e2e2e6" });
+      nodes.push({ id: "salary", kind: "salary" as GNode["kind"], label: "Salaire", r: 30, color: "#e2e2e6" });
     }
 
     // ── Nœud central Patrimoine ─────────────────────────────────────
@@ -449,24 +449,24 @@ export default function GalaxyView({
             return <g>{stars}</g>;
           }, [])}
           <g ref={rootRef}>
-            {/* Structural links — visible! */}
+            {/* Structural links */}
             {links.map(l => {
               const s = nodeById.get(l.source), tg = nodeById.get(l.target);
               if (!s || !tg || s.x == null || tg.x == null) return null;
               const isGoal = tg.kind === "goal";
               const isFlow = tg.kind === "salary" || tg.kind === "expenses" || tg.kind === "reste";
               return <line key={`ln-${s.id}-${tg.id}`} x1={s.x} y1={s.y} x2={tg.x} y2={tg.y}
-                stroke={tg.color} strokeOpacity={isFlow ? 0.15 : 0.18} strokeWidth={isFlow ? 1 : 0.8}
+                stroke={tg.color} strokeOpacity={isFlow ? 0.2 : 0.25} strokeWidth={isFlow ? 1.2 : 1}
                 strokeDasharray={isGoal ? "4 5" : isFlow ? "5 4" : undefined} />;
             })}
-            {/* Flow links (from DB) — brighter purple dashed */}
+            {/* Flow links (from DB) */}
             {flowLinks.map((f, i) => {
               const s = nodeById.get(f.source), tg = nodeById.get(f.target);
               if (!s || !tg || s.x == null || tg.x == null) return null;
               const mx = ((s.x ?? 0) + (tg.x ?? 0)) / 2, my = ((s.y ?? 0) + (tg.y ?? 0)) / 2 - 10;
               return <g key={`fl-${i}`}>
-                <line x1={s.x} y1={s.y} x2={tg.x} y2={tg.y} stroke="#7c6af5" strokeOpacity={0.25} strokeWidth={1.2} strokeDasharray="6 4" />
-                <text x={mx} y={my} textAnchor="middle" fontSize={9} fill="#7c6af5" opacity={0.7} fontWeight={500}>{f.label}</text>
+                <line x1={s.x} y1={s.y} x2={tg.x} y2={tg.y} stroke="#7c6af5" strokeOpacity={0.3} strokeWidth={1.5} strokeDasharray="6 4" />
+                <text x={mx} y={my} textAnchor="middle" fontSize={10} fill="#9585ff" opacity={0.8} fontWeight={500}>{f.label}</text>
               </g>;
             })}
             {/* Animated rockets on flow links */}
@@ -479,8 +479,8 @@ export default function GalaxyView({
               const ry = (s.y ?? 0) + ((tg.y ?? 0) - (s.y ?? 0)) * p;
               const ang = Math.atan2((tg.y ?? 0) - (s.y ?? 0), (tg.x ?? 0) - (s.x ?? 0)) * 180 / Math.PI;
               return <g key={`rk-${i}`} transform={`translate(${rx},${ry}) rotate(${ang})`}>
-                <polygon points="-4,-2.5 4,0 -4,2.5" fill="#7c6af5" opacity={0.7} />
-                <polygon points="-5,0 -9,-2.5 -7.5,0 -9,2.5" fill="#fb923c" opacity={0.4 + Math.sin(t * 12) * 0.2} />
+                <polygon points="-5,-3 5,0 -5,3" fill="#9585ff" opacity={0.8} />
+                <polygon points="-6,0 -10,-3 -8,0 -10,3" fill="#fb923c" opacity={0.5 + Math.sin(t * 12) * 0.25} />
               </g>;
             })}
             {/* Animated dot particles on ALL structural links */}
@@ -491,7 +491,7 @@ export default function GalaxyView({
               const p = (t / speed) % 1;
               const cx = (s.x ?? 0) + ((tg.x ?? 0) - (s.x ?? 0)) * p;
               const cy = (s.y ?? 0) + ((tg.y ?? 0) - (s.y ?? 0)) * p;
-              return <circle key={`dot-${s.id}-${tg.id}`} cx={cx} cy={cy} r={1.5} fill={tg.color} opacity={0.5} filter="url(#gl)" />;
+              return <circle key={`dot-${s.id}-${tg.id}`} cx={cx} cy={cy} r={2} fill={tg.color} opacity={0.55} filter="url(#gl)" />;
             })}
             {/* Nodes — 3D spheres with themed skins */}
             {(() => {
