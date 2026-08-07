@@ -23,6 +23,22 @@ type Quote = { price: number; currency: string } | null;
 const W = 1200, H = 800, CX = W / 2, CY = H / 2, CENTER_R = 32;
 function sr(v: number, mx: number, mn: number, mxx: number) { return mx <= 0 ? mn : mn + (mxx - mn) * Math.sqrt(Math.max(0, Math.min(1, v / mx))); }
 
+function hashSeed(a: string, b: string) { let h = 0; for (const c of a + b) h = (h * 31 + c.charCodeAt(0)) | 0; return h; }
+function curveControl(s: { x: number; y: number }, tg: { x: number; y: number }, seed: number) {
+  const dx = tg.x - s.x, dy = tg.y - s.y, dist = Math.sqrt(dx * dx + dy * dy) || 1;
+  const nx = -dy / dist, ny = dx / dist, sign = seed % 2 === 0 ? 1 : -1;
+  const bend = Math.min(70, dist * 0.28) * sign;
+  return { x: (s.x + tg.x) / 2 + nx * bend, y: (s.y + tg.y) / 2 + ny * bend };
+}
+function bezierPoint(s: { x: number; y: number }, c: { x: number; y: number }, tg: { x: number; y: number }, p: number) {
+  const mt = 1 - p;
+  const x = mt * mt * s.x + 2 * mt * p * c.x + p * p * tg.x;
+  const y = mt * mt * s.y + 2 * mt * p * c.y + p * p * tg.y;
+  const dx = 2 * mt * (c.x - s.x) + 2 * p * (tg.x - c.x);
+  const dy = 2 * mt * (c.y - s.y) + 2 * p * (tg.y - c.y);
+  return { x, y, angle: Math.atan2(dy, dx) * 180 / Math.PI };
+}
+
 interface GNode extends SimulationNodeDatum {
   id: string; kind: string; label: string; r: number; color: string;
   portfolioKey?: number | "unassigned"; assetId?: number; goalId?: number; memberId?: number;
@@ -408,7 +424,7 @@ export default function GalaxyView({
       </div>
 
       {/* ── GRAPH ── */}
-      <div className="relative overflow-hidden" style={{ background: "radial-gradient(ellipse at 35% 25%, rgba(80,50,140,0.12), transparent 50%), radial-gradient(ellipse at 70% 70%, rgba(30,60,120,0.08), transparent 40%), #0a0a0e" }}>
+      <div className="relative overflow-hidden" style={{ background: "radial-gradient(ellipse at 30% 20%, rgba(124,106,245,0.16), transparent 45%), radial-gradient(ellipse at 75% 65%, rgba(45,180,190,0.10), transparent 42%), radial-gradient(ellipse at 15% 80%, rgba(200,90,60,0.06), transparent 35%), #06060a" }}>
         <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full h-full select-none touch-none block absolute inset-0"
           onPointerDown={onBgDown} onPointerMove={onBgMove} onPointerUp={onBgUp} onPointerLeave={onBgUp}
           onClick={() => { setSelected(null); setCreateMode(null); }}>
@@ -432,6 +448,8 @@ export default function GalaxyView({
             <radialGradient id="sph-reste" cx="38%" cy="28%" r="60%"><stop offset="0%" stopColor="#d4c8ff" /><stop offset="30%" stopColor="#a088ff" /><stop offset="60%" stopColor="#6a50d0" /><stop offset="100%" stopColor="#201548" /></radialGradient>
             <radialGradient id="sph-hl" cx="28%" cy="20%" r="28%"><stop offset="0%" stopColor="white" stopOpacity="0.55" /><stop offset="50%" stopColor="white" stopOpacity="0.12" /><stop offset="100%" stopColor="white" stopOpacity="0" /></radialGradient>
             <clipPath id="clip-sal"><circle r={32} /></clipPath>
+            <radialGradient id="vignette" cx="50%" cy="45%" r="72%"><stop offset="55%" stopColor="#000" stopOpacity={0} /><stop offset="100%" stopColor="#000" stopOpacity={0.55} /></radialGradient>
+            <radialGradient id="rocket-trail" cx="50%" cy="50%" r="50%"><stop offset="0%" stopColor="#ffb870" stopOpacity={0.9} /><stop offset="100%" stopColor="#ffb870" stopOpacity={0} /></radialGradient>
 
             {nodes.filter(n => ["portfolio", "member", "goal"].includes(n.kind)).map(n => (
               <React.Fragment key={`sph-grp-${n.id}`}>
@@ -450,15 +468,53 @@ export default function GalaxyView({
             ))}
           </defs>
 
-          {STARS.map((s, i) => <circle key={`s${i}`} cx={s.x} cy={s.y} r={s.r} fill="#fff" opacity={s.op} />)}
+          {STARS.map((s, i) => <circle key={`s${i}`} cx={s.x} cy={s.y} r={s.r} fill="#fff" opacity={i < 8 ? s.op * (0.65 + 0.35 * Math.sin(t * 1.3 + i * 0.9)) : s.op} />)}
           <circle cx={CX} cy={CY} r={200} fill="none" stroke="rgba(255,255,255,0.03)" strokeDasharray="4 12" />
           <circle cx={CX} cy={CY} r={350} fill="none" stroke="rgba(255,255,255,0.02)" strokeDasharray="4 16" />
 
           <g ref={rootRef}>
-            {links.map(l => { const s = nodeById.get(l.source), tg = nodeById.get(l.target); if (!s || !tg || s.x == null || tg.x == null) return null; return <line key={`ln-${s.id}-${tg.id}`} x1={s.x} y1={s.y} x2={tg.x} y2={tg.y} stroke={tg.color} strokeOpacity={tg.kind === "expense-item" ? 0.1 : 0.22} strokeWidth={tg.kind === "expense-item" ? 0.5 : 1} strokeDasharray={tg.kind === "goal" ? "4 5" : undefined} />; })}
-            {flowLinks.map((f, i) => { const s = nodeById.get(f.source), tg = nodeById.get(f.target); if (!s || !tg || s.x == null || tg.x == null) return null; const mx = ((s.x ?? 0) + (tg.x ?? 0)) / 2, my = ((s.y ?? 0) + (tg.y ?? 0)) / 2 - 12; return <g key={`fl-${i}`}><line x1={s.x} y1={s.y} x2={tg.x} y2={tg.y} stroke="#9585ff" strokeOpacity={0.3} strokeWidth={1.5} strokeDasharray="6 4" /><text x={mx} y={my} textAnchor="middle" fontSize={10} fill="#b8a5ff" opacity={0.75} fontWeight={500}>{f.label}</text></g>; })}
-            {flowLinks.map((f, i) => { const s = nodeById.get(f.source), tg = nodeById.get(f.target); if (!s || !tg || s.x == null || tg.x == null) return null; const sp = 3 + i * 0.6, p = (t / sp) % 1, rx = (s.x ?? 0) + ((tg.x ?? 0) - (s.x ?? 0)) * p, ry = (s.y ?? 0) + ((tg.y ?? 0) - (s.y ?? 0)) * p, ang = Math.atan2((tg.y ?? 0) - (s.y ?? 0), (tg.x ?? 0) - (s.x ?? 0)) * 180 / Math.PI; return <g key={`rk-${i}`} transform={`translate(${rx},${ry}) rotate(${ang})`}><polygon points="-5,-3 6,0 -5,3" fill="#b8a5ff" opacity={0.8} /><polygon points="-6,0 -11,-3 -9,0 -11,3" fill="#fb923c" opacity={0.45 + Math.sin(t * 14) * 0.25} /></g>; })}
-            {links.filter(l => nodeById.get(l.target)?.kind !== "expense-item").map(l => { const s = nodeById.get(l.source), tg = nodeById.get(l.target); if (!s || !tg || s.x == null || tg.x == null) return null; const sp = 5 + (s.id.charCodeAt(0) % 4), p = (t / sp) % 1; return <circle key={`dot-${s.id}-${tg.id}`} cx={(s.x ?? 0) + ((tg.x ?? 0) - (s.x ?? 0)) * p} cy={(s.y ?? 0) + ((tg.y ?? 0) - (s.y ?? 0)) * p} r={2} fill={tg.color} opacity={0.5} filter="url(#gl)" />; })}
+            {links.map(l => {
+              const s = nodeById.get(l.source), tg = nodeById.get(l.target);
+              if (!s || !tg || s.x == null || tg.x == null) return null;
+              const seed = hashSeed(s.id, tg.id), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
+              return <path key={`ln-${s.id}-${tg.id}`} d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke={tg.color} strokeOpacity={tg.kind === "expense-item" ? 0.1 : 0.22} strokeWidth={tg.kind === "expense-item" ? 0.5 : 1} strokeDasharray={tg.kind === "goal" ? "4 5" : undefined} />;
+            })}
+            {flowLinks.map((f, i) => {
+              const s = nodeById.get(f.source), tg = nodeById.get(f.target);
+              if (!s || !tg || s.x == null || tg.x == null) return null;
+              const seed = hashSeed(f.source, f.target), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
+              const mid = bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, 0.5);
+              return <g key={`fl-${i}`}>
+                <path d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke="#9585ff" strokeOpacity={0.3} strokeWidth={1.5} strokeDasharray="6 4" />
+                <text x={mid.x} y={mid.y - 12} textAnchor="middle" fontSize={10} fill="#b8a5ff" opacity={0.75} fontWeight={500}>{f.label}</text>
+              </g>;
+            })}
+            {flowLinks.map((f, i) => {
+              const s = nodeById.get(f.source), tg = nodeById.get(f.target);
+              if (!s || !tg || s.x == null || tg.x == null) return null;
+              const seed = hashSeed(f.source, f.target), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
+              const sp = 3 + i * 0.6, p = (t / sp) % 1;
+              const head = bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, p);
+              const trail = [0.05, 0.1, 0.16, 0.23].map(off => {
+                const pp = Math.max(0, p - off);
+                return bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, pp);
+              });
+              return <g key={`rk-${i}`}>
+                {trail.map((pt, ti) => <circle key={`tr-${i}-${ti}`} cx={pt.x} cy={pt.y} r={3.5 - ti * 0.7} fill="url(#rocket-trail)" opacity={0.55 - ti * 0.12} />)}
+                <g transform={`translate(${head.x},${head.y}) rotate(${head.angle})`}>
+                  <polygon points="-5,-3 6,0 -5,3" fill="#b8a5ff" opacity={0.9} />
+                  <polygon points="-6,0 -11,-3 -9,0 -11,3" fill="#fb923c" opacity={0.5 + Math.sin(t * 14) * 0.25} />
+                </g>
+              </g>;
+            })}
+            {links.filter(l => nodeById.get(l.target)?.kind !== "expense-item").map(l => {
+              const s = nodeById.get(l.source), tg = nodeById.get(l.target);
+              if (!s || !tg || s.x == null || tg.x == null) return null;
+              const seed = hashSeed(s.id, tg.id), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
+              const sp = 5 + (s.id.charCodeAt(0) % 4), p = (t / sp) % 1;
+              const pt = bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, p);
+              return <circle key={`dot-${s.id}-${tg.id}`} cx={pt.x} cy={pt.y} r={2} fill={tg.color} opacity={0.5} filter="url(#gl)" />;
+            })}
 
             {/* Magnetic snap halo */}
             {snapTarget && (() => { const tg = nodeById.get(snapTarget); if (!tg || tg.x == null) return null; return <g><circle cx={tg.x} cy={tg.y} r={tg.r + 20} fill="none" stroke="#9585ff" strokeOpacity={0.6} strokeWidth={2.5} strokeDasharray="4 3"><animate attributeName="r" values={`${tg.r + 14};${tg.r + 24};${tg.r + 14}`} dur="0.7s" repeatCount="indefinite" /></circle><circle cx={tg.x} cy={tg.y} r={tg.r + 12} fill="rgba(149,133,255,0.06)" /></g>; })()}
@@ -600,6 +656,7 @@ export default function GalaxyView({
               </g>;
             })}
           </g>
+          <rect x={0} y={0} width={W} height={H} fill="url(#vignette)" pointerEvents="none" />
         </svg>
         <p className="absolute bottom-3 left-1/2 -translate-x-1/2 text-[10px] text-white/20 pointer-events-none">Molette = zoom · glisser pour déplacer · glisser un actif vers un portefeuille pour le réassigner</p>
       </div>
