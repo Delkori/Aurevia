@@ -31,7 +31,7 @@ cp .env.example .env.local
 Ouvre `.env.local` et remplis :
 
 ```
-DATABASE_URL=postgresql://... (ta connection string Neon)
+DATABASE_NEON_URL=postgresql://... (ta connection string Neon)
 APP_PASSWORD=choisis-un-mot-de-passe
 ```
 
@@ -59,7 +59,7 @@ Ouvre http://localhost:3000, entre le mot de passe défini dans
 1. Pousse le projet sur un repo GitHub (`git init`, `git add .`,
    `git commit -m "init"`, crée un repo sur GitHub, `git push`).
 2. Sur vercel.com, clique **Add New → Project**, choisis ton repo.
-3. Dans **Environment Variables**, ajoute `DATABASE_URL` et `APP_PASSWORD`
+3. Dans **Environment Variables**, ajoute `DATABASE_NEON_URL` et `APP_PASSWORD`
    (les mêmes valeurs que dans `.env.local`).
 4. Clique **Deploy**. C'est tout — Vercel détecte Next.js automatiquement.
 

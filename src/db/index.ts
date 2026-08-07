@@ -7,11 +7,11 @@ declare global {
   var __db_client__: ReturnType<typeof postgres> | undefined;
 }
 
-const connectionString = process.env.DATABASE_URL;
+const connectionString = process.env.DATABASE_NEON_URL;
 
 if (!connectionString) {
   throw new Error(
-    "DATABASE_URL manquant. Ajoute-le dans .env.local (voir .env.example)."
+    "DATABASE_NEON_URL manquant. Ajoute-le dans .env.local (voir .env.example)."
   );
 }
 
