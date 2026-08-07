@@ -70,13 +70,13 @@ export function getLogoUrl(type: string, ticker: string | null): string | null {
   if (!ticker) return null;
 
   if (type === "crypto") {
-    return CRYPTO_IMAGES[ticker.toLowerCase()] ?? null;
+    const url = CRYPTO_IMAGES[ticker.toLowerCase()];
+    return url ? `/api/logo?url=${encodeURIComponent(url)}` : null;
   }
 
-  // Stock/ETF — use Clearbit logo service
   const domain = TICKER_TO_DOMAIN[ticker] ?? TICKER_TO_DOMAIN[ticker.toUpperCase()];
   if (domain) {
-    return `https://logo.clearbit.com/${domain}`;
+    return `/api/logo?url=${encodeURIComponent("https://logo.clearbit.com/" + domain)}`;
   }
 
   return null;
