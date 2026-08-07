@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Plus, Trash2, Sparkles, X } from "lucide-react";
+import { Plus, Trash2, Sparkles, X, AlertTriangle } from "lucide-react";
 import { formatMoney } from "@/lib/format";
 import BudgetSankey from "@/components/BudgetSankey";
+import { apiFetch, ApiError } from "@/lib/api";
 
 type Category = {
   id: number;
@@ -38,14 +39,20 @@ export default function BudgetPage() {
   const [showCategoryForm, setShowCategoryForm] = useState(false);
   const [showGenerator, setShowGenerator] = useState(false);
   const [generatorIncome, setGeneratorIncome] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const [cats, ents] = await Promise.all([
-      fetch("/api/budget/categories").then((r) => r.json()),
-      fetch(`/api/budget/entries?month=${month}`).then((r) => r.json()),
-    ]);
-    setCategories(cats);
-    setEntries(ents);
+    setError(null);
+    try {
+      const [cats, ents] = (await Promise.all([
+        apiFetch("/api/budget/categories"),
+        apiFetch(`/api/budget/entries?month=${month}`),
+      ])) as [Category[], Entry[]];
+      setCategories(cats);
+      setEntries(ents);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Erreur de chargement.");
+    }
   }, [month]);
 
   useEffect(() => {
@@ -66,81 +73,118 @@ export default function BudgetPage() {
 
   const submitEntry = async (e: React.FormEvent) => {
     e.preventDefault();
-    await fetch("/api/budget/entries", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...entryForm, categoryId: Number(entryForm.categoryId) }),
-    });
-    setEntryForm({ ...emptyEntryForm, date: `${month}-01` });
-    setShowEntryForm(false);
-    load();
+    setError(null);
+    try {
+      await apiFetch("/api/budget/entries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...entryForm, categoryId: Number(entryForm.categoryId) }),
+      });
+      setEntryForm({ ...emptyEntryForm, date: `${month}-01` });
+      setShowEntryForm(false);
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Échec de l'ajout.");
+    }
   };
 
   const submitCategory = async (e: React.FormEvent) => {
     e.preventDefault();
-    await fetch("/api/budget/categories", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...categoryForm,
-        monthlyTarget: categoryForm.monthlyTarget || null,
-        color: categoryForm.kind === "income" ? "#3FA796" : "#C97B4A",
-      }),
-    });
-    setCategoryForm(emptyCategoryForm);
-    setShowCategoryForm(false);
-    load();
+    setError(null);
+    try {
+      await apiFetch("/api/budget/categories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...categoryForm,
+          monthlyTarget: categoryForm.monthlyTarget || null,
+          color: categoryForm.kind === "income" ? "#44cf6e" : "#e9973f",
+        }),
+      });
+      setCategoryForm(emptyCategoryForm);
+      setShowCategoryForm(false);
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Échec de la création.");
+    }
   };
 
   const removeEntry = async (id: number) => {
-    await fetch(`/api/budget/entries/${id}`, { method: "DELETE" });
-    load();
+    setError(null);
+    try {
+      await apiFetch(`/api/budget/entries/${id}`, { method: "DELETE" });
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Échec de la suppression.");
+    }
   };
 
   const removeCategory = async (id: number) => {
     if (!confirm("Supprimer cette catégorie et ses dépenses associées ?")) return;
-    await fetch(`/api/budget/categories/${id}`, { method: "DELETE" });
-    load();
+    setError(null);
+    try {
+      await apiFetch(`/api/budget/categories/${id}`, { method: "DELETE" });
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Échec de la suppression.");
+    }
   };
 
   // Génère 3 catégories de dépenses selon la règle 50/30/20 à partir d'un revenu
   const generateBudget = async () => {
     const rev = Number(generatorIncome);
     if (!rev) return;
-    const plan = [
-      { name: "Besoins essentiels", pct: 0.5 },
-      { name: "Envies", pct: 0.3 },
-      { name: "Épargne / Investissement", pct: 0.2 },
-    ];
-    for (const p of plan) {
-      const existing = categories.find((c) => c.name === p.name);
-      const target = Math.round(rev * p.pct);
-      if (existing) {
-        await fetch(`/api/budget/categories/${existing.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...existing, monthlyTarget: String(target) }),
-        });
-      } else {
-        await fetch("/api/budget/categories", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: p.name,
-            kind: "expense",
-            monthlyTarget: String(target),
-            color: "#C97B4A",
-          }),
-        });
+    setError(null);
+    try {
+      const plan = [
+        { name: "Besoins essentiels", pct: 0.5 },
+        { name: "Envies", pct: 0.3 },
+        { name: "Épargne / Investissement", pct: 0.2 },
+      ];
+      for (const p of plan) {
+        const existing = categories.find((c) => c.name === p.name);
+        const target = Math.round(rev * p.pct);
+        if (existing) {
+          await apiFetch(`/api/budget/categories/${existing.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...existing, monthlyTarget: String(target) }),
+          });
+        } else {
+          await apiFetch("/api/budget/categories", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: p.name,
+              kind: "expense",
+              monthlyTarget: String(target),
+              color: "#e9973f",
+            }),
+          });
+        }
       }
+      setShowGenerator(false);
+      setGeneratorIncome("");
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Échec de la génération.");
     }
-    setShowGenerator(false);
-    setGeneratorIncome("");
-    load();
   };
 
   return (
     <div className="p-8 md:p-10 max-w-5xl mx-auto space-y-6">
+      {error && (
+        <div className="flex items-start gap-3 bg-negative/10 border border-negative/40 rounded-lg px-4 py-3 text-sm text-negative">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <p className="font-medium">Un problème est survenu</p>
+            <p className="text-xs mt-1 opacity-90">{error}</p>
+          </div>
+          <button onClick={() => setError(null)} className="text-negative/70 hover:text-negative">
+            <X size={16} />
+          </button>
+        </div>
+      )}
       <header className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-semibold">Budget</h1>
@@ -334,7 +378,7 @@ export default function BudgetPage() {
                     className="h-full rounded-full"
                     style={{
                       width: `${progress}%`,
-                      background: progress > 100 ? "#C15B4A" : c.color,
+                      background: progress > 100 ? "#fb464c" : c.color,
                     }}
                   />
                 </div>

@@ -104,11 +104,11 @@ export default function GalaxyView({
     const list = [...byPortfolio.entries()].map(([key, list]) => {
       const portfolio =
         key === "unassigned"
-          ? { id: "unassigned" as const, name: "Sans portefeuille", color: "#8A92A3" }
+          ? { id: "unassigned" as const, name: "Sans portefeuille", color: "#999999" }
           : portfolios.find((p) => p.id === key) ?? {
               id: key,
               name: "?",
-              color: "#8A92A3",
+              color: "#999999",
             };
       const valued = list.map((a) => ({
         asset: a,
@@ -152,7 +152,7 @@ export default function GalaxyView({
         className="lg:col-span-2 rounded-lg overflow-hidden border border-border relative"
         style={{
           background:
-            "radial-gradient(ellipse at 50% 40%, #141924 0%, #0a0c10 70%)",
+            "radial-gradient(ellipse at 50% 40%, #232323 0%, #141414 70%)",
         }}
       >
         <svg viewBox="0 0 1000 660" className="w-full h-auto select-none">
@@ -172,9 +172,9 @@ export default function GalaxyView({
               </feMerge>
             </filter>
             <radialGradient id="sunGradient" cx="35%" cy="30%" r="70%">
-              <stop offset="0%" stopColor="#F3D77A" />
-              <stop offset="55%" stopColor="#C9A227" />
-              <stop offset="100%" stopColor="#8A6B15" />
+              <stop offset="0%" stopColor="#c4b5fd" />
+              <stop offset="55%" stopColor="#8a5cf5" />
+              <stop offset="100%" stopColor="#5a3fae" />
             </radialGradient>
             {positioned.map((g) => (
               <radialGradient
@@ -198,7 +198,7 @@ export default function GalaxyView({
               cx={s.x}
               cy={s.y}
               r={s.r}
-              fill="#EDEFF2"
+              fill="#dcddde"
               opacity={0.35}
               style={{
                 animation: `aurevia-twinkle ${s.dur}s ease-in-out ${s.delay}s infinite`,
@@ -213,7 +213,7 @@ export default function GalaxyView({
               cy={CENTER.y}
               r={PLANET_ORBIT_R}
               fill="none"
-              stroke="#2A3140"
+              stroke="#3f3f3f"
               strokeWidth={1}
               strokeDasharray="2 6"
             />
@@ -241,7 +241,7 @@ export default function GalaxyView({
               y={CENTER.y + 50}
               textAnchor="middle"
               fontSize={11}
-              fill="#8A92A3"
+              fill="#999999"
               letterSpacing={0.5}
             >
               PATRIMOINE TOTAL
@@ -252,7 +252,7 @@ export default function GalaxyView({
               textAnchor="middle"
               fontSize={14}
               fontWeight={600}
-              fill="#EDEFF2"
+              fill="#dcddde"
               className="tabular"
             >
               {formatMoney(grandTotal)}
@@ -342,7 +342,7 @@ export default function GalaxyView({
                           y={my + mr + 13}
                           textAnchor="middle"
                           fontSize={10}
-                          fill="#9BA3B4"
+                          fill="#a8a8a8"
                         >
                           {v.asset.name.length > 13
                             ? v.asset.name.slice(0, 12) + "…"
@@ -383,7 +383,7 @@ export default function GalaxyView({
                     textAnchor="middle"
                     fontSize={13}
                     fontWeight={700}
-                    fill="#0B0D11"
+                    fill="#141414"
                   >
                     {g.portfolio.name}
                   </text>
@@ -392,7 +392,7 @@ export default function GalaxyView({
                     y={g.y + 15}
                     textAnchor="middle"
                     fontSize={10.5}
-                    fill="#0B0D11"
+                    fill="#141414"
                     className="tabular"
                   >
                     {formatMoney(g.total)}
@@ -407,7 +407,7 @@ export default function GalaxyView({
               x={CENTER.x}
               y={CENTER.y}
               textAnchor="middle"
-              fill="#8A92A3"
+              fill="#999999"
               fontSize={14}
             >
               Ajoute des actifs pour voir ta galaxie

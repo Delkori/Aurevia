@@ -124,7 +124,7 @@ export default function AssetsPage() {
   const createPortfolio = async (): Promise<number | null> => {
     if (!newPortfolioName.trim()) return null;
     try {
-      const colors = ["#C9A227", "#3FA796", "#6E7BAE", "#C97B4A", "#8A92A3"];
+      const colors = ["#8a5cf5", "#53dfdd", "#e9973f", "#44cf6e", "#fa99cd"];
       const created = (await apiFetch("/api/portfolios", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

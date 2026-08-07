@@ -14,7 +14,7 @@ export async function PUT(
 
     const [updated] = await db
       .update(portfolios)
-      .set({ name: body.name, color: body.color || "#C9A227" })
+      .set({ name: body.name, color: body.color || "#8a5cf5" })
       .where(eq(portfolios.id, Number(id)))
       .returning();
 

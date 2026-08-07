@@ -35,18 +35,18 @@ export default function NetWorthChart({ data }: { data: Snapshot[] }) {
       <AreaChart data={chartData} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
         <defs>
           <linearGradient id="netWorthFill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#C9A227" stopOpacity={0.35} />
-            <stop offset="100%" stopColor="#C9A227" stopOpacity={0} />
+            <stop offset="0%" stopColor="#8a5cf5" stopOpacity={0.35} />
+            <stop offset="100%" stopColor="#8a5cf5" stopOpacity={0} />
           </linearGradient>
         </defs>
         <XAxis
           dataKey="date"
-          tick={{ fill: "#8A92A3", fontSize: 11 }}
-          axisLine={{ stroke: "#262B33" }}
+          tick={{ fill: "#999999", fontSize: 11 }}
+          axisLine={{ stroke: "#333333" }}
           tickLine={false}
         />
         <YAxis
-          tick={{ fill: "#8A92A3", fontSize: 11 }}
+          tick={{ fill: "#999999", fontSize: 11 }}
           axisLine={false}
           tickLine={false}
           tickFormatter={(v) => formatMoney(v)}
@@ -54,18 +54,18 @@ export default function NetWorthChart({ data }: { data: Snapshot[] }) {
         />
         <Tooltip
           contentStyle={{
-            background: "#161A21",
-            border: "1px solid #262B33",
+            background: "#202020",
+            border: "1px solid #333333",
             borderRadius: 8,
             fontSize: 12,
           }}
-          labelStyle={{ color: "#8A92A3" }}
+          labelStyle={{ color: "#999999" }}
           formatter={(value) => [formatMoney(Number(value)), "Patrimoine"]}
         />
         <Area
           type="monotone"
           dataKey="value"
-          stroke="#C9A227"
+          stroke="#8a5cf5"
           strokeWidth={2}
           fill="url(#netWorthFill)"
         />

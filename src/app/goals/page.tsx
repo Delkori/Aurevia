@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Plus, Trash2, X } from "lucide-react";
+import { Plus, Trash2, X, AlertTriangle } from "lucide-react";
 import { formatMoney } from "@/lib/format";
 import { currentValue } from "@/lib/networth";
+import { apiFetch, ApiError } from "@/lib/api";
 
 type Goal = {
   id: number;
@@ -22,7 +23,7 @@ type Asset = {
   manualValue: string | null;
 };
 
-const COLORS = ["#C9A227", "#3FA796", "#6E7BAE", "#C97B4A", "#8A92A3"];
+const COLORS = ["#8a5cf5", "#53dfdd", "#e9973f", "#44cf6e", "#fa99cd"];
 
 const emptyForm = { name: "", targetAmount: "", targetDate: "", color: COLORS[0] };
 
@@ -31,29 +32,34 @@ export default function GoalsPage() {
   const [currentTotal, setCurrentTotal] = useState(0);
   const [form, setForm] = useState(emptyForm);
   const [showForm, setShowForm] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const [goalsData, assetsData] = await Promise.all([
-      fetch("/api/goals").then((r) => r.json()),
-      fetch("/api/assets").then((r) => r.json()) as Promise<Asset[]>,
-    ]);
-    setGoals(goalsData);
+    setError(null);
+    try {
+      const [goalsData, assetsData] = (await Promise.all([
+        apiFetch("/api/goals"),
+        apiFetch("/api/assets"),
+      ])) as [Goal[], Asset[]];
+      setGoals(goalsData);
 
-    const tickers = assetsData
-      .map((a) => a.ticker)
-      .filter((t): t is string => !!t);
-    const quotes =
-      tickers.length > 0
-        ? await fetch(`/api/prices?tickers=${tickers.join(",")}`).then((r) =>
-            r.json()
-          )
-        : {};
+      const tickers = assetsData
+        .map((a) => a.ticker)
+        .filter((t): t is string => !!t);
+      const quotes = (
+        tickers.length > 0
+          ? await apiFetch(`/api/prices?tickers=${tickers.join(",")}`)
+          : {}
+      ) as Record<string, { price: number; currency: string } | null>;
 
-    const total = assetsData.reduce(
-      (sum, a) => sum + currentValue(a, a.ticker ? quotes[a.ticker] : null),
-      0
-    );
-    setCurrentTotal(total);
+      const total = assetsData.reduce(
+        (sum, a) => sum + currentValue(a, a.ticker ? quotes[a.ticker] : null),
+        0
+      );
+      setCurrentTotal(total);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Erreur de chargement.");
+    }
   }, []);
 
   useEffect(() => {
@@ -62,24 +68,46 @@ export default function GoalsPage() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    await fetch("/api/goals", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
-    });
-    setForm(emptyForm);
-    setShowForm(false);
-    load();
+    setError(null);
+    try {
+      await apiFetch("/api/goals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      setForm(emptyForm);
+      setShowForm(false);
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Échec de la création.");
+    }
   };
 
   const remove = async (id: number) => {
     if (!confirm("Supprimer cet objectif ?")) return;
-    await fetch(`/api/goals/${id}`, { method: "DELETE" });
-    load();
+    setError(null);
+    try {
+      await apiFetch(`/api/goals/${id}`, { method: "DELETE" });
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Échec de la suppression.");
+    }
   };
 
   return (
     <div className="p-8 md:p-10 max-w-5xl mx-auto space-y-6">
+      {error && (
+        <div className="flex items-start gap-3 bg-negative/10 border border-negative/40 rounded-lg px-4 py-3 text-sm text-negative">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <p className="font-medium">Un problème est survenu</p>
+            <p className="text-xs mt-1 opacity-90">{error}</p>
+          </div>
+          <button onClick={() => setError(null)} className="text-negative/70 hover:text-negative">
+            <X size={16} />
+          </button>
+        </div>
+      )}
       <header className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Objectifs</h1>

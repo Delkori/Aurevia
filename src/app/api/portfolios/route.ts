@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
       .insert(portfolios)
       .values({
         name: body.name,
-        color: body.color || "#C9A227",
+        color: body.color || "#8a5cf5",
       })
       .returning();
 

@@ -12,7 +12,7 @@ import {
 export const portfolios = pgTable("portfolios", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
-  color: text("color").notNull().default("#C9A227"),
+  color: text("color").notNull().default("#8a5cf5"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -40,7 +40,7 @@ export const goals = pgTable("goals", {
   name: text("name").notNull(),
   targetAmount: numeric("target_amount").notNull(),
   targetDate: date("target_date"),
-  color: text("color").notNull().default("#C9A227"),
+  color: text("color").notNull().default("#8a5cf5"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -50,7 +50,7 @@ export const budgetCategories = pgTable("budget_categories", {
   name: text("name").notNull(),
   kind: text("kind").notNull(), // "income" | "expense"
   monthlyTarget: numeric("monthly_target"), // objectif mensuel (budget)
-  color: text("color").notNull().default("#8892A6"),
+  color: text("color").notNull().default("#999999"),
 });
 
 // Lignes de dépenses/revenus
