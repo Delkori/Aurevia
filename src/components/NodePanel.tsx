@@ -147,9 +147,29 @@ function FlowForm({ portfolios, goals, onSubmit, onCancel }:
   );
 }
 
+// ── Salary Form ──────────────────────────────────────────────────────────────
+function SalaryForm({ currentSalary, onSubmit, onCancel }:
+  { currentSalary: number; onSubmit: (v: number) => void; onCancel: () => void }) {
+  const [val, setVal] = useState(String(currentSalary || ""));
+  return (
+    <form onSubmit={e => { e.preventDefault(); onSubmit(Number(val) || 0); }} className="space-y-1">
+      <p className="text-[10px] text-text-muted uppercase tracking-wide">Salaire mensuel net</p>
+      <p className="text-xs text-text-muted mt-1 mb-2">
+        Ce montant apparaît comme nœud source dans la galaxie. Les flux que tu crées partent de ce salaire vers tes portefeuilles et objectifs.
+      </p>
+      <Label>Montant net / mois</Label>
+      <Inp required type="number" step="any" value={val} onChange={e => setVal(e.target.value)} placeholder="2800" className="tabular" />
+      <div className="flex gap-2 pt-3">
+        <Btn type="submit" variant="accent" className="flex-1">Enregistrer</Btn>
+        <Btn type="button" onClick={onCancel}>Fermer</Btn>
+      </div>
+    </form>
+  );
+}
+
 // ── Main Panel ───────────────────────────────────────────────────────────────
-export default function NodePanel({ selected, loans, portfolios, members, goals, flows, actions, onClear, createMode, setCreateMode }:
-  { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void }) {
+export default function NodePanel({ selected, loans, portfolios, members, goals, flows, actions, onClear, createMode, setCreateMode, salary, onUpdateSalary }:
+  { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void> }) {
 
   useEffect(() => { setCreateMode(null); }, [selected]); // eslint-disable-line
 
@@ -163,6 +183,8 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
       {createMode === "asset" && <AssetForm portfolios={portfolios} onSubmit={async d => { await actions.createAsset(d); clear(); }} onCancel={clear} />}
       {createMode === "goal" && <GoalForm members={members} onSubmit={async d => { await actions.createGoal(d); clear(); }} onCancel={clear} />}
       {createMode === "flow" && <FlowForm portfolios={portfolios} goals={goals} onSubmit={async d => { await actions.createFlow(d); clear(); }} onCancel={clear} />}
+
+      {createMode === "salary" && <SalaryForm currentSalary={salary} onSubmit={async v => { await onUpdateSalary(v); clear(); }} onCancel={clear} />}
 
       {!createMode && !selected && <p className="text-sm text-text-muted">Clique un nœud pour le détail, ou utilise la barre d&apos;outils à gauche.</p>}
 

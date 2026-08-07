@@ -48,11 +48,11 @@ function useAnimClock() {
 }
 
 export default function GalaxyView({
-  assets, portfolios, goals, loans, members, flows, quotes, actions, salary,
+  assets, portfolios, goals, loans, members, flows, quotes, actions, salary, onUpdateSalary,
 }: {
   assets: Asset[]; portfolios: Portfolio[]; goals: Goal[]; loans: Loan[];
   members: Member[]; flows: Flow[]; quotes: Record<string, Quote>;
-  actions: Actions; salary: number;
+  actions: Actions; salary: number; onUpdateSalary: (v: number) => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState<Set<number | "unassigned">>(new Set());
   const [selected, setSelected] = useState<Selection>(null);
@@ -308,26 +308,42 @@ export default function GalaxyView({
   };
 
   return (
-    <div className="grid h-full" style={{ gridTemplateColumns: "52px 1fr 280px" }}>
+    <div className="grid h-full" style={{ gridTemplateColumns: "140px 1fr 280px" }}>
       {/* Barre d'outils gauche */}
-      <div className="bg-surface/40 border-r border-border flex flex-col items-center py-3 gap-1">
+      <div className="bg-surface/40 border-r border-border flex flex-col py-4 px-3 gap-1 overflow-y-auto">
+        <p className="text-[10px] text-text-muted uppercase tracking-wider px-1 mb-2">Créer</p>
         {[
-          { icon: FolderPlus, tip: "Portefeuille", mode: "portfolio" },
-          { icon: Plus, tip: "Actif", mode: "asset" },
-          { icon: Star, tip: "Objectif", mode: "goal" },
-          { icon: ArrowRight, tip: "Flux", mode: "flow" },
-        ].map(({ icon: Icon, tip, mode }) => (
-          <button key={mode} title={tip} onClick={() => { setSelected(null); setCreateMode(mode); }}
-            className={`w-9 h-9 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-hover ${createMode === mode ? "bg-accent/15 text-accent" : ""}`}>
-            <Icon size={16} />
+          { icon: FolderPlus, label: "Portefeuille", mode: "portfolio" },
+          { icon: Plus, label: "Actif", mode: "asset" },
+          { icon: Star, label: "Objectif", mode: "goal" },
+          { icon: ArrowRight, label: "Flux mensuel", mode: "flow" },
+        ].map(({ icon: Icon, label, mode }) => (
+          <button key={mode} onClick={() => { setSelected(null); setCreateMode(mode); }}
+            className={`flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg text-xs text-left transition-colors ${createMode === mode ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text hover:bg-surface-hover"}`}>
+            <Icon size={15} className="shrink-0" />
+            {label}
           </button>
         ))}
-        <div className="flex-1" />
-        <button title="Rangement auto" onClick={autoLayout} className="w-9 h-9 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-hover">
-          <RotateCcw size={15} />
+
+        <div className="h-px bg-border my-3" />
+        <p className="text-[10px] text-text-muted uppercase tracking-wider px-1 mb-2">Revenus</p>
+        <button onClick={() => { setSelected(null); setCreateMode("salary"); }}
+          className={`flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg text-xs text-left transition-colors ${createMode === "salary" ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text hover:bg-surface-hover"}`}>
+          <span className="w-[15px] text-center shrink-0 text-sm">💰</span>
+          Salaire {salary > 0 ? `(${formatMoney(salary)})` : ""}
         </button>
-        <button title="Export PDF" onClick={exportPdf} className="w-9 h-9 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-hover">
-          <Download size={15} />
+
+        <div className="flex-1" />
+        <div className="h-px bg-border my-2" />
+        <button onClick={autoLayout}
+          className="flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg text-xs text-text-muted hover:text-text hover:bg-surface-hover">
+          <RotateCcw size={14} className="shrink-0" />
+          Rangement auto
+        </button>
+        <button onClick={exportPdf}
+          className="flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg text-xs text-text-muted hover:text-text hover:bg-surface-hover">
+          <Download size={14} className="shrink-0" />
+          Export PDF
         </button>
       </div>
 
@@ -419,7 +435,7 @@ export default function GalaxyView({
       </div>
 
       {/* Panel */}
-      <NodePanel selected={selected} loans={loans} portfolios={portfolios} members={members} goals={goals} flows={flows} actions={actions} onClear={() => setSelected(null)} createMode={createMode} setCreateMode={setCreateMode} />
+      <NodePanel selected={selected} loans={loans} portfolios={portfolios} members={members} goals={goals} flows={flows} actions={actions} onClear={() => setSelected(null)} createMode={createMode} setCreateMode={setCreateMode} salary={salary} onUpdateSalary={onUpdateSalary} />
     </div>
 
   );

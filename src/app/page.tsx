@@ -73,6 +73,10 @@ export default function HomePage() {
     deleteFlow: (id: number) => api(`/api/flows/${id}`, "DELETE"),
   };
 
+  const updateSalary = async (v: number) => {
+    await api("/api/settings", "PUT", { monthly_salary: String(v) });
+  };
+
   if (loading) return <div className="h-screen flex items-center justify-center text-text-muted text-sm">Chargement…</div>;
 
   return (
@@ -89,6 +93,7 @@ export default function HomePage() {
           assets={assets} portfolios={portfolios} goals={goals} loans={loans}
           members={members} flows={flows} quotes={quotes} actions={actions}
           salary={Number(settings.monthly_salary) || 0}
+          onUpdateSalary={updateSalary}
         />
       </div>
     </div>
