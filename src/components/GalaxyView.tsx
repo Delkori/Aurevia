@@ -323,6 +323,8 @@ export default function GalaxyView({
   };
 
   const isOverBudget = salary > 0 && totalExpenseFlows > salary;
+  const budgetRatio = salary > 0 ? totalExpenseFlows / salary : 0; // 0..1+ (1+ = deficit)
+  const isWarning = budgetRatio > 0.8 && budgetRatio <= 1; // approaching limit
   const tauxEpargne = salary > 0 ? Math.round((salary - totalExpenseFlows) / salary * 100) : 0;
 
   return (
@@ -415,8 +417,8 @@ export default function GalaxyView({
             <filter id="glow-strong" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="6" result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
             <filter id="turb-lava"><feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="3" seed="5"><animate attributeName="seed" values="1;20;1" dur="2s" repeatCount="indefinite" /></feTurbulence><feDisplacementMap in="SourceGraphic" scale="6" /></filter>
             <filter id="turb-water"><feTurbulence type="fractalNoise" baseFrequency="0.015" numOctaves="3" seed="7"><animate attributeName="baseFrequency" values="0.015;0.025;0.015" dur="5s" repeatCount="indefinite" /></feTurbulence><feDisplacementMap in="SourceGraphic" scale="4" /></filter>
-            <filter id="terrain" x="-10%" y="-10%" width="120%" height="120%"><feTurbulence type="fractalNoise" baseFrequency="0.06" numOctaves="4" seed="12" /><feColorMatrix type="saturate" values="0.3" /><feBlend in="SourceGraphic" mode="overlay" /></filter>
-            <filter id="clouds" x="-10%" y="-10%" width="120%" height="120%"><feTurbulence type="fractalNoise" baseFrequency="0.03" numOctaves="2" seed="42" result="t" /><feColorMatrix in="t" type="matrix" values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.15 0" result="c" /><feComposite in="c" in2="SourceGraphic" operator="atop" /></filter>
+            <filter id="terrain" x="0%" y="0%" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency="0.045" numOctaves="5" seed="12" result="noise" /><feComponentTransfer in="noise" result="soft"><feFuncA type="gamma" amplitude="0.5" exponent="2" offset="0" /></feComponentTransfer><feComposite in="SourceGraphic" in2="soft" operator="arithmetic" k1="1.2" k2="0.3" k3="0" k4="0" /></filter>
+            <filter id="clouds" x="0%" y="0%" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency="0.025 0.04" numOctaves="3" seed="42" result="t"><animate attributeName="seed" values="42;44;42" dur="8s" repeatCount="indefinite" /></feTurbulence><feComponentTransfer in="t" result="tc"><feFuncA type="discrete" tableValues="0 0 0 0 0.1 0.25 0.35" /></feComponentTransfer><feColorMatrix in="tc" type="matrix" values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.5 0" result="c" /><feComposite in="c" in2="SourceGraphic" operator="atop" /></filter>
             <filter id="circuits" x="-10%" y="-10%" width="120%" height="120%"><feTurbulence type="turbulence" baseFrequency="0.08" numOctaves="2" seed="99" /><feColorMatrix type="luminanceToAlpha" /><feComponentTransfer><feFuncA type="discrete" tableValues="0 0 0 0.12 0.25" /></feComponentTransfer><feFlood floodColor="#00ffe0" floodOpacity="1" result="c" /><feComposite in="c" operator="in" /><feComposite in2="SourceGraphic" /></filter>
 
             <radialGradient id="sph-center" cx="35%" cy="28%" r="65%"><stop offset="0%" stopColor="#fff4cc" /><stop offset="15%" stopColor="#ffe88a" /><stop offset="35%" stopColor="#e0a830" /><stop offset="60%" stopColor="#c07018" /><stop offset="100%" stopColor="#3a1800" /></radialGradient>
@@ -471,19 +473,112 @@ export default function GalaxyView({
               return <g key={n.id} className="nd" transform={`translate(${n.x},${n.y})`} style={{ cursor: "pointer" }}
                 onPointerDown={onNodeDown(n.id)} onClick={e => { e.stopPropagation(); handleClick(n, e as unknown as React.MouseEvent); }}>
 
-                {n.kind === "center" && <><circle r={n.r + 25} fill="url(#glow-center)" /><circle r={n.r} fill="url(#sph-center)" filter="url(#glow-strong)" /><circle r={n.r} fill="url(#sph-hl)" /><text y={-5} textAnchor="middle" fontSize={12} fontWeight={600} fill="#fff" style={ts}>Patrimoine</text><text y={12} textAnchor="middle" fontSize={10} fill="rgba(255,230,160,0.9)">{formatMoney(grandTotal)}</text></>}
+                {n.kind === "center" && (() => {
+                  const R = n.r;
+                  const bob = Math.sin(t * 1.5) * 1.2; // gentle breathing animation
+                  return <>
+                    <circle r={R + 25} fill="url(#glow-center)" />
+                    <circle r={R} fill="url(#sph-center)" filter="url(#glow-strong)" />
+                    <circle r={R} fill="url(#sph-hl)" />
 
-                {n.kind === "salary" && <><circle r={n.r + 3} fill="none" stroke="rgba(100,255,150,0.08)" /><circle r={n.r} fill="url(#sph-salary)" filter="url(#terrain)" /><circle r={n.r} fill="url(#salary-land)" /><circle r={n.r} fill="url(#sph-salary)" filter="url(#clouds)" opacity={0.5} /><circle r={n.r} fill="url(#sph-hl)" /><g clipPath="url(#clip-sal)">{Array.from({ length: 18 }, (_, i) => <line key={i} x1={-n.r + 3 + i * 3.5} y1={n.r - 1} x2={-n.r + 3 + i * 3.5 + (i % 2 ? 1 : -1)} y2={n.r - 1 - (3 + (i * 7 % 7))} stroke="#30e060" strokeWidth={1.3} strokeLinecap="round" opacity={0.4 + (i % 3) * 0.2} />)}</g><text y={-5} textAnchor="middle" fontSize={11} fontWeight={600} fill="#fff" style={ts}>Salaire</text><text y={9} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.75)">{formatMoney(salary)}/mois</text></>}
+                    {/* ── Little astronaut standing on top ── */}
+                    <g transform={`translate(0, ${-R - 16 + bob})`}>
+                      {/* Legs */}
+                      <line x1={-2.5} y1={8} x2={-3} y2={14} stroke="#e8e8ee" strokeWidth={2.2} strokeLinecap="round" />
+                      <line x1={2.5} y1={8} x2={3} y2={14} stroke="#e8e8ee" strokeWidth={2.2} strokeLinecap="round" />
+                      {/* Body */}
+                      <rect x={-4} y={-2} width={8} height={11} rx={3} fill="#f0f0f5" stroke="#c8c8d5" strokeWidth={0.5} />
+                      {/* Backpack */}
+                      <rect x={-5.5} y={0} width={2.5} height={7} rx={1} fill="#b8b8c8" />
+                      {/* Arms (crossed pose) */}
+                      <line x1={-4} y1={2} x2={2} y2={4.5} stroke="#e8e8ee" strokeWidth={2} strokeLinecap="round" />
+                      <line x1={4} y1={2} x2={-2} y2={4.5} stroke="#e8e8ee" strokeWidth={2} strokeLinecap="round" />
+                      {/* Helmet */}
+                      <circle cy={-6} r={5} fill="#f5f5fa" stroke="#c8c8d5" strokeWidth={0.6} />
+                      {/* Visor */}
+                      <ellipse cx={0.5} cy={-6} rx={3.2} ry={2.8} fill="#2a3550" />
+                      <ellipse cx={-0.5} cy={-7} rx={1} ry={0.7} fill="rgba(255,255,255,0.5)" />
+                      {/* Antenna */}
+                      <line x1={0} y1={-11} x2={0} y2={-13.5} stroke="#c8c8d5" strokeWidth={0.7} />
+                      <circle cy={-14} r={0.9} fill="#ff5555" opacity={0.6 + Math.sin(t * 4) * 0.4} />
+                    </g>
 
-                {n.kind === "expenses" && <>{isOverBudget && <circle r={n.r + 16} fill="url(#glow-lava)" />}{isOverBudget && <circle r={n.r + 6} fill="none" stroke="#ff4500" strokeOpacity={0.3} strokeDasharray="2 3" />}<circle r={n.r} fill={isOverBudget ? "url(#sph-lava)" : "url(#sph-expenses)"} />{isOverBudget && <><circle r={n.r} fill="url(#sph-lava)" filter="url(#turb-lava)" opacity={0.5} /><circle r={n.r} fill="url(#lava-cracks)" /></>}<circle r={n.r} fill="url(#sph-hl)" /><text y={-5} textAnchor="middle" fontSize={10} fontWeight={600} fill="#fff" style={ts}>Dépenses</text><text y={9} textAnchor="middle" fontSize={9} fill={isOverBudget ? "#ffaa70" : "rgba(255,255,255,0.7)"}>{totalExpenseFlows > 0 ? formatMoney(totalExpenseFlows) : "0 €"}/m</text>{isOverBudget && <text y={22} textAnchor="middle" fontSize={8} fill="#ff6b35" fontWeight={600}>ALERTE</text>}</>}
+                    <text y={-3} textAnchor="middle" fontSize={12} fontWeight={600} fill="#fff" style={ts}>Patrimoine</text>
+                    <text y={13} textAnchor="middle" fontSize={10} fill="rgba(255,230,160,0.9)">{formatMoney(grandTotal)}</text>
+                  </>;
+                })()}
+
+                {n.kind === "salary" && <><clipPath id={`cp-${n.id}`}><circle r={n.r} /></clipPath><circle r={n.r + 3} fill="none" stroke="rgba(100,255,150,0.08)" /><circle r={n.r} fill="url(#sph-salary)" /><g clipPath={`url(#cp-${n.id})`}><circle r={n.r} fill="url(#sph-salary)" filter="url(#terrain)" /><circle r={n.r} fill="url(#salary-land)" /><circle r={n.r} fill="url(#sph-salary)" filter="url(#clouds)" opacity={0.4} /></g><circle r={n.r} fill="url(#sph-hl)" /><g clipPath="url(#clip-sal)">{Array.from({ length: 18 }, (_, i) => <line key={i} x1={-n.r + 3 + i * 3.5} y1={n.r - 1} x2={-n.r + 3 + i * 3.5 + (i % 2 ? 1 : -1)} y2={n.r - 1 - (3 + (i * 7 % 7))} stroke="#30e060" strokeWidth={1.3} strokeLinecap="round" opacity={0.4 + (i % 3) * 0.2} />)}</g><text y={-5} textAnchor="middle" fontSize={11} fontWeight={600} fill="#fff" style={ts}>Salaire</text><text y={9} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.75)">{formatMoney(salary)}/mois</text></>}
+
+                {n.kind === "expenses" && (() => {
+                  const R = n.r;
+                  return <>
+                    {/* Heat glow */}
+                    {isOverBudget && <circle r={R + 20 + Math.sin(t * 3) * 4} fill="url(#glow-lava)" />}
+                    {isWarning && <circle r={R + 10} fill="url(#glow-lava)" opacity={0.4} />}
+                    {/* Planet body */}
+                    <circle r={R} fill={isOverBudget ? "url(#sph-lava)" : "url(#sph-expenses)"} />
+                    {/* Bubbling lava surface */}
+                    {isOverBudget && <>
+                      <clipPath id={`cp-lava-${n.id}`}><circle r={R} /></clipPath>
+                      <g clipPath={`url(#cp-lava-${n.id})`}>
+                        <circle r={R} fill="url(#sph-lava)" filter="url(#turb-lava)" opacity={0.6} />
+                        {/* Lava cracks pulsing */}
+                        {Array.from({ length: 5 }, (_, i) => {
+                          const a1 = (i * 72 + t * 8) * Math.PI / 180;
+                          const a2 = a1 + 0.6;
+                          return <path key={`crack-${i}`}
+                            d={`M ${Math.cos(a1) * R * 0.3} ${Math.sin(a1) * R * 0.3} Q ${Math.cos((a1 + a2) / 2) * R * 0.7} ${Math.sin((a1 + a2) / 2) * R * 0.7} ${Math.cos(a2) * R * 0.95} ${Math.sin(a2) * R * 0.95}`}
+                            stroke="#ff6600" strokeWidth={1 + Math.sin(t * 4 + i) * 0.5} fill="none" opacity={0.5 + Math.sin(t * 3 + i * 2) * 0.3} />;
+                        })}
+                      </g>
+                      <circle r={R} fill="url(#lava-cracks)" />
+                    </>}
+                    <circle r={R} fill="url(#sph-hl)" />
+
+                    {/* ── ERUPTION: fire particles ── */}
+                    {isOverBudget && Array.from({ length: 12 }, (_, i) => {
+                      const phase = (t * 0.8 + i * 0.35) % 1;
+                      const ang = -Math.PI / 2 + (Math.sin(i * 7.3) * 0.9);
+                      const dist = R + phase * 45;
+                      const px = Math.cos(ang) * dist + Math.sin(t * 2 + i) * 6 * phase;
+                      const py = Math.sin(ang) * dist - phase * 15;
+                      const sz = (1 - phase) * 3 + 0.5;
+                      const cols = ["#ff6600", "#ff4400", "#ffaa00", "#ff2200"];
+                      return <circle key={`fire-${i}`} cx={px} cy={py} r={sz} fill={cols[i % 4]} opacity={(1 - phase) * 0.8} />;
+                    })}
+                    {/* Smoke plumes */}
+                    {isOverBudget && Array.from({ length: 6 }, (_, i) => {
+                      const phase = (t * 0.3 + i * 0.5) % 1;
+                      const px = Math.sin(t * 0.8 + i * 2) * 10 * phase;
+                      const py = -R - phase * 55;
+                      return <circle key={`smoke-${i}`} cx={px} cy={py} r={3 + phase * 9} fill="#555" opacity={(1 - phase) * 0.25} filter="url(#gl)" />;
+                    })}
+                    {/* Lava projections (arcs) */}
+                    {isOverBudget && Array.from({ length: 4 }, (_, i) => {
+                      const phase = (t * 0.6 + i * 0.25) % 1;
+                      const dir = i % 2 === 0 ? 1 : -1;
+                      const px = dir * phase * 35;
+                      const py = -R * 0.7 - Math.sin(phase * Math.PI) * 30;
+                      return <circle key={`proj-${i}`} cx={px} cy={py} r={1.8 - phase} fill="#ff5500" opacity={1 - phase} />;
+                    })}
+                    {/* Warning shake effect on text */}
+                    <g transform={isOverBudget ? `translate(${Math.sin(t * 20) * 0.8},0)` : undefined}>
+                      <text y={-5} textAnchor="middle" fontSize={10} fontWeight={600} fill="#fff" style={ts}>Dépenses</text>
+                      <text y={9} textAnchor="middle" fontSize={9} fill={isOverBudget ? "#ffaa70" : isWarning ? "#ffd280" : "rgba(255,255,255,0.7)"}>{totalExpenseFlows > 0 ? formatMoney(totalExpenseFlows) : "0 €"}/m</text>
+                      {isOverBudget && <text y={24} textAnchor="middle" fontSize={9} fill="#ff6b35" fontWeight={700} opacity={0.6 + Math.sin(t * 6) * 0.4}>DÉFICIT</text>}
+                      {isWarning && <text y={22} textAnchor="middle" fontSize={8} fill="#ffb84d" fontWeight={600}>{Math.round(budgetRatio * 100)}% du budget</text>}
+                    </g>
+                  </>;
+                })()}
 
                 {n.kind === "expense-item" && <><circle r={n.r} fill="rgba(248,113,113,0.1)" stroke="rgba(248,113,113,0.2)" strokeWidth={0.5} /><text y={-1} textAnchor="middle" fontSize={8} fill="rgba(255,255,255,0.65)">{n.label.length > 10 ? n.label.slice(0, 9) + "…" : n.label}</text><text y={8} textAnchor="middle" fontSize={7} fill="rgba(248,113,113,0.75)">{n.sub}</text></>}
 
                 {n.kind === "reste" && <><circle r={n.r} fill="url(#sph-reste)" /><circle r={n.r} fill="url(#sph-hl)" /><text y={-4} textAnchor="middle" fontSize={10} fontWeight={500} fill="#e0d8ff">Reste</text><text y={9} textAnchor="middle" fontSize={9} fill="rgba(200,185,255,0.8)">{formatMoney(resteAInvestir)}/m</text></>}
 
-                {n.kind === "portfolio" && <><circle r={n.r + 5} fill={`url(#atmo-${n.id})`} /><circle r={n.r} fill={`url(#sph-${n.id})`} filter="url(#terrain)" /><circle r={n.r} fill={`url(#sph-${n.id})`} opacity={0.5} filter="url(#clouds)" /><circle r={n.r} fill="url(#sph-hl)" stroke={n.color} strokeOpacity={isExp ? 0.35 : 0.1} strokeWidth={isExp ? 1.5 : 0.5} /><text y={-6} textAnchor="middle" fontSize={11} fontWeight={600} fill="#fff" style={ts}>{n.label}</text><text y={9} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.7)">{n.sub}</text>{(n.gainVal ?? 0) !== 0 && <text y={22} textAnchor="middle" fontSize={8} fill={(n.gainVal ?? 0) >= 0 ? "#34d399" : "#fb7185"}>{(n.gainVal ?? 0) >= 0 ? "+" : ""}{formatMoney(n.gainVal ?? 0)}</text>}</>}
+                {n.kind === "portfolio" && <><clipPath id={`cp-${n.id}`}><circle r={n.r} /></clipPath><circle r={n.r + 5} fill={`url(#atmo-${n.id})`} /><circle r={n.r} fill={`url(#sph-${n.id})`} /><g clipPath={`url(#cp-${n.id})`}><circle r={n.r} fill={`url(#sph-${n.id})`} filter="url(#terrain)" opacity={0.7} /><circle r={n.r} fill={`url(#sph-${n.id})`} opacity={0.35} filter="url(#clouds)" /></g><circle r={n.r} fill="url(#sph-hl)" stroke={n.color} strokeOpacity={isExp ? 0.35 : 0.1} strokeWidth={isExp ? 1.5 : 0.5} /><text y={-6} textAnchor="middle" fontSize={11} fontWeight={600} fill="#fff" style={ts}>{n.label}</text><text y={9} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.7)">{n.sub}</text>{(n.gainVal ?? 0) !== 0 && <text y={22} textAnchor="middle" fontSize={8} fill={(n.gainVal ?? 0) >= 0 ? "#34d399" : "#fb7185"}>{(n.gainVal ?? 0) >= 0 ? "+" : ""}{formatMoney(n.gainVal ?? 0)}</text>}</>}
 
-                {n.kind === "goal" && <><circle r={n.r + 5} fill={`url(#atmo-${n.id})`} /><circle r={n.r + 3} fill="none" stroke={n.color} strokeOpacity={0.1} strokeDasharray="3 4" /><circle r={n.r} fill={`url(#sph-${n.id})`} filter="url(#terrain)" />{(n.color === "#fb923c" || n.color === "#fbbf24") && <><clipPath id={`clip-${n.id}`}><circle r={n.r} /></clipPath><g clipPath={`url(#clip-${n.id})`}><ellipse cx={0} cy={n.r * 0.55} rx={n.r * 0.9} ry={5} fill="#f5d280" opacity={0.35} /><ellipse cx={0} cy={n.r * 0.7} rx={n.r} ry={4} fill="#2898d4" opacity={0.2} filter="url(#turb-water)" /></g></>}<circle r={n.r} fill="url(#sph-hl)" />{(gp ?? 0) >= 1 && <circle r={n.r + 6} fill="none" stroke="#34d399" strokeOpacity={0.45} strokeWidth={1.5} />}<text y={-4} textAnchor="middle" fontSize={10} fontWeight={600} fill="#fff" style={ts}>{n.label.length > 12 ? n.label.slice(0, 11) + "…" : n.label}</text><text y={10} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.7)">{n.sub}</text></>}
+                {n.kind === "goal" && <><clipPath id={`cp-${n.id}`}><circle r={n.r} /></clipPath><circle r={n.r + 5} fill={`url(#atmo-${n.id})`} /><circle r={n.r + 3} fill="none" stroke={n.color} strokeOpacity={0.1} strokeDasharray="3 4" /><circle r={n.r} fill={`url(#sph-${n.id})`} /><g clipPath={`url(#cp-${n.id})`}><circle r={n.r} fill={`url(#sph-${n.id})`} filter="url(#terrain)" opacity={0.6} /></g>{(n.color === "#fb923c" || n.color === "#fbbf24") && <><clipPath id={`clip-${n.id}`}><circle r={n.r} /></clipPath><g clipPath={`url(#clip-${n.id})`}><ellipse cx={0} cy={n.r * 0.55} rx={n.r * 0.9} ry={5} fill="#f5d280" opacity={0.35} /><ellipse cx={0} cy={n.r * 0.7} rx={n.r} ry={4} fill="#2898d4" opacity={0.2} filter="url(#turb-water)" /></g></>}<circle r={n.r} fill="url(#sph-hl)" />{(gp ?? 0) >= 1 && <circle r={n.r + 6} fill="none" stroke="#34d399" strokeOpacity={0.45} strokeWidth={1.5} />}<text y={-4} textAnchor="middle" fontSize={10} fontWeight={600} fill="#fff" style={ts}>{n.label.length > 12 ? n.label.slice(0, 11) + "…" : n.label}</text><text y={10} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.7)">{n.sub}</text></>}
 
                 {n.kind === "asset" && (() => {
                   const isPos = (n.gainVal ?? 0) >= 0;
