@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Wallet, Atom, Clock, Receipt, LineChart } from "lucide-react";
+import { LayoutDashboard, Wallet, Atom, Clock, Receipt, LineChart, Settings } from "lucide-react";
 
 const links = [
   { href: "/", label: "Vue d'ensemble", icon: LayoutDashboard },
@@ -11,6 +11,7 @@ const links = [
   { href: "/timeline", label: "Timeline", icon: Clock },
   { href: "/budget", label: "Budget", icon: Receipt },
   { href: "/projection", label: "Projection", icon: LineChart },
+  { href: "/settings", label: "Paramètres", icon: Settings },
 ];
 
 export default function Sidebar() {

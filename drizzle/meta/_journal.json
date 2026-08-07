@@ -29,6 +29,13 @@
       "when": 1786090891588,
       "tag": "0003_volatile_maximus",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786095157735,
+      "tag": "0004_brief_leper_queen",
+      "breakpoints": true
     }
   ]
 }

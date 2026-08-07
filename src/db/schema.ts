@@ -8,53 +8,84 @@ import {
   integer,
 } from "drizzle-orm/pg-core";
 
-// Portefeuille (PEA, CTO, Assurance-vie, Crypto...) qui regroupe des actifs
+// ── Membres du foyer ─────────────────────────────────────────────────────────
+export const members = pgTable("members", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  role: text("role").notNull().default("owner"), // owner | spouse | child | other
+  color: text("color").notNull().default("#7c6af5"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// ── Portefeuilles ────────────────────────────────────────────────────────────
 export const portfolios = pgTable("portfolios", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   color: text("color").notNull().default("#8a5cf5"),
+  memberId: integer("member_id").references(() => members.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-// Un actif détenu : action/ETF (avec ticker => cours en direct),
-// ou un actif "manuel" (immobilier, cash, autre) dont on saisit la valeur à la main.
+// ── Actifs ────────────────────────────────────────────────────────────────────
 export const assets = pgTable("assets", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
-  type: text("type").notNull(), // "stock" | "etf" | "crypto" | "real_estate" | "cash" | "other"
-  ticker: text("ticker"), // symbole Yahoo Finance, ex: "AAPL", "BTC-USD", "CW8.PA"
-  quantity: numeric("quantity"), // pour actions/etf/crypto
-  avgBuyPrice: numeric("avg_buy_price"), // prix de revient moyen, pour calculer la plus-value
-  manualValue: numeric("manual_value"), // pour immobilier / cash / autre
-  yieldRate: numeric("yield_rate"), // rendement annuel en %, ex: SCPI
+  type: text("type").notNull(),
+  ticker: text("ticker"),
+  quantity: numeric("quantity"),
+  avgBuyPrice: numeric("avg_buy_price"),
+  manualValue: numeric("manual_value"),
+  yieldRate: numeric("yield_rate"),
   currency: text("currency").notNull().default("EUR"),
-  portfolioId: integer("portfolio_id").references(() => portfolios.id, {
-    onDelete: "set null",
-  }),
+  portfolioId: integer("portfolio_id").references(() => portfolios.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
-// Objectifs de patrimoine (ex: "Atteindre 100 000 € d'ici 2027")
+// ── Objectifs ─────────────────────────────────────────────────────────────────
 export const goals = pgTable("goals", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   targetAmount: numeric("target_amount").notNull(),
   targetDate: date("target_date"),
   color: text("color").notNull().default("#8a5cf5"),
+  memberId: integer("member_id").references(() => members.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-// Catégories de budget (revenus / dépenses)
+// ── Flux financiers ──────────────────────────────────────────────────────────
+// Un flux représente un transfert récurrent entre deux entités
+// sourceType/targetType : "salary" | "portfolio" | "goal" | "expense" | "external"
+export const flows = pgTable("flows", {
+  id: serial("id").primaryKey(),
+  name: text("name"),
+  sourceType: text("source_type").notNull(),
+  sourceId: integer("source_id"), // null si salary
+  targetType: text("target_type").notNull(),
+  targetId: integer("target_id"),
+  amount: numeric("amount").notNull(),
+  frequency: text("frequency").notNull().default("monthly"), // monthly | weekly | yearly | once
+  memberId: integer("member_id").references(() => members.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// ── Paramètres (clé-valeur) ──────────────────────────────────────────────────
+export const settings = pgTable("settings", {
+  id: serial("id").primaryKey(),
+  key: text("key").notNull().unique(),
+  value: text("value").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// ── Budget ────────────────────────────────────────────────────────────────────
 export const budgetCategories = pgTable("budget_categories", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
-  kind: text("kind").notNull(), // "income" | "expense"
-  monthlyTarget: numeric("monthly_target"), // objectif mensuel (budget)
+  kind: text("kind").notNull(),
+  monthlyTarget: numeric("monthly_target"),
   color: text("color").notNull().default("#999999"),
 });
 
-// Lignes de dépenses/revenus
 export const budgetEntries = pgTable("budget_entries", {
   id: serial("id").primaryKey(),
   categoryId: integer("category_id")
@@ -66,15 +97,15 @@ export const budgetEntries = pgTable("budget_entries", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-// Crédit / prêt (ex: emprunt immobilier), rattaché optionnellement à un actif
+// ── Crédits / Prêts ──────────────────────────────────────────────────────────
 export const loans = pgTable("loans", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   assetId: integer("asset_id").references(() => assets.id, { onDelete: "set null" }),
-  principal: numeric("principal").notNull(), // montant emprunté initial
-  remainingBalance: numeric("remaining_balance").notNull(), // capital restant dû
-  interestRate: numeric("interest_rate"), // taux annuel, en %
-  monthlyPayment: numeric("monthly_payment"), // mensualité
+  principal: numeric("principal").notNull(),
+  remainingBalance: numeric("remaining_balance").notNull(),
+  interestRate: numeric("interest_rate"),
+  monthlyPayment: numeric("monthly_payment"),
   startDate: date("start_date"),
   endDate: date("end_date"),
   currency: text("currency").notNull().default("EUR"),
@@ -82,7 +113,7 @@ export const loans = pgTable("loans", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
-// Historique du patrimoine net, pour tracer la courbe dans le temps
+// ── Historique patrimoine net ─────────────────────────────────────────────────
 export const netWorthSnapshots = pgTable("net_worth_snapshots", {
   id: serial("id").primaryKey(),
   date: date("date").notNull(),

@@ -19,6 +19,7 @@ export async function PUT(
         targetAmount: body.targetAmount,
         targetDate: body.targetDate || null,
         color: body.color || "#8a5cf5",
+        memberId: body.memberId ?? null,
       })
       .where(eq(goals.id, Number(id)))
       .returning();

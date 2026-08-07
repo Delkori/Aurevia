@@ -23,6 +23,7 @@ export async function POST(req: NextRequest) {
         targetAmount: body.targetAmount,
         targetDate: body.targetDate || null,
         color: body.color || "#8a5cf5",
+        memberId: body.memberId || null,
       })
       .returning();
 
