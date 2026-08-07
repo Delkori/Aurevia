@@ -77,6 +77,7 @@ export default function GalaxyView({
   const nodesMapRef = useRef<Map<string, GNode>>(new Map());
   const [, setTick] = useState(0);
   const [dragId, setDragId] = useState<string | null>(null);
+  const [snapTarget, setSnapTarget] = useState<string | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const zoomRef = useRef<{ k: number; x: number; y: number }>({ k: 1, x: 0, y: 0 });
   const rootRef = useRef<SVGGElement | null>(null);
@@ -164,8 +165,9 @@ export default function GalaxyView({
       if (expanded.has(g.key)) {
         const maxAV = Math.max(1, ...g.valued.map(v => v.value));
         for (const v of g.valued) {
-          const gn = gain(v.asset, v.asset.ticker ? quotes[v.asset.ticker] : null);
-          nodes.push({ id: `a-${v.asset.id}`, kind: "asset", label: v.asset.name, r: sr(v.value, maxAV, 10, 28), color: g.portfolio.color, portfolioKey: g.key, assetId: v.asset.id, gainVal: gn, sub: formatMoney(v.value) });
+          const gn = (v.asset.avgBuyPrice && Number(v.asset.avgBuyPrice) > 0) ? gain(v.asset, v.asset.ticker ? quotes[v.asset.ticker] : null) : 0;
+          const hasGain = v.asset.avgBuyPrice && Number(v.asset.avgBuyPrice) > 0;
+          nodes.push({ id: `a-${v.asset.id}`, kind: "asset", label: v.asset.name, r: sr(v.value, maxAV, 10, 28), color: g.portfolio.color, portfolioKey: g.key, assetId: v.asset.id, gainVal: hasGain ? gn : undefined, sub: formatMoney(v.value) });
           links.push({ source: pid, target: `a-${v.asset.id}` });
         }
       }
@@ -270,8 +272,23 @@ export default function GalaxyView({
       if (!node) return;
       const svg = svgRef.current!;
       const rect = svg.getBoundingClientRect(), z = zoomRef.current;
-      node.fx = ((e.clientX - rect.left) / rect.width * W - z.x) / z.k;
-      node.fy = ((e.clientY - rect.top) / rect.height * H - z.y) / z.k;
+      const mx = ((e.clientX - rect.left) / rect.width * W - z.x) / z.k;
+      const my = ((e.clientY - rect.top) / rect.height * H - z.y) / z.k;
+      node.fx = mx;
+      node.fy = my;
+
+      // Magnetic snap detection — only for assets dragged near portfolios
+      if (node.kind === "asset" && node.assetId != null) {
+        let closest: string | null = null;
+        let closestDist = 80; // snap radius
+        nodesMapRef.current.forEach((pn) => {
+          if (pn.kind !== "portfolio" || pn.portfolioKey === node.portfolioKey) return;
+          const dx = (pn.x ?? 0) - mx, dy = (pn.y ?? 0) - my;
+          const dist = Math.sqrt(dx * dx + dy * dy) - pn.r;
+          if (dist < closestDist) { closestDist = dist; closest = pn.id; }
+        });
+        setSnapTarget(closest);
+      }
       return;
     }
     if (!panState.current?.active) return;
@@ -283,9 +300,19 @@ export default function GalaxyView({
   const onBgUp = () => {
     if (dragId) {
       const node = nodesMapRef.current.get(dragId);
+
+      // Magnetic snap — reassign asset to new portfolio
+      if (node?.kind === "asset" && node.assetId != null && snapTarget) {
+        const targetNode = nodesMapRef.current.get(snapTarget);
+        if (targetNode?.kind === "portfolio" && targetNode.portfolioKey !== undefined && targetNode.portfolioKey !== "unassigned") {
+          actions.updateAsset(node.assetId, { portfolioId: targetNode.portfolioKey as number });
+        }
+      }
+
       if (node && node.x != null && node.y != null) setNodePosition(dragId, { x: node.x, y: node.y });
       simRef.current?.alphaTarget(0);
       setDragId(null);
+      setSnapTarget(null);
     }
     panState.current = null;
   };
@@ -592,6 +619,15 @@ export default function GalaxyView({
               return <circle key={`dot-${s.id}-${tg.id}`} cx={(s.x ?? 0) + ((tg.x ?? 0) - (s.x ?? 0)) * p} cy={(s.y ?? 0) + ((tg.y ?? 0) - (s.y ?? 0)) * p} r={2} fill={tg.color} opacity={0.5} filter="url(#gl)" />;
             })}
 
+            {/* Magnetic snap halo */}
+            {snapTarget && (() => {
+              const tg = nodeById.get(snapTarget);
+              if (!tg || tg.x == null) return null;
+              return <circle cx={tg.x} cy={tg.y} r={tg.r + 20} fill="none" stroke="#9585ff" strokeOpacity={0.5} strokeWidth={2} strokeDasharray="4 3">
+                <animate attributeName="r" values={`${tg.r + 15};${tg.r + 22};${tg.r + 15}`} dur="0.8s" repeatCount="indefinite" />
+              </circle>;
+            })()}
+
             {/* Nodes */}
             {nodes.map(n => renderNode(n))}
           </g>
@@ -602,7 +638,7 @@ export default function GalaxyView({
       </div>
 
       {/* ── Panel ── */}
-      <NodePanel selected={selected} loans={loans} portfolios={portfolios} members={members} goals={goals} flows={flows} actions={actions} onClear={() => setSelected(null)} createMode={createMode} setCreateMode={setCreateMode} salary={salary} onUpdateSalary={onUpdateSalary} />
+      <NodePanel selected={selected} loans={loans} portfolios={portfolios} members={members} goals={goals} flows={flows} actions={actions} onClear={() => setSelected(null)} createMode={createMode} setCreateMode={setCreateMode} salary={salary} onUpdateSalary={onUpdateSalary} groups={groups.map(g => ({ key: g.key, total: g.total, valued: g.valued }))} grossTotal={grossTotal} debt={debt} />
     </div>
   );
 }

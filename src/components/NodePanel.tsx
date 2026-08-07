@@ -81,9 +81,9 @@ function PortfolioForm({ initial, members, onSubmit, onDelete, onCancel }:
 }
 
 // ── Asset Form ───────────────────────────────────────────────────────────────
-function AssetForm({ initial, portfolios, onSubmit, onDelete, onCancel }:
-  { initial?: Asset; portfolios: Portfolio[]; onSubmit: (d: Record<string, unknown>) => void; onDelete?: () => void; onCancel: () => void }) {
-  const [f, setF] = useState({ name: initial?.name ?? "", type: initial?.type ?? "stock", ticker: initial?.ticker ?? "", quantity: initial?.quantity ?? "", avgBuyPrice: initial?.avgBuyPrice ?? "", manualValue: initial?.manualValue ?? "", yieldRate: initial?.yieldRate ?? "", currency: initial?.currency ?? "EUR", portfolioId: initial?.portfolioId ? String(initial.portfolioId) : "" });
+function AssetForm({ initial, portfolios, defaultPortfolioId, onSubmit, onDelete, onCancel }:
+  { initial?: Asset; portfolios: Portfolio[]; defaultPortfolioId?: number; onSubmit: (d: Record<string, unknown>) => void; onDelete?: () => void; onCancel: () => void }) {
+  const [f, setF] = useState({ name: initial?.name ?? "", type: initial?.type ?? "stock", ticker: initial?.ticker ?? "", quantity: initial?.quantity ?? "", avgBuyPrice: initial?.avgBuyPrice ?? "", manualValue: initial?.manualValue ?? "", yieldRate: initial?.yieldRate ?? "", currency: initial?.currency ?? "EUR", portfolioId: initial?.portfolioId ? String(initial.portfolioId) : defaultPortfolioId ? String(defaultPortfolioId) : "" });
   const nt = TYPES_WITH_TICKER.has(f.type);
   function payload() {
     return { name: f.name, type: f.type, ticker: nt ? f.ticker || null : null, quantity: nt ? f.quantity || null : null, avgBuyPrice: nt ? f.avgBuyPrice || null : null, manualValue: nt ? null : f.manualValue || null, yieldRate: YIELD_TYPES.has(f.type) ? f.yieldRate || null : null, currency: f.currency, portfolioId: f.portfolioId ? Number(f.portfolioId) : null };
@@ -173,25 +173,70 @@ function SalaryForm({ currentSalary, onSubmit, onCancel }:
 }
 
 // ── Main Panel ───────────────────────────────────────────────────────────────
-export default function NodePanel({ selected, loans, portfolios, members, goals, flows, actions, onClear, createMode, setCreateMode, salary, onUpdateSalary }:
-  { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void> }) {
+export default function NodePanel({ selected, loans, portfolios, members, goals, flows, actions, onClear, createMode, setCreateMode, salary, onUpdateSalary, groups, grossTotal, debt }:
+  { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number }) {
 
   useEffect(() => { setCreateMode(null); }, [selected]); // eslint-disable-line
 
   const clear = () => { setCreateMode(null); onClear(); };
-  const debt = loans.reduce((s, l) => s + Number(l.remainingBalance || 0), 0);
 
   return (
     <div className="bg-surface/40 border-l border-border p-5 space-y-3 overflow-y-auto">
 
       {createMode === "portfolio" && <PortfolioForm members={members} onSubmit={async d => { await actions.createPortfolio(d); clear(); }} onCancel={clear} />}
-      {createMode === "asset" && <AssetForm portfolios={portfolios} onSubmit={async d => { await actions.createAsset(d); clear(); }} onCancel={clear} />}
+      {createMode === "asset" && <AssetForm portfolios={portfolios} defaultPortfolioId={selected?.kind === "portfolio" && selected.id !== "unassigned" ? selected.id as number : undefined} onSubmit={async d => { await actions.createAsset(d); clear(); }} onCancel={clear} />}
       {createMode === "goal" && <GoalForm members={members} onSubmit={async d => { await actions.createGoal(d); clear(); }} onCancel={clear} />}
       {createMode === "flow" && <FlowForm portfolios={portfolios} goals={goals} onSubmit={async d => { await actions.createFlow(d); clear(); }} onCancel={clear} />}
 
       {createMode === "salary" && <SalaryForm currentSalary={salary} onSubmit={async v => { await onUpdateSalary(v); clear(); }} onCancel={clear} />}
 
-      {!createMode && !selected && <p className="text-sm text-text-muted">Clique un nœud pour le détail, ou utilise la barre d&apos;outils à gauche.</p>}
+      {!createMode && !selected && (
+        <div className="space-y-3">
+          <h3 className="font-medium font-[family-name:var(--font-heading)] text-sm">Vue d&apos;ensemble</h3>
+          <p className="text-2xl font-[family-name:var(--font-mono-num)] tabular">{formatMoney(grossTotal - debt)}</p>
+          {debt > 0 && <div className="text-xs text-text-muted space-y-0.5">
+            <p className="tabular">{formatMoney(grossTotal)} d&apos;actifs</p>
+            <p className="tabular text-negative">− {formatMoney(debt)} de crédits</p>
+          </div>}
+          {loans.length > 0 && <div className="pt-2 border-t border-border">
+            <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Crédits</p>
+            {loans.map(l => <div key={l.id} className="flex justify-between text-xs py-0.5"><span className="text-text-muted">{l.name}</span><span className="tabular text-negative">{formatMoney(Number(l.remainingBalance))}</span></div>)}
+          </div>}
+          {portfolios.length > 0 && <div className="pt-2 border-t border-border">
+            <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Portefeuilles</p>
+            {portfolios.map(p => {
+              const g = groups.find(gr => gr.key === p.id);
+              return <div key={p.id} className="flex items-center justify-between text-xs py-1">
+                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />{p.name}</span>
+                <span className="tabular">{formatMoney(g?.total ?? 0)}</span>
+              </div>;
+            })}
+          </div>}
+          {goals.length > 0 && <div className="pt-2 border-t border-border">
+            <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Objectifs</p>
+            {goals.map(g => {
+              const prog = Math.min(1, (grossTotal - debt) / Number(g.targetAmount));
+              return <div key={g.id} className="py-1">
+                <div className="flex justify-between text-xs"><span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full shrink-0" style={{ background: g.color }} />{g.name}</span><span className="tabular">{Math.round(prog * 100)}%</span></div>
+                <div className="h-1 rounded bg-border mt-1 overflow-hidden"><div className="h-full rounded" style={{ width: `${Math.min(100, prog * 100)}%`, background: g.color }} /></div>
+              </div>;
+            })}
+          </div>}
+          {flows.length > 0 && <div className="pt-2 border-t border-border">
+            <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Flux mensuels</p>
+            {flows.map(f => {
+              const sName = f.sourceType === "salary" ? "Salaire" : portfolios.find(p => p.id === f.sourceId)?.name || "?";
+              const tName = f.targetType === "portfolio" ? portfolios.find(p => p.id === f.targetId)?.name
+                : f.targetType === "goal" ? goals.find(g => g.id === f.targetId)?.name
+                : f.targetType === "expense" ? (f.name || "Dépense") : "?";
+              return <div key={f.id} className="flex justify-between text-xs py-0.5">
+                <span className="text-text-muted">{sName} → {tName}</span>
+                <span className="tabular text-accent">{formatMoney(Number(f.amount))}</span>
+              </div>;
+            })}
+          </div>}
+        </div>
+      )}
 
       {!createMode && selected?.kind === "total" && (
         <div className="space-y-2">
@@ -222,13 +267,51 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
         </div>
       )}
 
-      {!createMode && selected?.kind === "portfolio" && selected.id !== "unassigned" && (
+      {(!createMode || createMode === "edit-portfolio") && selected?.kind === "portfolio" && selected.id !== "unassigned" && (
         <div className="space-y-3">
-          <PortfolioForm initial={{ name: selected.name, color: selected.color, memberId: selected.memberId }} members={members}
+          {/* Portfolio summary */}
+          <div className="flex items-center gap-2">
+            <span className="w-3 h-3 rounded-full shrink-0" style={{ background: selected.color }} />
+            <h3 className="font-medium font-[family-name:var(--font-heading)] text-sm">{selected.name}</h3>
+          </div>
+          <p className="text-2xl font-[family-name:var(--font-mono-num)] tabular">{formatMoney(selected.total)}</p>
+          <p className="text-xs text-text-muted">{selected.count} actif{selected.count > 1 ? "s" : ""} · {grossTotal > 0 ? Math.round(selected.total / grossTotal * 100) : 0}% du patrimoine</p>
+
+          {/* Quick actions */}
+          <div className="flex gap-2">
+            <Btn variant="accent" className="flex-1" onClick={() => setCreateMode("edit-portfolio")}>Modifier</Btn>
+            <Btn onClick={() => { setCreateMode("asset"); }}>+ Actif</Btn>
+          </div>
+
+          {/* Edit form (hidden by default) */}
+          {createMode === "edit-portfolio" && <PortfolioForm initial={{ name: selected.name, color: selected.color, memberId: selected.memberId }} members={members}
             onSubmit={async d => { await actions.updatePortfolio(selected.id as number, d); clear(); }}
             onDelete={async () => { if (!confirm(`Supprimer "${selected.name}" ?`)) return; await actions.deletePortfolio(selected.id as number); clear(); }}
-            onCancel={clear} />
-          {/* Flux associés */}
+            onCancel={() => setCreateMode(null)} />}
+
+          {/* Assets list */}
+          {(() => {
+            const g = groups.find(gr => gr.key === selected.id);
+            if (!g || g.valued.length === 0) return <p className="text-xs text-text-muted border border-dashed border-border rounded-lg p-4 text-center">Aucun actif. Clique &quot;+ Actif&quot; pour en ajouter.</p>;
+            return <div className="pt-2 border-t border-border">
+              <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Composition</p>
+              {g.valued.sort((a, b) => b.value - a.value).map(v => {
+                const gv = (v.asset.avgBuyPrice && Number(v.asset.avgBuyPrice) > 0) ? v.value - Number(v.asset.quantity || 0) * Number(v.asset.avgBuyPrice) : null;
+                return <div key={v.asset.id} className="flex justify-between items-center text-xs py-1.5 border-b border-border/50 last:border-0">
+                  <div>
+                    <p className="font-medium text-text">{v.asset.name}</p>
+                    <p className="text-[10px] text-text-muted">{ASSET_TYPE_LABELS[v.asset.type]}{v.asset.ticker ? ` · ${v.asset.ticker}` : ""}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="tabular">{formatMoney(v.value)}</p>
+                    {gv !== null && gv !== 0 && <p className={`text-[10px] tabular ${gv >= 0 ? "text-positive" : "text-negative"}`}>{gv >= 0 ? "+" : ""}{formatMoney(gv)}</p>}
+                  </div>
+                </div>;
+              })}
+            </div>;
+          })()}
+
+          {/* Flows */}
           {(() => {
             const incoming = flows.filter(f => f.targetType === "portfolio" && f.targetId === selected.id);
             const outgoing = flows.filter(f => f.sourceType === "portfolio" && f.sourceId === selected.id);
@@ -238,16 +321,16 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
               {incoming.map(f => (
                 <div key={f.id} className="flex items-center justify-between text-xs py-1">
                   <span className="text-text-muted">{f.sourceType === "salary" ? "Salaire" : f.name || "Flux"} →</span>
-                  <span className="tabular text-positive">+{formatMoney(Number(f.amount))}/mois</span>
-                  <button onClick={async () => { if (confirm("Supprimer ce flux ?")) { await actions.deleteFlow(f.id); clear(); } }} className="p-0.5 text-text-muted hover:text-negative"><Trash2 size={11} /></button>
+                  <span className="tabular text-positive">+{formatMoney(Number(f.amount))}/m</span>
+                  <button onClick={async () => { if (confirm("Supprimer ?")) { await actions.deleteFlow(f.id); clear(); } }} className="p-0.5 text-text-muted hover:text-negative"><Trash2 size={10} /></button>
                 </div>
               ))}
               {outgoing.map(f => {
                 const targetName = f.targetType === "goal" ? goals.find(g => g.id === f.targetId)?.name : f.name || "Flux";
                 return <div key={f.id} className="flex items-center justify-between text-xs py-1">
                   <span className="text-text-muted">→ {targetName}</span>
-                  <span className="tabular text-negative">-{formatMoney(Number(f.amount))}/mois</span>
-                  <button onClick={async () => { if (confirm("Supprimer ce flux ?")) { await actions.deleteFlow(f.id); clear(); } }} className="p-0.5 text-text-muted hover:text-negative"><Trash2 size={11} /></button>
+                  <span className="tabular text-negative">-{formatMoney(Number(f.amount))}/m</span>
+                  <button onClick={async () => { if (confirm("Supprimer ?")) { await actions.deleteFlow(f.id); clear(); } }} className="p-0.5 text-text-muted hover:text-negative"><Trash2 size={10} /></button>
                 </div>;
               })}
             </div>;
@@ -268,19 +351,41 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
             onSubmit={async d => { await actions.updateGoal(selected.goal.id, d); clear(); }}
             onDelete={async () => { if (!confirm(`Supprimer "${selected.goal.name}" ?`)) return; await actions.deleteGoal(selected.goal.id); clear(); }}
             onCancel={clear} />
+
+          {/* Funding sources + time estimate */}
           {(() => {
             const incoming = flows.filter(f => f.targetType === "goal" && f.targetId === selected.goal.id);
-            if (incoming.length === 0) return null;
-            return <div className="pt-2 border-t border-border space-y-1">
-              <p className="text-[10px] text-text-muted uppercase tracking-wide">Alimenté par</p>
-              {incoming.map(f => {
-                const srcName = f.sourceType === "salary" ? "Salaire" : portfolios.find(p => p.id === f.sourceId)?.name || f.name || "Flux";
-                return <div key={f.id} className="flex items-center justify-between text-xs py-1">
-                  <span className="text-text-muted">{srcName} →</span>
-                  <span className="tabular text-accent">{formatMoney(Number(f.amount))}/mois</span>
-                  <button onClick={async () => { if (confirm("Supprimer ce flux ?")) { await actions.deleteFlow(f.id); clear(); } }} className="p-0.5 text-text-muted hover:text-negative"><Trash2 size={11} /></button>
-                </div>;
-              })}
+            const totalMonthly = incoming.reduce((s, f) => s + Number(f.amount), 0);
+            const target = Number(selected.goal.targetAmount);
+            const current = grossTotal - debt;
+            const remaining = Math.max(0, target - current);
+            const monthsLeft = totalMonthly > 0 ? Math.ceil(remaining / totalMonthly) : null;
+
+            return <div className="pt-2 border-t border-border space-y-2">
+              {incoming.length > 0 && <>
+                <p className="text-[10px] text-text-muted uppercase tracking-wide">Sources de financement</p>
+                {incoming.map(f => {
+                  const srcName = f.sourceType === "salary" ? "Salaire" : portfolios.find(p => p.id === f.sourceId)?.name || f.name || "Flux";
+                  const pct = totalMonthly > 0 ? Math.round(Number(f.amount) / totalMonthly * 100) : 0;
+                  return <div key={f.id} className="flex items-center justify-between text-xs py-1">
+                    <span>{srcName}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="tabular text-accent">{formatMoney(Number(f.amount))}/m</span>
+                      <span className="text-[10px] text-text-muted">{pct}%</span>
+                      <button onClick={async () => { if (confirm("Supprimer ?")) { await actions.deleteFlow(f.id); clear(); } }} className="p-0.5 text-text-muted hover:text-negative"><Trash2 size={10} /></button>
+                    </div>
+                  </div>;
+                })}
+                <div className="bg-bg rounded-lg px-3 py-2 text-xs space-y-1">
+                  <div className="flex justify-between"><span className="text-text-muted">Versement total</span><span className="tabular text-accent">{formatMoney(totalMonthly)}/mois</span></div>
+                  {selected.progress < 1 && monthsLeft !== null && <div className="flex justify-between">
+                    <span className="text-text-muted">Objectif atteint dans</span>
+                    <span className="tabular">{monthsLeft < 12 ? `${monthsLeft} mois` : `${Math.round(monthsLeft / 12 * 10) / 10} ans`}</span>
+                  </div>}
+                  {selected.progress >= 1 && <p className="text-positive font-medium">Objectif atteint</p>}
+                </div>
+              </>}
+              {incoming.length === 0 && <p className="text-xs text-text-muted">Aucun flux vers cet objectif. Crée un flux pour alimenter cette étoile.</p>}
             </div>;
           })()}
         </div>
