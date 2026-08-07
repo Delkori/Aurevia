@@ -11,8 +11,9 @@ import {
   type Simulation,
   type SimulationNodeDatum,
 } from "d3-force";
-import { formatMoney, formatPercent } from "@/lib/format";
-import { currentValue, gain, gainPercent, ASSET_TYPE_LABELS } from "@/lib/networth";
+import { formatMoney } from "@/lib/format";
+import { currentValue, gain, gainPercent, totalDebt, ASSET_TYPE_LABELS } from "@/lib/networth";
+import NodePanel, { type Selection } from "@/components/NodePanel";
 
 type Asset = {
   id: number;
@@ -22,12 +23,27 @@ type Asset = {
   quantity: string | null;
   avgBuyPrice: string | null;
   manualValue: string | null;
+  yieldRate: string | null;
   currency: string;
   portfolioId: number | null;
 };
 
 type Portfolio = { id: number; name: string; color: string };
+type Goal = { id: number; name: string; targetAmount: string; targetDate: string | null; color: string };
+type Loan = { id: number; name: string; remainingBalance: string; principal: string; interestRate: string | null; monthlyPayment: string | null; assetId: number | null; currency: string };
 type Quote = { price: number; currency: string } | null;
+
+type Actions = {
+  createPortfolio: (data: { name: string; color: string }) => Promise<void>;
+  updatePortfolio: (id: number, data: { name: string; color: string }) => Promise<void>;
+  deletePortfolio: (id: number) => Promise<void>;
+  createAsset: (data: Record<string, unknown>) => Promise<void>;
+  updateAsset: (id: number, data: Record<string, unknown>) => Promise<void>;
+  deleteAsset: (id: number) => Promise<void>;
+  createGoal: (data: { name: string; targetAmount: string; color: string }) => Promise<void>;
+  updateGoal: (id: number, data: { name: string; targetAmount: string; color: string }) => Promise<void>;
+  deleteGoal: (id: number) => Promise<void>;
+};
 
 const WIDTH = 1000;
 const HEIGHT = 620;
@@ -37,66 +53,57 @@ const PLANET_MIN = 24;
 const PLANET_MAX = 70;
 const MOON_MIN = 9;
 const MOON_MAX = 30;
+const GOAL_MIN = 20;
+const GOAL_MAX = 56;
 
 function scaledRadius(value: number, maxValue: number, min: number, max: number) {
   if (maxValue <= 0) return min;
-  const ratio = Math.max(0, Math.min(1, value / maxValue));
-  return min + (max - min) * Math.sqrt(ratio);
+  return min + (max - min) * Math.sqrt(Math.max(0, Math.min(1, value / maxValue)));
 }
 
 interface GNode extends SimulationNodeDatum {
   id: string;
-  kind: "center" | "portfolio" | "asset";
+  kind: "center" | "portfolio" | "asset" | "goal";
   label: string;
   r: number;
   color: string;
   portfolioKey?: number | "unassigned";
   assetId?: number;
+  goalId?: number;
 }
 
-interface GLink {
-  source: string;
-  target: string;
-}
+interface GLink { source: string; target: string }
 
-function useAnimationClock() {
+function useAnimClock() {
   const [t, setT] = useState(0);
   const raf = useRef<number | null>(null);
-  const start = useRef<number | null>(null);
-
+  const s = useRef<number | null>(null);
   useEffect(() => {
     const tick = (ts: number) => {
-      if (start.current === null) start.current = ts;
-      setT((ts - start.current) / 1000);
+      if (s.current === null) s.current = ts;
+      setT((ts - s.current) / 1000);
       raf.current = requestAnimationFrame(tick);
     };
     raf.current = requestAnimationFrame(tick);
-    return () => {
-      if (raf.current) cancelAnimationFrame(raf.current);
-    };
+    return () => { if (raf.current) cancelAnimationFrame(raf.current); };
   }, []);
-
   return t;
 }
 
 export default function GalaxyView({
-  assets,
-  portfolios,
-  quotes,
+  assets, portfolios, goals, loans, quotes, actions,
 }: {
   assets: Asset[];
   portfolios: Portfolio[];
+  goals: Goal[];
+  loans: Loan[];
   quotes: Record<string, Quote>;
+  actions: Actions;
 }) {
   const [expanded, setExpanded] = useState<Set<number | "unassigned">>(new Set());
-  const [selected, setSelected] = useState<
-    | { kind: "total"; total: number }
-    | { kind: "portfolio"; id: number | "unassigned"; name: string; color: string; total: number; count: number }
-    | { kind: "asset"; asset: Asset; value: number; gain: number; gainPct: number; portfolioName: string }
-    | null
-  >(null);
+  const [selected, setSelected] = useState<Selection>(null);
 
-  const t = useAnimationClock();
+  const t = useAnimClock();
   const simRef = useRef<Simulation<GNode, GLink> | null>(null);
   const nodesMapRef = useRef<Map<string, GNode>>(new Map());
   const [, setTick] = useState(0);
@@ -104,74 +111,62 @@ export default function GalaxyView({
   const svgRef = useRef<SVGSVGElement | null>(null);
 
   const groups = useMemo(() => {
-    const byPortfolio = new Map<number | "unassigned", Asset[]>();
+    const byP = new Map<number | "unassigned", Asset[]>();
     for (const a of assets) {
-      const key = a.portfolioId ?? "unassigned";
-      if (!byPortfolio.has(key)) byPortfolio.set(key, []);
-      byPortfolio.get(key)!.push(a);
+      const k = a.portfolioId ?? "unassigned";
+      if (!byP.has(k)) byP.set(k, []);
+      byP.get(k)!.push(a);
     }
-
-    const list = [...byPortfolio.entries()].map(([key, list]) => {
-      const portfolio =
-        key === "unassigned"
+    return [...byP.entries()]
+      .map(([key, list]) => {
+        const portfolio = key === "unassigned"
           ? { id: "unassigned" as const, name: "Sans portefeuille", color: "#6b6b72" }
           : portfolios.find((p) => p.id === key) ?? { id: key, name: "?", color: "#6b6b72" };
-      const valued = list.map((a) => ({
-        asset: a,
-        value: currentValue(a, a.ticker ? quotes[a.ticker] : null),
-      }));
-      const total = valued.reduce((s, v) => s + v.value, 0);
-      return { key, portfolio, valued, total };
-    });
-
-    return list.sort((a, b) => b.total - a.total);
+        const valued = list.map((a) => ({
+          asset: a,
+          value: currentValue(a, a.ticker ? quotes[a.ticker] : null),
+        }));
+        return { key, portfolio, valued, total: valued.reduce((s, v) => s + v.value, 0) };
+      })
+      .sort((a, b) => b.total - a.total);
   }, [assets, portfolios, quotes]);
 
-  const grandTotal = groups.reduce((s, g) => s + g.total, 0);
-  const maxPortfolioValue = Math.max(1, ...groups.map((g) => g.total));
+  const grossTotal = groups.reduce((s, g) => s + g.total, 0);
+  const debt = totalDebt(loans);
+  const grandTotal = grossTotal - debt;
+  const maxPV = Math.max(1, ...groups.map((g) => g.total));
+  const maxGT = Math.max(1, ...goals.map((g) => Number(g.targetAmount)));
 
   const { targetNodes, links } = useMemo(() => {
-    const nodes: GNode[] = [
-      { id: "center", kind: "center", label: "Patrimoine", r: CENTER_R, color: "#7c6af5" },
-    ];
+    const nodes: GNode[] = [{ id: "center", kind: "center", label: "Patrimoine", r: CENTER_R, color: "#7c6af5" }];
     const links: GLink[] = [];
 
     for (const g of groups) {
       const pid = `p-${g.key}`;
-      nodes.push({
-        id: pid,
-        kind: "portfolio",
-        label: g.portfolio.name,
-        r: scaledRadius(g.total, maxPortfolioValue, PLANET_MIN, PLANET_MAX),
-        color: g.portfolio.color,
-        portfolioKey: g.key,
-      });
+      nodes.push({ id: pid, kind: "portfolio", label: g.portfolio.name, r: scaledRadius(g.total, maxPV, PLANET_MIN, PLANET_MAX), color: g.portfolio.color, portfolioKey: g.key });
       links.push({ source: "center", target: pid });
 
       if (expanded.has(g.key)) {
-        const maxAssetValue = Math.max(1, ...g.valued.map((v) => v.value));
+        const maxAV = Math.max(1, ...g.valued.map((v) => v.value));
         for (const v of g.valued) {
           const aid = `a-${v.asset.id}`;
-          nodes.push({
-            id: aid,
-            kind: "asset",
-            label: v.asset.name,
-            r: scaledRadius(v.value, maxAssetValue, MOON_MIN, MOON_MAX),
-            color: g.portfolio.color,
-            portfolioKey: g.key,
-            assetId: v.asset.id,
-          });
+          nodes.push({ id: aid, kind: "asset", label: v.asset.name, r: scaledRadius(v.value, maxAV, MOON_MIN, MOON_MAX), color: g.portfolio.color, portfolioKey: g.key, assetId: v.asset.id });
           links.push({ source: pid, target: aid });
         }
       }
     }
 
+    for (const goal of goals) {
+      const gid = `goal-${goal.id}`;
+      nodes.push({ id: gid, kind: "goal", label: goal.name, r: scaledRadius(Number(goal.targetAmount), maxGT, GOAL_MIN, GOAL_MAX), color: goal.color, goalId: goal.id });
+      links.push({ source: "center", target: gid });
+    }
+
     return { targetNodes: nodes, links };
-  }, [groups, maxPortfolioValue, expanded]);
+  }, [groups, maxPV, expanded, goals, maxGT]);
 
   useEffect(() => {
     const map = nodesMapRef.current;
-
     const nodes: GNode[] = targetNodes.map((n) => {
       const prev = map.get(n.id);
       if (prev) return { ...prev, ...n, x: prev.x, y: prev.y, vx: prev.vx, vy: prev.vy };
@@ -181,10 +176,7 @@ export default function GalaxyView({
     nodesMapRef.current = newMap;
 
     const center = newMap.get("center");
-    if (center) {
-      center.fx = CENTER.x;
-      center.fy = CENTER.y;
-    }
+    if (center) { center.fx = CENTER.x; center.fy = CENTER.y; }
 
     if (!simRef.current) {
       simRef.current = forceSimulation<GNode>(nodes)
@@ -198,48 +190,26 @@ export default function GalaxyView({
       simRef.current.nodes(nodes);
     }
 
-    simRef.current
-      .force(
-        "link",
-        forceLink<GNode, GLink>(links)
-          .id((d) => d.id)
-          .distance((l) => {
-            const target = typeof l.target === "object" ? l.target : newMap.get(l.target as unknown as string);
-            return target?.kind === "asset" ? 62 : 165;
-          })
-          .strength(0.5)
-      )
-      .alpha(0.7)
-      .restart();
+    simRef.current.force("link", forceLink<GNode, GLink>(links).id((d) => d.id).distance((l) => {
+      const tgt = typeof l.target === "object" ? l.target : newMap.get(l.target as unknown as string);
+      return tgt?.kind === "asset" ? 62 : 170;
+    }).strength(0.5)).alpha(0.7).restart();
   }, [targetNodes, links]);
 
-  useEffect(() => {
-    const sim = simRef.current;
-    return () => {
-      sim?.stop();
-    };
-  }, []);
+  useEffect(() => { const sim = simRef.current; return () => { sim?.stop(); }; }, []);
 
   const nodes = [...nodesMapRef.current.values()];
   const nodeById = nodesMapRef.current;
 
   const toggle = (key: number | "unassigned") => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
+    setExpanded((prev) => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n; });
   };
 
-  const toSvgPoint = useCallback((clientX: number, clientY: number) => {
+  const toSvgPoint = useCallback((cx: number, cy: number) => {
     const svg = svgRef.current;
     if (!svg) return { x: 0, y: 0 };
     const rect = svg.getBoundingClientRect();
-    return {
-      x: ((clientX - rect.left) / rect.width) * WIDTH,
-      y: ((clientY - rect.top) / rect.height) * HEIGHT,
-    };
+    return { x: ((cx - rect.left) / rect.width) * WIDTH, y: ((cy - rect.top) / rect.height) * HEIGHT };
   }, []);
 
   const onPointerDown = (id: string) => (e: React.PointerEvent) => {
@@ -262,12 +232,27 @@ export default function GalaxyView({
   const endDrag = () => {
     if (!dragId) return;
     const node = nodeById.get(dragId);
-    if (node) {
-      node.fx = null;
-      node.fy = null;
-    }
+    if (node) { node.fx = null; node.fy = null; }
     simRef.current?.alphaTarget(0);
     setDragId(null);
+  };
+
+  const handleClick = (n: GNode) => {
+    if (n.kind === "center") {
+      setSelected({ kind: "total", total: grandTotal, grossTotal, debt });
+    } else if (n.kind === "portfolio" && n.portfolioKey !== undefined) {
+      const g = groups.find((gr) => gr.key === n.portfolioKey)!;
+      toggle(n.portfolioKey);
+      setSelected({ kind: "portfolio", id: n.portfolioKey, name: g.portfolio.name, color: g.portfolio.color, total: g.total, count: g.valued.length });
+    } else if (n.kind === "asset" && n.assetId != null) {
+      const g = groups.find((gr) => gr.key === n.portfolioKey)!;
+      const v = g.valued.find((val) => val.asset.id === n.assetId)!;
+      const q = v.asset.ticker ? quotes[v.asset.ticker] : null;
+      setSelected({ kind: "asset", asset: v.asset, value: v.value, gain: gain(v.asset, q), gainPct: gainPercent(v.asset, q), portfolioName: g.portfolio.name });
+    } else if (n.kind === "goal" && n.goalId != null) {
+      const goal = goals.find((g) => g.id === n.goalId)!;
+      setSelected({ kind: "goal", goal, progress: Math.min(1, grandTotal / Number(goal.targetAmount)) });
+    }
   };
 
   return (
@@ -283,116 +268,79 @@ export default function GalaxyView({
           onPointerMove={onPointerMove}
           onPointerUp={endDrag}
           onPointerLeave={endDrag}
+          onClick={() => setSelected(null)}
         >
           <defs>
             <filter id="glow-soft" x="-100%" y="-100%" width="300%" height="300%">
-              <feGaussianBlur stdDeviation="5" result="blur" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
+              <feGaussianBlur stdDeviation="4" result="blur" />
+              <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
             </filter>
             <radialGradient id="centerGradient" cx="35%" cy="30%" r="70%">
               <stop offset="0%" stopColor="#c9c2ff" />
               <stop offset="55%" stopColor="#7c6af5" />
               <stop offset="100%" stopColor="#453a8a" />
             </radialGradient>
-            {nodes
-              .filter((n) => n.kind !== "center")
-              .map((n) => (
-                <radialGradient key={`grad-${n.id}`} id={`grad-${n.id}`} cx="35%" cy="30%" r="70%">
-                  <stop offset="0%" stopColor={n.color} stopOpacity={1} />
-                  <stop offset="60%" stopColor={n.color} stopOpacity={0.85} />
-                  <stop offset="100%" stopColor={n.color} stopOpacity={0.55} />
-                </radialGradient>
-              ))}
+            {nodes.filter((n) => n.kind !== "center").map((n) => (
+              <radialGradient key={`grad-${n.id}`} id={`grad-${n.id}`} cx="35%" cy="30%" r="70%">
+                <stop offset="0%" stopColor={n.color} stopOpacity={1} />
+                <stop offset="60%" stopColor={n.color} stopOpacity={0.85} />
+                <stop offset="100%" stopColor={n.color} stopOpacity={0.55} />
+              </radialGradient>
+            ))}
           </defs>
 
           {links.map((l) => {
-            const source = nodeById.get(l.source);
-            const target = nodeById.get(l.target);
-            if (!source || !target || source.x == null || target.x == null) return null;
-            const period = target.kind === "asset" ? 5.5 : 9;
+            const src = nodeById.get(l.source);
+            const tgt = nodeById.get(l.target);
+            if (!src || !tgt || src.x == null || tgt.x == null) return null;
+            const isGoal = tgt.kind === "goal";
+            const period = tgt.kind === "asset" ? 5.5 : 9;
             const progress = (t / period) % 1;
-            const rx = (source.x ?? 0) + ((target.x ?? 0) - (source.x ?? 0)) * progress;
-            const ry = (source.y ?? 0) + ((target.y ?? 0) - (source.y ?? 0)) * progress;
+            const rx = (src.x ?? 0) + ((tgt.x ?? 0) - (src.x ?? 0)) * progress;
+            const ry = (src.y ?? 0) + ((tgt.y ?? 0) - (src.y ?? 0)) * progress;
             return (
-              <g key={`${source.id}-${target.id}`}>
-                <line
-                  x1={source.x}
-                  y1={source.y}
-                  x2={target.x}
-                  y2={target.y}
-                  stroke={target.color}
-                  strokeOpacity={0.18}
-                  strokeWidth={1}
-                />
-                <circle cx={rx} cy={ry} r={1.8} fill={target.color} opacity={0.9} filter="url(#glow-soft)" />
+              <g key={`${src.id}-${tgt.id}`}>
+                <line x1={src.x} y1={src.y} x2={tgt.x} y2={tgt.y} stroke={tgt.color} strokeOpacity={0.18} strokeWidth={1} strokeDasharray={isGoal ? "5 5" : undefined} />
+                <circle cx={rx} cy={ry} r={1.8} fill={tgt.color} opacity={0.85} filter="url(#glow-soft)" />
               </g>
             );
           })}
 
           {nodes.map((n) => {
-            const isExpanded = n.kind === "portfolio" && n.portfolioKey !== undefined && expanded.has(n.portfolioKey);
+            const isExp = n.kind === "portfolio" && n.portfolioKey !== undefined && expanded.has(n.portfolioKey);
             if (n.x == null || n.y == null) return null;
+            const gp = n.kind === "goal" && n.goalId != null
+              ? Math.min(1, grandTotal / Number(goals.find((g) => g.id === n.goalId)?.targetAmount || 1))
+              : null;
+            const isSel =
+              (selected?.kind === "goal" && n.goalId === selected.goal.id) ||
+              (selected?.kind === "portfolio" && n.portfolioKey === selected.id) ||
+              (selected?.kind === "asset" && n.assetId === selected.asset.id);
+
             return (
-              <g
-                key={n.id}
-                transform={`translate(${n.x}, ${n.y})`}
-                className="cursor-pointer"
-                onPointerDown={onPointerDown(n.id)}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (n.kind === "center") {
-                    setSelected({ kind: "total", total: grandTotal });
-                  } else if (n.kind === "portfolio" && n.portfolioKey !== undefined) {
-                    const g = groups.find((gr) => gr.key === n.portfolioKey)!;
-                    toggle(n.portfolioKey);
-                    setSelected({
-                      kind: "portfolio",
-                      id: n.portfolioKey,
-                      name: g.portfolio.name,
-                      color: g.portfolio.color,
-                      total: g.total,
-                      count: g.valued.length,
-                    });
-                  } else if (n.kind === "asset" && n.assetId != null) {
-                    const g = groups.find((gr) => gr.key === n.portfolioKey)!;
-                    const v = g.valued.find((val) => val.asset.id === n.assetId)!;
-                    const q = v.asset.ticker ? quotes[v.asset.ticker] : null;
-                    setSelected({
-                      kind: "asset",
-                      asset: v.asset,
-                      value: v.value,
-                      gain: gain(v.asset, q),
-                      gainPct: gainPercent(v.asset, q),
-                      portfolioName: g.portfolio.name,
-                    });
-                  }
-                }}
-              >
-                <circle
-                  r={n.r}
-                  fill={n.kind === "center" ? "url(#centerGradient)" : `url(#grad-${n.id})`}
-                  stroke={n.color}
-                  strokeWidth={isExpanded ? 2 : 1.2}
-                  filter="url(#glow-soft)"
-                  className="transition-[stroke-width] duration-200"
-                />
+              <g key={n.id} transform={`translate(${n.x}, ${n.y})`} className="cursor-pointer" onPointerDown={onPointerDown(n.id)} onClick={(e) => { e.stopPropagation(); handleClick(n); }}>
+                {n.kind === "goal" ? (
+                  <>
+                    <circle r={n.r} fill="none" stroke={n.color} strokeOpacity={0.4} strokeDasharray="3 4" strokeWidth={1.2} />
+                    <circle r={n.r - 5} fill={n.color} fillOpacity={0.15 + (gp ?? 0) * 0.65} stroke={n.color} strokeWidth={isSel ? 2 : 1} />
+                    {(gp ?? 0) >= 1 && <circle r={n.r + 8} fill="none" stroke="var(--positive)" strokeOpacity={0.6} strokeWidth={1.5} />}
+                  </>
+                ) : (
+                  <circle r={n.r} fill={n.kind === "center" ? "url(#centerGradient)" : `url(#grad-${n.id})`} stroke={n.color} strokeWidth={isExp || isSel ? 2 : 1.2} filter="url(#glow-soft)" />
+                )}
                 {n.kind !== "asset" && (
-                  <text
-                    y={-2}
-                    textAnchor="middle"
-                    fontSize={n.kind === "center" ? 12 : 12.5}
-                    fontWeight={700}
-                    fill="#0d0d0f"
-                  >
+                  <text y={n.kind === "goal" ? -1 : -2} textAnchor="middle" fontSize={12} fontWeight={700} fill={n.kind === "goal" ? "#e8e8ea" : "#0d0d0f"}>
                     {n.label}
                   </text>
                 )}
                 {n.kind === "portfolio" && (
                   <text y={14} textAnchor="middle" fontSize={10} fill="#0d0d0f" className="tabular">
                     {formatMoney(groups.find((g) => g.key === n.portfolioKey)?.total ?? 0)}
+                  </text>
+                )}
+                {n.kind === "goal" && (
+                  <text y={14} textAnchor="middle" fontSize={10} fill="#e8e8ea" className="tabular" opacity={0.85}>
+                    {((gp ?? 0) * 100).toFixed(0)}%
                   </text>
                 )}
                 {n.kind === "asset" && (
@@ -404,72 +352,24 @@ export default function GalaxyView({
             );
           })}
 
-          {nodes.length <= 1 && (
+          {nodes.length <= 1 && goals.length === 0 && (
             <text x={CENTER.x} y={CENTER.y + 60} textAnchor="middle" fill="#6b6b72" fontSize={14}>
-              Ajoute des actifs pour voir ta galaxie
+              Utilise le panneau à droite pour créer ton premier élément
             </text>
           )}
         </svg>
-        <p className="text-xs text-text-muted text-center pb-4 -mt-2 relative">
-          Glisse un nœud, clique une planète pour révéler ses actifs
+        <p className="text-xs text-text-muted text-center pb-4 -mt-2">
+          Glisse un nœud · planète pleine = portefeuille · anneau = objectif
         </p>
       </div>
 
-      <div className="bg-surface border border-border rounded-lg p-5">
-        {!selected && (
-          <p className="text-sm text-text-muted">
-            Clique le centre (patrimoine total), une planète (portefeuille) ou un
-            satellite (actif) pour voir le détail ici.
-          </p>
-        )}
-        {selected?.kind === "total" && (
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-accent" />
-              <h3 className="font-medium font-[family-name:var(--font-heading)]">Patrimoine total</h3>
-            </div>
-            <p className="text-2xl font-[family-name:var(--font-mono-num)] tabular mt-3">
-              {formatMoney(selected.total)}
-            </p>
-            <p className="text-xs text-text-muted mt-1">
-              {groups.length} portefeuille{groups.length > 1 ? "s" : ""}
-            </p>
-          </div>
-        )}
-        {selected?.kind === "portfolio" && (
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full" style={{ background: selected.color }} />
-              <h3 className="font-medium font-[family-name:var(--font-heading)]">{selected.name}</h3>
-            </div>
-            <p className="text-2xl font-[family-name:var(--font-mono-num)] tabular mt-3">
-              {formatMoney(selected.total)}
-            </p>
-            <p className="text-xs text-text-muted mt-1">
-              {selected.count} actif{selected.count > 1 ? "s" : ""}
-              {grandTotal > 0 && ` · ${((selected.total / grandTotal) * 100).toFixed(0)}% du patrimoine`}
-            </p>
-          </div>
-        )}
-        {selected?.kind === "asset" && (
-          <div>
-            <p className="text-xs text-text-muted">{selected.portfolioName}</p>
-            <h3 className="font-medium font-[family-name:var(--font-heading)] mt-1">{selected.asset.name}</h3>
-            <p className="text-xs text-text-muted mt-0.5">
-              {ASSET_TYPE_LABELS[selected.asset.type]}
-              {selected.asset.ticker && ` · ${selected.asset.ticker}`}
-            </p>
-            <p className="text-2xl font-[family-name:var(--font-mono-num)] tabular mt-3">
-              {formatMoney(selected.value, selected.asset.currency)}
-            </p>
-            {(selected.asset.ticker || Number(selected.asset.avgBuyPrice) > 0) && (
-              <p className={`text-sm mt-1 ${selected.gain >= 0 ? "text-positive" : "text-negative"}`}>
-                {formatMoney(selected.gain, selected.asset.currency)} ({formatPercent(selected.gainPct)})
-              </p>
-            )}
-          </div>
-        )}
-      </div>
+      <NodePanel
+        selected={selected}
+        loans={loans}
+        portfolios={portfolios}
+        actions={actions}
+        onClear={() => setSelected(null)}
+      />
     </div>
   );
 }

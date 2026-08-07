@@ -253,14 +253,14 @@ export default function DashboardPage() {
       <section>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-medium text-text-muted">Objectifs</h2>
-          <a href="/goals" className="text-xs text-accent hover:underline">
+          <a href="/galaxy" className="text-xs text-accent hover:underline">
             Gérer les objectifs →
           </a>
         </div>
         {goals.length === 0 ? (
           <div className="text-sm text-text-muted border border-dashed border-border rounded-lg p-6 text-center">
             Pas encore d&apos;objectif.{" "}
-            <a href="/goals" className="text-accent hover:underline">
+            <a href="/galaxy" className="text-accent hover:underline">
               Crée le premier
             </a>
           </div>

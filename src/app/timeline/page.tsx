@@ -129,7 +129,7 @@ export default function TimelinePage() {
       {goals.length === 0 ? (
         <p className="text-sm text-text-muted border border-dashed border-border rounded-lg p-8 text-center">
           Aucun objectif défini.{" "}
-          <a href="/goals" className="text-accent hover:underline">
+          <a href="/galaxy" className="text-accent hover:underline">
             Crée-en un
           </a>{" "}
           pour voir ta timeline.
