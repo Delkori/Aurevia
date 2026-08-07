@@ -56,6 +56,26 @@ function dominantAssetSkin(valued: { asset: { type: string }; value: number }[])
   return best ? (SKIN_BY_TYPE[best] ?? "generic") : "generic";
 }
 
+const NAME_SKIN_KEYWORDS: [RegExp, PlanetSkin][] = [
+  [/\bcto\b/, "tech"],
+  [/\bpea\b/, "ocean"],
+  [/crypto|bitcoin|btc|eth/, "crypto"],
+  [/immobilier|scpi|pierre|foncier/, "terrain"],
+  [/assurance.?vie|livret|epargne|cash/, "ocean"],
+  [/or\b|metal|argent(?!\s)/, "terrain"],
+];
+function normalizeName(name: string) {
+  return name.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+}
+function skinFromName(name: string): PlanetSkin | null {
+  const n = normalizeName(name);
+  for (const [re, skin] of NAME_SKIN_KEYWORDS) if (re.test(n)) return skin;
+  return null;
+}
+function planetSkin(name: string, valued: { asset: { type: string }; value: number }[]): PlanetSkin {
+  return skinFromName(name) ?? dominantAssetSkin(valued);
+}
+
 interface GNode extends SimulationNodeDatum {
   id: string; kind: string; label: string; r: number; color: string;
   portfolioKey?: number | "unassigned"; assetId?: number; goalId?: number; memberId?: number;
@@ -164,7 +184,7 @@ export default function GalaxyView({
       const pid = `p-${g.key}`;
       const memberNode = g.portfolio.memberId ? `m-${g.portfolio.memberId}` : null;
       const totalGain = g.valued.reduce((s, v) => { const a = v.asset; return s + ((a.avgBuyPrice && Number(a.avgBuyPrice) > 0) ? gain(a, a.ticker ? quotes[a.ticker] : null) : 0); }, 0);
-      const skin = dominantAssetSkin(g.valued);
+      const skin = planetSkin(g.portfolio.name, g.valued);
       nodes.push({ id: pid, kind: "portfolio", label: g.portfolio.name, r: sr(g.total, maxPV, 24, 65), color: g.portfolio.color, portfolioKey: g.key, gainVal: totalGain, sub: formatMoney(g.total), skin });
       links.push({ source: memberNode ?? "center", target: pid });
       if (expanded.has(g.key)) {
