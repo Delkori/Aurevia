@@ -124,7 +124,7 @@ export default function AssetsPage() {
   const createPortfolio = async (): Promise<number | null> => {
     if (!newPortfolioName.trim()) return null;
     try {
-      const colors = ["#8a5cf5", "#53dfdd", "#e9973f", "#44cf6e", "#fa99cd"];
+      const colors = ["#7c6af5", "#5eead4", "#fb923c", "#4ade80", "#f0abfc"];
       const created = (await apiFetch("/api/portfolios", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -210,7 +210,7 @@ export default function AssetsPage() {
   return (
     <div className="p-8 md:p-10 max-w-6xl mx-auto space-y-6">
       <header>
-        <h1 className="text-2xl font-semibold">Actifs</h1>
+        <h1 className="text-2xl font-semibold font-[family-name:var(--font-heading)]">Actifs</h1>
         <p className="text-sm text-text-muted mt-1">
           Remplis directement une ligne pour ajouter un actif — ça s&apos;enregistre
           automatiquement.

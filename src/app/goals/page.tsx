@@ -23,7 +23,7 @@ type Asset = {
   manualValue: string | null;
 };
 
-const COLORS = ["#8a5cf5", "#53dfdd", "#e9973f", "#44cf6e", "#fa99cd"];
+const COLORS = ["#7c6af5", "#5eead4", "#fb923c", "#4ade80", "#f0abfc"];
 
 const emptyForm = { name: "", targetAmount: "", targetDate: "", color: COLORS[0] };
 
@@ -110,7 +110,7 @@ export default function GoalsPage() {
       )}
       <header className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">Objectifs</h1>
+          <h1 className="text-2xl font-semibold font-[family-name:var(--font-heading)]">Objectifs</h1>
           <p className="text-sm text-text-muted mt-1">
             Patrimoine actuel : <span className="tabular">{formatMoney(currentTotal)}</span>
           </p>

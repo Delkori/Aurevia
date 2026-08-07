@@ -85,7 +85,7 @@ export default function ProjectionPage() {
   return (
     <div className="p-8 md:p-10 max-w-5xl mx-auto space-y-8">
       <header>
-        <h1 className="text-2xl font-semibold">Projection</h1>
+        <h1 className="text-2xl font-semibold font-[family-name:var(--font-heading)]">Projection</h1>
         <p className="text-sm text-text-muted mt-1">
           Simule l&apos;évolution de ton patrimoine avec des versements
           réguliers et un rendement composé.
@@ -159,22 +159,22 @@ export default function ProjectionPage() {
           <AreaChart data={chartData} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
             <defs>
               <linearGradient id="projFill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#8a5cf5" stopOpacity={0.35} />
-                <stop offset="100%" stopColor="#8a5cf5" stopOpacity={0} />
+                <stop offset="0%" stopColor="#7c6af5" stopOpacity={0.35} />
+                <stop offset="100%" stopColor="#7c6af5" stopOpacity={0} />
               </linearGradient>
               <linearGradient id="contribFill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#999999" stopOpacity={0.25} />
-                <stop offset="100%" stopColor="#999999" stopOpacity={0} />
+                <stop offset="0%" stopColor="#6b6b72" stopOpacity={0.25} />
+                <stop offset="100%" stopColor="#6b6b72" stopOpacity={0} />
               </linearGradient>
             </defs>
             <XAxis
               dataKey="label"
-              tick={{ fill: "#999999", fontSize: 11 }}
-              axisLine={{ stroke: "#333333" }}
+              tick={{ fill: "#6b6b72", fontSize: 11 }}
+              axisLine={{ stroke: "rgba(255,255,255,0.1)" }}
               tickLine={false}
             />
             <YAxis
-              tick={{ fill: "#999999", fontSize: 11 }}
+              tick={{ fill: "#6b6b72", fontSize: 11 }}
               axisLine={false}
               tickLine={false}
               tickFormatter={(v) => formatMoney(v)}
@@ -182,8 +182,8 @@ export default function ProjectionPage() {
             />
             <Tooltip
               contentStyle={{
-                background: "#202020",
-                border: "1px solid #333333",
+                background: "#161618",
+                border: "1px solid rgba(255,255,255,0.1)",
                 borderRadius: 8,
                 fontSize: 12,
               }}
@@ -195,14 +195,14 @@ export default function ProjectionPage() {
             <Area
               type="monotone"
               dataKey="value"
-              stroke="#8a5cf5"
+              stroke="#7c6af5"
               strokeWidth={2}
               fill="url(#projFill)"
             />
             <Area
               type="monotone"
               dataKey="contributed"
-              stroke="#999999"
+              stroke="#6b6b72"
               strokeWidth={1.5}
               strokeDasharray="4 4"
               fill="url(#contribFill)"

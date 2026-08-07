@@ -98,7 +98,7 @@ export default function BudgetPage() {
         body: JSON.stringify({
           ...categoryForm,
           monthlyTarget: categoryForm.monthlyTarget || null,
-          color: categoryForm.kind === "income" ? "#44cf6e" : "#e9973f",
+          color: categoryForm.kind === "income" ? "#4ade80" : "#fb923c",
         }),
       });
       setCategoryForm(emptyCategoryForm);
@@ -158,7 +158,7 @@ export default function BudgetPage() {
               name: p.name,
               kind: "expense",
               monthlyTarget: String(target),
-              color: "#e9973f",
+              color: "#fb923c",
             }),
           });
         }
@@ -187,7 +187,7 @@ export default function BudgetPage() {
       )}
       <header className="flex items-center justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">Budget</h1>
+          <h1 className="text-2xl font-semibold font-[family-name:var(--font-heading)]">Budget</h1>
           <p className="text-sm text-text-muted mt-1">Revenus, dépenses et suivi mensuel.</p>
         </div>
         <div className="flex items-center gap-2">
@@ -378,7 +378,7 @@ export default function BudgetPage() {
                     className="h-full rounded-full"
                     style={{
                       width: `${progress}%`,
-                      background: progress > 100 ? "#fb464c" : c.color,
+                      background: progress > 100 ? "#f87171" : c.color,
                     }}
                   />
                 </div>

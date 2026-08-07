@@ -82,7 +82,7 @@ function SankeyNode(props: {
         y={y}
         width={width}
         height={height}
-        fill={isHub ? "#8a5cf5" : isSavings ? "#44cf6e" : "#027aff"}
+        fill={isHub ? "#7c6af5" : isSavings ? "#4ade80" : "#60a5fa"}
         fillOpacity={0.9}
         radius={2}
       />
@@ -91,7 +91,7 @@ function SankeyNode(props: {
         y={y - 8}
         textAnchor="middle"
         fontSize={11}
-        fill="#dcddde"
+        fill="#e8e8ea"
       >
         {payload.name}
       </text>
@@ -123,13 +123,13 @@ export default function BudgetSankey({
         data={data}
         node={SankeyNode}
         nodePadding={28}
-        link={{ stroke: "#3f3f3f", strokeOpacity: 0.5 }}
+        link={{ stroke: "rgba(255,255,255,0.12)", strokeOpacity: 0.5 }}
         margin={{ top: 24, bottom: 8, left: 8, right: 8 }}
       >
         <Tooltip
           contentStyle={{
-            background: "#202020",
-            border: "1px solid #333333",
+            background: "#161618",
+            border: "1px solid rgba(255,255,255,0.1)",
             borderRadius: 8,
             fontSize: 12,
           }}

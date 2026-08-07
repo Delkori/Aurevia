@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Wallet, Target, Receipt, LineChart, Atom } from "lucide-react";
+import { LayoutDashboard, Wallet, Target, Receipt, LineChart, Atom, Clock } from "lucide-react";
 
 const links = [
   { href: "/", label: "Vue d'ensemble", icon: LayoutDashboard },
   { href: "/assets", label: "Actifs", icon: Wallet },
   { href: "/galaxy", label: "Galaxie", icon: Atom },
   { href: "/goals", label: "Objectifs", icon: Target },
+  { href: "/timeline", label: "Timeline", icon: Clock },
   { href: "/budget", label: "Budget", icon: Receipt },
   { href: "/projection", label: "Projection", icon: LineChart },
 ];
@@ -22,7 +23,7 @@ export default function Sidebar() {
     <aside className="w-60 shrink-0 border-r border-border bg-surface/40 flex flex-col h-screen sticky top-0">
       <div className="px-6 py-6 border-b border-border">
         <div className="flex items-baseline gap-2">
-          <span className="text-lg font-[family-name:var(--font-mono-num)] font-semibold tracking-tight">
+          <span className="text-lg font-[family-name:var(--font-heading)] font-semibold tracking-tight">
             Aurevia
           </span>
         </div>

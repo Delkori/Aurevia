@@ -5,12 +5,12 @@ import { formatMoney } from "@/lib/format";
 import { ASSET_TYPE_LABELS } from "@/lib/networth";
 
 const COLORS: Record<string, string> = {
-  stock: "#8a5cf5",
-  etf: "#53dfdd",
-  crypto: "#e9973f",
-  real_estate: "#027aff",
-  cash: "#999999",
-  other: "#666666",
+  stock: "#7c6af5",
+  etf: "#5eead4",
+  crypto: "#fb923c",
+  real_estate: "#60a5fa",
+  cash: "#6b6b72",
+  other: "#4f4f57",
 };
 
 export default function AllocationChart({
@@ -51,13 +51,13 @@ export default function AllocationChart({
               stroke="none"
             >
               {grouped.map((entry) => (
-                <Cell key={entry.type} fill={COLORS[entry.type] ?? "#666666"} />
+                <Cell key={entry.type} fill={COLORS[entry.type] ?? "#4f4f57"} />
               ))}
             </Pie>
             <Tooltip
               contentStyle={{
-                background: "#202020",
-                border: "1px solid #333333",
+                background: "#161618",
+                border: "1px solid rgba(255,255,255,0.1)",
                 borderRadius: 8,
                 fontSize: 12,
               }}
@@ -77,7 +77,7 @@ export default function AllocationChart({
               <span className="flex items-center gap-2 text-text-muted">
                 <span
                   className="w-2.5 h-2.5 rounded-full shrink-0"
-                  style={{ background: COLORS[d.type] ?? "#666666" }}
+                  style={{ background: COLORS[d.type] ?? "#4f4f57" }}
                 />
                 {ASSET_TYPE_LABELS[d.type] ?? d.type}
               </span>

@@ -32,7 +32,7 @@ export default function LoginPage() {
         className="bg-surface border border-border rounded-lg p-8 w-full max-w-sm space-y-4"
       >
         <div>
-          <h1 className="text-lg font-[family-name:var(--font-mono-num)] font-semibold">
+          <h1 className="text-lg font-[family-name:var(--font-heading)] font-semibold">
             Aurevia
           </h1>
           <p className="text-xs text-text-muted mt-1">

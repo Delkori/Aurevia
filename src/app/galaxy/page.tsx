@@ -85,7 +85,7 @@ export default function GalaxyPage() {
   return (
     <div className="p-8 md:p-10 max-w-6xl mx-auto space-y-6">
       <header>
-        <h1 className="text-2xl font-semibold">Galaxie</h1>
+        <h1 className="text-2xl font-semibold font-[family-name:var(--font-heading)]">Galaxie</h1>
         <p className="text-sm text-text-muted mt-1">
           Tes portefeuilles comme des planètes, tes actifs gravitent autour selon
           leur poids.

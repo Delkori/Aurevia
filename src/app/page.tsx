@@ -1,12 +1,21 @@
 "use client";
 
 import { useEffect, useState, useMemo, useCallback } from "react";
-import { RefreshCw, TrendingUp, TrendingDown, AlertTriangle, X } from "lucide-react";
+import { RefreshCw, TrendingUp, TrendingDown, AlertTriangle, X, Bell } from "lucide-react";
 import NetWorthChart from "@/components/NetWorthChart";
 import AllocationChart from "@/components/AllocationChart";
+import { ToastStack, useToasts } from "@/components/Toast";
 import { formatMoney, formatPercent } from "@/lib/format";
 import { currentValue, gain, costBasis } from "@/lib/networth";
 import { apiFetch, ApiError } from "@/lib/api";
+import {
+  getNotifiedGoalIds,
+  markGoalNotified,
+  getAlertThreshold,
+  setAlertThreshold,
+  shouldAlertThresholdToday,
+  markThresholdAlertedToday,
+} from "@/lib/notifications";
 
 type Asset = {
   id: number;
@@ -38,6 +47,9 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [threshold, setThreshold] = useState<number | null>(null);
+  const [showThresholdInput, setShowThresholdInput] = useState(false);
+  const { toasts, push, dismiss } = useToasts();
 
   const loadAll = useCallback(async () => {
     setError(null);
@@ -67,6 +79,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     loadAll();
+    setThreshold(getAlertThreshold());
   }, [loadAll]);
 
   const refresh = async () => {
@@ -94,6 +107,26 @@ export default function DashboardPage() {
 
   const gainPercent = totalCost > 0 ? (totalGain / totalCost) * 100 : 0;
 
+  // Notifications : objectif atteint à 100%, patrimoine sous le seuil défini
+  useEffect(() => {
+    if (loading || goals.length === 0) return;
+    const notified = getNotifiedGoalIds();
+    for (const g of goals) {
+      if (total >= Number(g.targetAmount) && !notified.includes(g.id)) {
+        push(`Objectif "${g.name}" atteint 🎉 (${formatMoney(total)})`, "success");
+        markGoalNotified(g.id);
+      }
+    }
+  }, [loading, goals, total, push]);
+
+  useEffect(() => {
+    if (loading || threshold === null || total === 0) return;
+    if (total < threshold && shouldAlertThresholdToday()) {
+      push(`Patrimoine sous ton seuil d'alerte (${formatMoney(threshold)})`, "warning");
+      markThresholdAlertedToday();
+    }
+  }, [loading, threshold, total, push]);
+
   if (loading) {
     return (
       <div className="p-10 text-text-muted text-sm">Chargement…</div>
@@ -102,6 +135,7 @@ export default function DashboardPage() {
 
   return (
     <div className="p-8 md:p-10 max-w-5xl mx-auto space-y-10">
+      <ToastStack toasts={toasts} onDismiss={dismiss} />
       {error && (
         <div className="flex items-start gap-3 bg-negative/10 border border-negative/40 rounded-lg px-4 py-3 text-sm text-negative">
           <AlertTriangle size={16} className="mt-0.5 shrink-0" />
@@ -147,6 +181,46 @@ export default function DashboardPage() {
           Actualiser les cours
         </button>
       </header>
+
+      <div className="relative flex justify-end -mt-6">
+        <button
+          onClick={() => setShowThresholdInput((v) => !v)}
+          className="flex items-center gap-1.5 text-xs text-text-muted hover:text-text"
+        >
+          <Bell size={12} />
+          {threshold ? `Alerte sous ${formatMoney(threshold)}` : "Définir un seuil d'alerte"}
+        </button>
+        {showThresholdInput && (
+          <div className="absolute top-6 right-0 bg-surface border border-border rounded-md p-3 flex items-center gap-2 z-10">
+            <input
+              type="number"
+              defaultValue={threshold ?? ""}
+              placeholder="Ex : 5000"
+              className="w-28 bg-bg border border-border rounded px-2 py-1.5 text-xs tabular"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  const v = Number((e.target as HTMLInputElement).value) || null;
+                  setAlertThreshold(v);
+                  setThreshold(v);
+                  setShowThresholdInput(false);
+                }
+              }}
+            />
+            <button
+              className="text-xs text-accent"
+              onClick={(e) => {
+                const input = (e.currentTarget.previousSibling as HTMLInputElement);
+                const v = Number(input.value) || null;
+                setAlertThreshold(v);
+                setThreshold(v);
+                setShowThresholdInput(false);
+              }}
+            >
+              OK
+            </button>
+          </div>
+        )}
+      </div>
 
       <section className="grid md:grid-cols-3 gap-6">
         <div className="md:col-span-2 bg-surface border border-border rounded-lg p-6">
