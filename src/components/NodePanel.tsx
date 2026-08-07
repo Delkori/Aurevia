@@ -157,7 +157,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
   const debt = loans.reduce((s, l) => s + Number(l.remainingBalance || 0), 0);
 
   return (
-    <div className="bg-surface border border-border rounded-lg p-5 space-y-3 max-h-[calc(100vh-160px)] overflow-y-auto">
+    <div className="bg-surface/40 border-l border-border p-5 space-y-3 overflow-y-auto">
 
       {createMode === "portfolio" && <PortfolioForm members={members} onSubmit={async d => { await actions.createPortfolio(d); clear(); }} onCancel={clear} />}
       {createMode === "asset" && <AssetForm portfolios={portfolios} onSubmit={async d => { await actions.createAsset(d); clear(); }} onCancel={clear} />}

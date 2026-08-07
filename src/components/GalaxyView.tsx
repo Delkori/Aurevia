@@ -308,9 +308,9 @@ export default function GalaxyView({
   };
 
   return (
-    <div className="grid lg:grid-cols-[52px_1fr_280px] gap-0 rounded-lg overflow-hidden border border-border">
+    <div className="grid h-full" style={{ gridTemplateColumns: "52px 1fr 280px" }}>
       {/* Barre d'outils gauche */}
-      <div className="bg-surface/60 border-r border-border flex flex-col items-center py-3 gap-1">
+      <div className="bg-surface/40 border-r border-border flex flex-col items-center py-3 gap-1">
         {[
           { icon: FolderPlus, tip: "Portefeuille", mode: "portfolio" },
           { icon: Plus, tip: "Actif", mode: "asset" },
@@ -332,8 +332,8 @@ export default function GalaxyView({
       </div>
 
       {/* Graphe */}
-      <div className="relative bg-bg" style={{ minHeight: 520 }}>
-        <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full h-full select-none touch-none block"
+      <div className="relative bg-bg overflow-hidden">
+        <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full h-full select-none touch-none block absolute inset-0"
           onPointerDown={onBgPointerDown} onPointerMove={onBgPointerMove} onPointerUp={onBgPointerUp} onPointerLeave={onBgPointerUp}
           onClick={() => { setSelected(null); setCreateMode(null); }}>
           <defs>
@@ -421,5 +421,6 @@ export default function GalaxyView({
       {/* Panel */}
       <NodePanel selected={selected} loans={loans} portfolios={portfolios} members={members} goals={goals} flows={flows} actions={actions} onClear={() => setSelected(null)} createMode={createMode} setCreateMode={setCreateMode} />
     </div>
+
   );
 }
