@@ -36,6 +36,13 @@
       "when": 1786095157735,
       "tag": "0004_brief_leper_queen",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786136526144,
+      "tag": "0005_small_living_mummy",
+      "breakpoints": true
     }
   ]
 }

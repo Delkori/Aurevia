@@ -12,6 +12,7 @@ type Goal = { id: number; name: string; targetAmount: string; targetDate: string
 type Loan = { id: number; name: string; remainingBalance: string; principal: string; interestRate: string | null; monthlyPayment: string | null; assetId: number | null; currency: string };
 type Member = { id: number; name: string; role: string; color: string };
 type Flow = { id: number; name: string | null; sourceType: string; sourceId: number | null; targetType: string; targetId: number | null; amount: string; frequency: string; memberId: number | null };
+type GoalLink = { id: number; goalId: number; portfolioId: number };
 type Quote = { price: number; currency: string } | null;
 
 export default function HomePage() {
@@ -21,6 +22,7 @@ export default function HomePage() {
   const [loans, setLoans] = useState<Loan[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [flows, setFlows] = useState<Flow[]>([]);
+  const [goalLinks, setGoalLinks] = useState<GoalLink[]>([]);
   const [quotes, setQuotes] = useState<Record<string, Quote>>({});
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -29,10 +31,10 @@ export default function HomePage() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [a, p, g, l, m, f, s] = await Promise.allSettled([
+      const [a, p, g, l, m, f, s, gl] = await Promise.allSettled([
         apiFetch("/api/assets"), apiFetch("/api/portfolios"), apiFetch("/api/goals"),
         apiFetch("/api/loans"), apiFetch("/api/members"), apiFetch("/api/flows"),
-        apiFetch("/api/settings"),
+        apiFetch("/api/settings"), apiFetch("/api/goal-links"),
       ]);
       const ad = a.status === "fulfilled" ? (a.value as Asset[]) : [];
       setAssets(ad);
@@ -42,6 +44,7 @@ export default function HomePage() {
       setMembers(m.status === "fulfilled" ? (m.value as Member[]) : []);
       setFlows(f.status === "fulfilled" ? (f.value as Flow[]) : []);
       setSettings(s.status === "fulfilled" ? (s.value as Record<string, string>) : {});
+      setGoalLinks(gl.status === "fulfilled" ? (gl.value as GoalLink[]) : []);
       if (a.status === "rejected") throw a.reason;
       try { setQuotes(await fetchAllQuotes(ad) as Record<string, Quote>); } catch {}
     } catch (err) {
@@ -72,6 +75,8 @@ export default function HomePage() {
     deleteGoal: (id: number) => api(`/api/goals/${id}`, "DELETE") as Promise<void>,
     createFlow: (d: Record<string, unknown>) => api("/api/flows", "POST", d) as Promise<void>,
     deleteFlow: (id: number) => api(`/api/flows/${id}`, "DELETE") as Promise<void>,
+    createGoalLink: (d: Record<string, unknown>) => api("/api/goal-links", "POST", d) as Promise<void>,
+    deleteGoalLink: (id: number) => api(`/api/goal-links/${id}`, "DELETE") as Promise<void>,
   };
 
   const updateSalary = async (v: number) => {
@@ -92,7 +97,7 @@ export default function HomePage() {
       <div className="flex-1 min-h-0">
         <GalaxyView
           assets={assets} portfolios={portfolios} goals={goals} loans={loans}
-          members={members} flows={flows} quotes={quotes} actions={actions}
+          members={members} flows={flows} goalLinks={goalLinks} quotes={quotes} actions={actions}
           salary={Number(settings.monthly_salary) || 0}
           onUpdateSalary={updateSalary}
         />

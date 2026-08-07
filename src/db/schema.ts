@@ -53,6 +53,16 @@ export const goals = pgTable("goals", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// ── Liens objectif ↔ portefeuille ────────────────────────────────────────────
+// Relie un objectif aux portefeuilles dont la valeur compte dans sa progression
+// (indépendant des flux mensuels, qui suivent les versements récurrents)
+export const goalLinks = pgTable("goal_links", {
+  id: serial("id").primaryKey(),
+  goalId: integer("goal_id").notNull().references(() => goals.id, { onDelete: "cascade" }),
+  portfolioId: integer("portfolio_id").notNull().references(() => portfolios.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // ── Flux financiers ──────────────────────────────────────────────────────────
 // Un flux représente un transfert récurrent entre deux entités
 // sourceType/targetType : "salary" | "portfolio" | "goal" | "expense" | "external"

@@ -18,6 +18,7 @@ type Goal = { id: number; name: string; targetAmount: string; targetDate: string
 type Loan = { id: number; name: string; remainingBalance: string; currency: string };
 type Member = { id: number; name: string; role: string; color: string };
 type Flow = { id: number; name: string | null; sourceType: string; sourceId: number | null; targetType: string; targetId: number | null; amount: string; frequency: string; memberId: number | null };
+type GoalLink = { id: number; goalId: number; portfolioId: number };
 type Quote = { price: number; currency: string } | null;
 
 const W = 1200, H = 800, CX = W / 2, CY = H / 2, CENTER_R = 32;
@@ -103,10 +104,10 @@ const STARS = Array.from({ length: 180 }, (_, i) => ({
 }));
 
 export default function GalaxyView({
-  assets, portfolios, goals, loans, members, flows, quotes, actions, salary, onUpdateSalary,
+  assets, portfolios, goals, loans, members, flows, goalLinks, quotes, actions, salary, onUpdateSalary,
 }: {
   assets: Asset[]; portfolios: Portfolio[]; goals: Goal[]; loans: Loan[];
-  members: Member[]; flows: Flow[]; quotes: Record<string, Quote>;
+  members: Member[]; flows: Flow[]; goalLinks: GoalLink[]; quotes: Record<string, Quote>;
   actions: Actions; salary: number; onUpdateSalary: (v: number) => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState<Set<number | "unassigned">>(new Set());
@@ -140,8 +141,15 @@ export default function GalaxyView({
   const maxPV = Math.max(1, ...groups.map(g => g.total));
   const maxGT = Math.max(1, ...goals.map(g => Number(g.targetAmount)));
 
+  const goalProgress = (goal: Goal) => {
+    const linkedIds = goalLinks.filter(gl => gl.goalId === goal.id).map(gl => gl.portfolioId);
+    if (linkedIds.length === 0) return Math.min(1, grandTotal / Number(goal.targetAmount));
+    const linkedTotal = linkedIds.reduce((s, pid) => s + (groups.find(g => g.key === pid)?.total ?? 0), 0);
+    return Math.min(1, linkedTotal / Number(goal.targetAmount));
+  };
+
   // Build graph
-  const { targetNodes, links, flowLinks, resteAInvestir, totalExpenseFlows } = useMemo(() => {
+  const { targetNodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows } = useMemo(() => {
     const nodes: GNode[] = [];
     const links: GLink[] = [];
     const flowLinks: { source: string; target: string; label: string }[] = [];
@@ -200,11 +208,14 @@ export default function GalaxyView({
       }
     }
 
+    const goalLinkEdges: { source: string; target: string }[] = [];
     for (const goal of goals) {
       const memberNode = goal.memberId ? `m-${goal.memberId}` : null;
-      const prog = Math.min(1, grandTotal / Number(goal.targetAmount));
+      const linkedPortfolioIds = goalLinks.filter(gl => gl.goalId === goal.id).map(gl => gl.portfolioId);
+      const prog = goalProgress(goal);
       nodes.push({ id: `g-${goal.id}`, kind: "goal", label: goal.name, r: sr(Number(goal.targetAmount), maxGT, 18, 52), color: goal.color, goalId: goal.id, sub: `${Math.round(prog * 100)}%` });
       links.push({ source: memberNode ?? "center", target: `g-${goal.id}` });
+      linkedPortfolioIds.forEach(pid => { if (nodes.find(n => n.id === `p-${pid}`)) goalLinkEdges.push({ source: `g-${goal.id}`, target: `p-${pid}` }); });
     }
 
     flows.forEach(f => {
@@ -215,8 +226,8 @@ export default function GalaxyView({
         flowLinks.push({ source: sId, target: tId, label: formatMoney(Number(f.amount)) });
     });
 
-    return { targetNodes: nodes, links, flowLinks, resteAInvestir, totalExpenseFlows };
-  }, [groups, maxPV, expanded, goals, maxGT, members, portfolios, flows, quotes, salary, grandTotal]);
+    return { targetNodes: nodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows };
+  }, [groups, maxPV, expanded, goals, maxGT, members, portfolios, flows, quotes, salary, goalLinks, goalProgress]);
 
   // Simulation
   useEffect(() => {
@@ -246,8 +257,10 @@ export default function GalaxyView({
     simRef.current.force("link", forceLink<GNode, GLink>(links).id(d => d.id).distance(l => {
       const tgt = typeof l.target === "object" ? l.target : nm.get(l.target as unknown as string);
       return tgt?.kind === "expense-item" ? 45 : tgt?.kind === "asset" ? 65 : tgt?.kind === "member" ? 130 : 180;
-    }).strength(0.3)).alpha(0.7).restart();
-  }, [targetNodes, links]);
+    }).strength(0.3));
+    simRef.current.force("goalLink", forceLink<GNode, GLink>(goalLinkEdges).id(d => d.id).distance(160).strength(0.08));
+    simRef.current.alpha(0.7).restart();
+  }, [targetNodes, links, goalLinkEdges]);
 
   useEffect(() => { const sim = simRef.current; return () => { sim?.stop(); }; }, []);
 
@@ -357,7 +370,7 @@ export default function GalaxyView({
     }
     else if (n.kind === "goal" && n.goalId != null) {
       const goal = goals.find(g => g.id === n.goalId)!;
-      setSelected({ kind: "goal", goal, progress: Math.min(1, grandTotal / Number(goal.targetAmount)) });
+      setSelected({ kind: "goal", goal, progress: goalProgress(goal), linkedPortfolioIds: goalLinks.filter(gl => gl.goalId === goal.id).map(gl => gl.portfolioId) });
     }
     else if (n.kind === "member" && n.memberId != null) {
       const member = members.find(m => m.id === n.memberId)!;
@@ -564,6 +577,19 @@ export default function GalaxyView({
               return <circle key={`dot-${s.id}-${tg.id}`} cx={pt.x} cy={pt.y} r={2} fill={tg.color} opacity={0.5} filter="url(#gl)" />;
             })}
 
+            {/* Goal ↔ planet validation links */}
+            {goalLinkEdges.map((l, i) => {
+              const s = nodeById.get(l.source), tg = nodeById.get(l.target);
+              if (!s || !tg || s.x == null || tg.x == null) return null;
+              const seed = hashSeed(l.source, l.target), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
+              const p = (t / 6) % 1;
+              const pt = bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, p);
+              return <g key={`gl-${i}`}>
+                <path d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke="#34d399" strokeOpacity={0.4} strokeWidth={1.4} />
+                <circle cx={pt.x} cy={pt.y} r={2.5} fill="#34d399" opacity={0.85} filter="url(#gl)" />
+              </g>;
+            })}
+
             {/* Magnetic snap halo */}
             {snapTarget && (() => { const tg = nodeById.get(snapTarget); if (!tg || tg.x == null) return null; return <g><circle cx={tg.x} cy={tg.y} r={tg.r + 20} fill="none" stroke="#9585ff" strokeOpacity={0.6} strokeWidth={2.5} strokeDasharray="4 3"><animate attributeName="r" values={`${tg.r + 14};${tg.r + 24};${tg.r + 14}`} dur="0.7s" repeatCount="indefinite" /></circle><circle cx={tg.x} cy={tg.y} r={tg.r + 12} fill="rgba(149,133,255,0.06)" /></g>; })()}
 
@@ -571,7 +597,7 @@ export default function GalaxyView({
             {nodes.map(n => {
               if (n.x == null || n.y == null) return null;
               const isExp = n.kind === "portfolio" && n.portfolioKey !== undefined && expanded.has(n.portfolioKey);
-              const gp = n.kind === "goal" && n.goalId != null ? Math.min(1, grandTotal / Number(goals.find(g => g.id === n.goalId)?.targetAmount || 1)) : null;
+              const gp = n.kind === "goal" && n.goalId != null ? (() => { const goal = goals.find(g => g.id === n.goalId); return goal ? goalProgress(goal) : null; })() : null;
               const ts = { textShadow: "0 1px 4px rgba(0,0,0,0.6)" } as const;
 
               return <g key={n.id} className="nd" transform={`translate(${n.x},${n.y})`} style={{ cursor: "pointer" }}
@@ -673,6 +699,12 @@ export default function GalaxyView({
                       {isOverBudget && <text y={24} textAnchor="middle" fontSize={9} fill="#ff6b35" fontWeight={700} opacity={0.6 + Math.sin(t * 6) * 0.4}>DÉFICIT</text>}
                       {isWarning && <text y={22} textAnchor="middle" fontSize={8} fill="#ffb84d" fontWeight={600}>{Math.round(budgetRatio * 100)}% du budget</text>}
                     </g>
+                    <g transform={`translate(${R * 0.68},${R * 0.68})`} style={{ cursor: "pointer" }}
+                      onPointerDown={e => e.stopPropagation()}
+                      onClick={e => { e.stopPropagation(); setCreateMode("expense"); }}>
+                      <circle r={11} fill="#12121a" stroke="#f87171" strokeWidth={1.2} />
+                      <Plus x={-6} y={-6} size={12} color="#fca5a5" />
+                    </g>
                   </>;
                 })()}
 
@@ -693,7 +725,44 @@ export default function GalaxyView({
                     <g clipPath={`url(#cp-${n.id})`}>
                       <circle r={n.r} fill={skinFill} filter={skinFilter} opacity={0.65} />
                       {skin !== "tech" && <circle r={n.r} fill={skinFill} opacity={0.3} filter="url(#clouds)" />}
+
+                      {skin === "ocean" && <>
+                        {[0.22, 0.5, 0.78].map((ry, i) => (
+                          <ellipse key={`wave-${i}`} cx={Math.sin(t * 0.6 + i * 2) * n.r * 0.12} cy={n.r * (ry - 0.5) * 1.5} rx={n.r * 1.05} ry={2.5 + i * 0.8} fill="#d0f7ff" opacity={0.16 + (i === 1 ? 0.1 : 0)} />
+                        ))}
+                        <ellipse cx={-n.r * 0.32} cy={n.r * 0.2} rx={n.r * 0.24} ry={n.r * 0.11} fill="#245a34" opacity={0.65} />
+                        <ellipse cx={-n.r * 0.32} cy={n.r * 0.14} rx={n.r * 0.1} ry={n.r * 0.05} fill="#3a8a4c" opacity={0.5} />
+                      </>}
+
+                      {skin === "terrain" && [[-0.32, -0.22, 0.15], [0.26, 0.12, 0.11], [0.02, 0.38, 0.09]].map((c, i) => (
+                        <ellipse key={`cr-${i}`} cx={c[0] * n.r} cy={c[1] * n.r} rx={c[2] * n.r} ry={c[2] * n.r * 0.6} fill="#241608" opacity={0.45} />
+                      ))}
+
+                      {skin === "crypto" && Array.from({ length: 6 }, (_, i) => {
+                        const ang = (i / 6) * Math.PI * 2;
+                        const pulse = 0.5 + 0.5 * Math.sin(t * 3 + i);
+                        return <line key={`ve-${i}`} x1={0} y1={0} x2={Math.cos(ang) * n.r * 0.95} y2={Math.sin(ang) * n.r * 0.95} stroke="#e8c0ff" strokeWidth={0.7 + pulse * 0.9} opacity={0.25 + pulse * 0.45} />;
+                      })}
                     </g>
+
+                    {skin === "tech" && <>
+                      {Array.from({ length: 5 }, (_, i) => {
+                        const ang = (i / 5) * Math.PI * 2 + t * 0.15;
+                        return <line key={`tc-${i}`} x1={Math.cos(ang) * n.r * 0.12} y1={Math.sin(ang) * n.r * 0.12} x2={Math.cos(ang) * n.r * 0.92} y2={Math.sin(ang) * n.r * 0.92} stroke="#5cfff0" strokeWidth={0.6} opacity={0.35 + Math.sin(t * 2 + i) * 0.2} clipPath={`url(#cp-${n.id})`} />;
+                      })}
+                      {Array.from({ length: 4 }, (_, i) => {
+                        const ang = (i / 4) * Math.PI * 2 - t * 0.2;
+                        return <circle key={`td-${i}`} cx={Math.cos(ang) * n.r * 0.55} cy={Math.sin(ang) * n.r * 0.55} r={1.5} fill="#baffee" opacity={0.6 + Math.sin(t * 3 + i) * 0.35} clipPath={`url(#cp-${n.id})`} />;
+                      })}
+                      <ellipse rx={n.r * 1.38} ry={n.r * 0.3} fill="none" stroke="#5cfff0" strokeOpacity={0.3} strokeWidth={1} transform={`rotate(${(t * 6) % 360})`} />
+                    </>}
+
+                    {skin === "empty" && Array.from({ length: 3 }, (_, i) => {
+                      const ang = (i / 3) * Math.PI * 2 + t * 0.35;
+                      const rr = n.r + 15;
+                      return <circle key={`rock-${i}`} cx={Math.cos(ang) * rr} cy={Math.sin(ang) * rr * 0.55} r={1.6 + i * 0.6} fill="#8a84a0" opacity={0.55} />;
+                    })}
+
                     <circle r={n.r} fill="url(#sph-hl)" stroke={n.color} strokeOpacity={isExp ? 0.35 : 0.1} strokeWidth={isExp ? 1.5 : 0.5} />
                     <text y={-6} textAnchor="middle" fontSize={11} fontWeight={600} fill="#fff" style={ts}>{n.label}</text>
                     <text y={9} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.7)">{n.sub}</text>
@@ -743,7 +812,7 @@ export default function GalaxyView({
       </div>
 
       {/* ── PANEL ── */}
-      <NodePanel selected={selected} loans={loans} portfolios={portfolios} members={members} goals={goals} flows={flows} actions={actions} onClear={() => setSelected(null)} createMode={createMode} setCreateMode={setCreateMode} salary={salary} onUpdateSalary={onUpdateSalary} groups={groups.map(g => ({ key: g.key, total: g.total, valued: g.valued }))} grossTotal={grossTotal} debt={debt}
+      <NodePanel selected={selected} loans={loans} portfolios={portfolios} members={members} goals={goals} flows={flows} goalLinks={goalLinks} actions={actions} onClear={() => setSelected(null)} createMode={createMode} setCreateMode={setCreateMode} salary={salary} onUpdateSalary={onUpdateSalary} groups={groups.map(g => ({ key: g.key, total: g.total, valued: g.valued }))} grossTotal={grossTotal} debt={debt}
         onPortfolioCreated={p => setSelected({ kind: "portfolio", id: p.id, name: p.name, color: p.color, total: 0, count: 0, memberId: p.memberId })} />
     </div>
   );

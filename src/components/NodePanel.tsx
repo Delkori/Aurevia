@@ -11,12 +11,13 @@ type Goal = { id: number; name: string; targetAmount: string; targetDate: string
 type Loan = { id: number; name: string; remainingBalance: string; currency: string };
 type Member = { id: number; name: string; role: string; color: string };
 type Flow = { id: number; name: string | null; sourceType: string; sourceId: number | null; targetType: string; targetId: number | null; amount: string; frequency: string; memberId: number | null };
+type GoalLink = { id: number; goalId: number; portfolioId: number };
 
 export type Selection =
   | { kind: "total"; total: number; grossTotal: number; debt: number }
   | { kind: "portfolio"; id: number | "unassigned"; name: string; color: string; total: number; count: number; memberId: number | null }
   | { kind: "asset"; asset: Asset; value: number; gain: number; gainPct: number; portfolioName: string }
-  | { kind: "goal"; goal: Goal; progress: number }
+  | { kind: "goal"; goal: Goal; progress: number; linkedPortfolioIds: number[] }
   | { kind: "member"; member: Member; total: number }
   | null;
 
@@ -32,6 +33,8 @@ export type Actions = {
   deleteGoal: (id: number) => Promise<void>;
   createFlow: (data: Record<string, unknown>) => Promise<void>;
   deleteFlow: (id: number) => Promise<void>;
+  createGoalLink: (data: Record<string, unknown>) => Promise<void>;
+  deleteGoalLink: (id: number) => Promise<void>;
 };
 
 const TYPES_WITH_TICKER = new Set(["stock", "etf", "crypto", "precious_metal"]);
@@ -128,9 +131,9 @@ function GoalForm({ initial, progress, members, onSubmit, onDelete, onCancel }:
 }
 
 // ── Flow Form ────────────────────────────────────────────────────────────────
-function FlowForm({ portfolios, goals, onSubmit, onCancel }:
-  { portfolios: Portfolio[]; goals: Goal[]; onSubmit: (d: Record<string, unknown>) => void; onCancel: () => void }) {
-  const [f, setF] = useState({ sourceType: "salary", sourceId: "", targetType: "portfolio", targetId: "", amount: "", frequency: "monthly", name: "" });
+function FlowForm({ portfolios, goals, defaultTargetType, onSubmit, onCancel }:
+  { portfolios: Portfolio[]; goals: Goal[]; defaultTargetType?: string; onSubmit: (d: Record<string, unknown>) => void; onCancel: () => void }) {
+  const [f, setF] = useState({ sourceType: "salary", sourceId: "", targetType: defaultTargetType ?? "portfolio", targetId: "", amount: "", frequency: "monthly", name: "" });
   const targets = f.targetType === "portfolio" ? portfolios.map(p => ({ id: p.id, name: p.name }))
     : f.targetType === "goal" ? goals.map(g => ({ id: g.id, name: g.name }))
     : [];
@@ -173,8 +176,8 @@ function SalaryForm({ currentSalary, onSubmit, onCancel }:
 }
 
 // ── Main Panel ───────────────────────────────────────────────────────────────
-export default function NodePanel({ selected, loans, portfolios, members, goals, flows, actions, onClear, createMode, setCreateMode, salary, onUpdateSalary, groups, grossTotal, debt, onPortfolioCreated }:
-  { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number; onPortfolioCreated?: (p: Portfolio) => void }) {
+export default function NodePanel({ selected, loans, portfolios, members, goals, flows, goalLinks, actions, onClear, createMode, setCreateMode, salary, onUpdateSalary, groups, grossTotal, debt, onPortfolioCreated }:
+  { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; goalLinks: GoalLink[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number; onPortfolioCreated?: (p: Portfolio) => void }) {
 
   useEffect(() => { setCreateMode(null); }, [selected]); // eslint-disable-line
 
@@ -187,6 +190,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
       {createMode === "asset" && <AssetForm portfolios={portfolios} defaultPortfolioId={selected?.kind === "portfolio" && selected.id !== "unassigned" ? selected.id as number : undefined} onSubmit={async d => { await actions.createAsset(d); clear(); }} onCancel={clear} />}
       {createMode === "goal" && <GoalForm members={members} onSubmit={async d => { await actions.createGoal(d); clear(); }} onCancel={clear} />}
       {createMode === "flow" && <FlowForm portfolios={portfolios} goals={goals} onSubmit={async d => { await actions.createFlow(d); clear(); }} onCancel={clear} />}
+      {createMode === "expense" && <FlowForm portfolios={portfolios} goals={goals} defaultTargetType="expense" onSubmit={async d => { await actions.createFlow(d); clear(); }} onCancel={clear} />}
 
       {createMode === "salary" && <SalaryForm currentSalary={salary} onSubmit={async v => { await onUpdateSalary(v); clear(); }} onCancel={clear} />}
 
@@ -351,6 +355,29 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
             onSubmit={async d => { await actions.updateGoal(selected.goal.id, d); clear(); }}
             onDelete={async () => { if (!confirm(`Supprimer "${selected.goal.name}" ?`)) return; await actions.deleteGoal(selected.goal.id); clear(); }}
             onCancel={clear} />
+
+          {/* Linked planets — drive the progress % */}
+          {portfolios.length > 0 && <div className="pt-2 border-t border-border space-y-1">
+            <p className="text-[10px] text-text-muted uppercase tracking-wide">Planètes liées</p>
+            <p className="text-[10px] text-text-muted">
+              {selected.linkedPortfolioIds.length > 0
+                ? "La progression est calculée sur la somme de ces planètes."
+                : "Aucun lien : la progression utilise le patrimoine net total."}
+            </p>
+            {portfolios.map(p => {
+              const link = goalLinks.find(gl => gl.goalId === selected.goal.id && gl.portfolioId === p.id);
+              const g = groups.find(gr => gr.key === p.id);
+              return <label key={p.id} className="flex items-center gap-2 text-xs py-1 cursor-pointer">
+                <input type="checkbox" checked={!!link} onChange={async () => {
+                  if (link) await actions.deleteGoalLink(link.id);
+                  else await actions.createGoalLink({ goalId: selected.goal.id, portfolioId: p.id });
+                }} />
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />
+                <span className="flex-1">{p.name}</span>
+                <span className="tabular text-text-muted">{formatMoney(g?.total ?? 0)}</span>
+              </label>;
+            })}
+          </div>}
 
           {/* Funding sources + time estimate */}
           {(() => {
