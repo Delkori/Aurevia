@@ -130,17 +130,22 @@ function GoalForm({ initial, progress, members, onSubmit, onDelete, onCancel }:
 // ── Flow Form ────────────────────────────────────────────────────────────────
 function FlowForm({ portfolios, goals, onSubmit, onCancel }:
   { portfolios: Portfolio[]; goals: Goal[]; onSubmit: (d: Record<string, unknown>) => void; onCancel: () => void }) {
-  const [f, setF] = useState({ sourceType: "salary", sourceId: "", targetType: "portfolio", targetId: "", amount: "", frequency: "monthly" });
-  const targets = f.targetType === "portfolio" ? portfolios.map(p => ({ id: p.id, name: p.name })) : goals.map(g => ({ id: g.id, name: g.name }));
+  const [f, setF] = useState({ sourceType: "salary", sourceId: "", targetType: "portfolio", targetId: "", amount: "", frequency: "monthly", name: "" });
+  const targets = f.targetType === "portfolio" ? portfolios.map(p => ({ id: p.id, name: p.name }))
+    : f.targetType === "goal" ? goals.map(g => ({ id: g.id, name: g.name }))
+    : [];
   const sources = f.sourceType === "portfolio" ? portfolios.map(p => ({ id: p.id, name: p.name })) : [];
+  const needsTargetPicker = f.targetType !== "expense";
   return (
     <form onSubmit={e => { e.preventDefault(); onSubmit({ ...f, sourceId: f.sourceId ? Number(f.sourceId) : null, targetId: f.targetId ? Number(f.targetId) : null }); }} className="space-y-1">
       <p className="text-[10px] text-text-muted uppercase tracking-wide">Nouveau flux</p>
+      <Label>Nom (optionnel)</Label><Inp value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="Loyer, Épargne PEA…" />
       <Label>Source</Label><Sel value={f.sourceType} onChange={e => setF({ ...f, sourceType: e.target.value, sourceId: "" })}><option value="salary">Salaire</option><option value="portfolio">Portefeuille</option></Sel>
       {f.sourceType !== "salary" && <Sel value={f.sourceId} onChange={e => setF({ ...f, sourceId: e.target.value })}><option value="">—</option>{sources.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</Sel>}
-      <Label>Destination</Label><Sel value={f.targetType} onChange={e => setF({ ...f, targetType: e.target.value, targetId: "" })}><option value="portfolio">Portefeuille</option><option value="goal">Objectif</option></Sel>
-      <Sel value={f.targetId} onChange={e => setF({ ...f, targetId: e.target.value })}><option value="">—</option>{targets.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</Sel>
-      <Label>Montant</Label><Inp required type="number" step="any" value={f.amount} onChange={e => setF({ ...f, amount: e.target.value })} className="tabular" />
+      <Label>Destination</Label><Sel value={f.targetType} onChange={e => setF({ ...f, targetType: e.target.value, targetId: "" })}><option value="portfolio">Portefeuille</option><option value="goal">Objectif</option><option value="expense">Dépense</option></Sel>
+      {needsTargetPicker && <Sel value={f.targetId} onChange={e => setF({ ...f, targetId: e.target.value })}><option value="">—</option>{targets.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</Sel>}
+      {f.targetType === "expense" && <Inp value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="Loyer, Courses, Transport…" />}
+      <Label>Montant</Label><Inp required type="number" step="any" value={f.amount} onChange={e => setF({ ...f, amount: e.target.value })} placeholder="800" className="tabular" />
       <Label>Fréquence</Label><Sel value={f.frequency} onChange={e => setF({ ...f, frequency: e.target.value })}><option value="monthly">Mensuel</option><option value="weekly">Hebdo</option><option value="yearly">Annuel</option></Sel>
       <div className="flex gap-2 pt-3"><Btn type="submit" variant="accent" className="flex-1">Créer</Btn><Btn type="button" onClick={onCancel}>Fermer</Btn></div>
     </form>
@@ -194,14 +199,60 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
           <p className="text-2xl font-[family-name:var(--font-mono-num)] tabular">{formatMoney(selected.total)}</p>
           {debt > 0 && <div className="text-xs text-text-muted space-y-0.5"><p className="tabular">{formatMoney(selected.grossTotal)} d&apos;actifs</p><p className="tabular text-negative">− {formatMoney(debt)} de crédits</p></div>}
           {loans.length > 0 && <div className="pt-2 border-t border-border">{loans.map(l => <div key={l.id} className="flex justify-between text-xs py-1"><span className="text-text-muted">{l.name}</span><span className="tabular text-negative">{formatMoney(Number(l.remainingBalance))}</span></div>)}</div>}
+          {flows.length > 0 && <div className="pt-2 border-t border-border">
+            <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Flux mensuels</p>
+            {flows.filter(f => f.sourceType === "salary").map(f => {
+              const tName = f.targetType === "portfolio" ? portfolios.find(p => p.id === f.targetId)?.name
+                : f.targetType === "goal" ? goals.find(g => g.id === f.targetId)?.name
+                : f.targetType === "expense" ? (f.name || "Dépense") : "?";
+              return <div key={f.id} className="flex justify-between text-xs py-0.5">
+                <span className="text-text-muted">→ {tName}</span>
+                <span className="tabular">{formatMoney(Number(f.amount))}</span>
+              </div>;
+            })}
+            {flows.filter(f => f.sourceType === "portfolio").map(f => {
+              const sName = portfolios.find(p => p.id === f.sourceId)?.name || "?";
+              const tName = f.targetType === "goal" ? goals.find(g => g.id === f.targetId)?.name : "?";
+              return <div key={f.id} className="flex justify-between text-xs py-0.5">
+                <span className="text-text-muted">{sName} → {tName}</span>
+                <span className="tabular">{formatMoney(Number(f.amount))}</span>
+              </div>;
+            })}
+          </div>}
         </div>
       )}
 
       {!createMode && selected?.kind === "portfolio" && selected.id !== "unassigned" && (
-        <PortfolioForm initial={{ name: selected.name, color: selected.color, memberId: selected.memberId }} members={members}
-          onSubmit={async d => { await actions.updatePortfolio(selected.id as number, d); clear(); }}
-          onDelete={async () => { if (!confirm(`Supprimer "${selected.name}" ?`)) return; await actions.deletePortfolio(selected.id as number); clear(); }}
-          onCancel={clear} />
+        <div className="space-y-3">
+          <PortfolioForm initial={{ name: selected.name, color: selected.color, memberId: selected.memberId }} members={members}
+            onSubmit={async d => { await actions.updatePortfolio(selected.id as number, d); clear(); }}
+            onDelete={async () => { if (!confirm(`Supprimer "${selected.name}" ?`)) return; await actions.deletePortfolio(selected.id as number); clear(); }}
+            onCancel={clear} />
+          {/* Flux associés */}
+          {(() => {
+            const incoming = flows.filter(f => f.targetType === "portfolio" && f.targetId === selected.id);
+            const outgoing = flows.filter(f => f.sourceType === "portfolio" && f.sourceId === selected.id);
+            if (incoming.length === 0 && outgoing.length === 0) return null;
+            return <div className="pt-2 border-t border-border space-y-1">
+              <p className="text-[10px] text-text-muted uppercase tracking-wide">Flux</p>
+              {incoming.map(f => (
+                <div key={f.id} className="flex items-center justify-between text-xs py-1">
+                  <span className="text-text-muted">{f.sourceType === "salary" ? "Salaire" : f.name || "Flux"} →</span>
+                  <span className="tabular text-positive">+{formatMoney(Number(f.amount))}/mois</span>
+                  <button onClick={async () => { if (confirm("Supprimer ce flux ?")) { await actions.deleteFlow(f.id); clear(); } }} className="p-0.5 text-text-muted hover:text-negative"><Trash2 size={11} /></button>
+                </div>
+              ))}
+              {outgoing.map(f => {
+                const targetName = f.targetType === "goal" ? goals.find(g => g.id === f.targetId)?.name : f.name || "Flux";
+                return <div key={f.id} className="flex items-center justify-between text-xs py-1">
+                  <span className="text-text-muted">→ {targetName}</span>
+                  <span className="tabular text-negative">-{formatMoney(Number(f.amount))}/mois</span>
+                  <button onClick={async () => { if (confirm("Supprimer ce flux ?")) { await actions.deleteFlow(f.id); clear(); } }} className="p-0.5 text-text-muted hover:text-negative"><Trash2 size={11} /></button>
+                </div>;
+              })}
+            </div>;
+          })()}
+        </div>
       )}
 
       {!createMode && selected?.kind === "asset" && (
@@ -212,10 +263,27 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
       )}
 
       {!createMode && selected?.kind === "goal" && (
-        <GoalForm initial={selected.goal} progress={selected.progress} members={members}
-          onSubmit={async d => { await actions.updateGoal(selected.goal.id, d); clear(); }}
-          onDelete={async () => { if (!confirm(`Supprimer "${selected.goal.name}" ?`)) return; await actions.deleteGoal(selected.goal.id); clear(); }}
-          onCancel={clear} />
+        <div className="space-y-3">
+          <GoalForm initial={selected.goal} progress={selected.progress} members={members}
+            onSubmit={async d => { await actions.updateGoal(selected.goal.id, d); clear(); }}
+            onDelete={async () => { if (!confirm(`Supprimer "${selected.goal.name}" ?`)) return; await actions.deleteGoal(selected.goal.id); clear(); }}
+            onCancel={clear} />
+          {(() => {
+            const incoming = flows.filter(f => f.targetType === "goal" && f.targetId === selected.goal.id);
+            if (incoming.length === 0) return null;
+            return <div className="pt-2 border-t border-border space-y-1">
+              <p className="text-[10px] text-text-muted uppercase tracking-wide">Alimenté par</p>
+              {incoming.map(f => {
+                const srcName = f.sourceType === "salary" ? "Salaire" : portfolios.find(p => p.id === f.sourceId)?.name || f.name || "Flux";
+                return <div key={f.id} className="flex items-center justify-between text-xs py-1">
+                  <span className="text-text-muted">{srcName} →</span>
+                  <span className="tabular text-accent">{formatMoney(Number(f.amount))}/mois</span>
+                  <button onClick={async () => { if (confirm("Supprimer ce flux ?")) { await actions.deleteFlow(f.id); clear(); } }} className="p-0.5 text-text-muted hover:text-negative"><Trash2 size={11} /></button>
+                </div>;
+              })}
+            </div>;
+          })()}
+        </div>
       )}
 
       {!createMode && selected?.kind === "member" && (
