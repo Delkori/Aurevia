@@ -33,6 +33,7 @@ export async function POST(req: NextRequest) {
         quantity: body.quantity || null,
         avgBuyPrice: body.avgBuyPrice || null,
         manualValue: body.manualValue || null,
+        yieldRate: body.yieldRate || null,
         currency: body.currency || "EUR",
         portfolioId: body.portfolioId ?? null,
       })

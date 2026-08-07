@@ -5,6 +5,7 @@ import { Plus, Trash2, AlertTriangle, X } from "lucide-react";
 import { formatMoney } from "@/lib/format";
 import { currentValue, gain, ASSET_TYPE_LABELS } from "@/lib/networth";
 import { apiFetch, ApiError } from "@/lib/api";
+import { fetchAllQuotes } from "@/lib/allQuotes";
 import LoansTable from "@/components/LoansTable";
 
 type Asset = {
@@ -15,6 +16,7 @@ type Asset = {
   quantity: string | null;
   avgBuyPrice: string | null;
   manualValue: string | null;
+  yieldRate: string | null;
   currency: string;
   portfolioId: number | null;
 };
@@ -22,8 +24,23 @@ type Asset = {
 type Portfolio = { id: number; name: string; color: string };
 type Quote = { price: number; currency: string } | null;
 
-const TYPES_WITH_TICKER = new Set(["stock", "etf", "crypto"]);
+// Types dont le prix vient de Yahoo Finance (actions/ETF/métaux précieux via tickers/futures)
+const YAHOO_TYPES = new Set(["stock", "etf", "precious_metal"]);
+// Types dont le prix vient de CoinGecko
+const CRYPTO_TYPES = new Set(["crypto"]);
+// Tous les types avec un cours en direct (ticker + quantité + prix de revient)
+const TYPES_WITH_TICKER = new Set([...YAHOO_TYPES, ...CRYPTO_TYPES]);
+// Types manuels avec un rendement annuel affiché (ex: SCPI)
+const YIELD_TYPES = new Set(["scpi"]);
+
 const CURRENCIES = ["EUR", "USD", "GBP", "CHF"];
+
+const METAL_TICKERS = [
+  { value: "GC=F", label: "Or (once troy)" },
+  { value: "SI=F", label: "Argent (once troy)" },
+  { value: "PL=F", label: "Platine (once troy)" },
+  { value: "PA=F", label: "Palladium (once troy)" },
+];
 
 // Une ligne "brouillon" pour ajouter un actif directement dans le tableau
 type DraftRow = {
@@ -33,6 +50,7 @@ type DraftRow = {
   quantity: string;
   avgBuyPrice: string;
   manualValue: string;
+  yieldRate: string;
   currency: string;
   portfolioId: string;
 };
@@ -44,6 +62,7 @@ const emptyDraft: DraftRow = {
   quantity: "",
   avgBuyPrice: "",
   manualValue: "",
+  yieldRate: "",
   currency: "EUR",
   portfolioId: "",
 };
@@ -57,6 +76,7 @@ function toPayload(row: DraftRow) {
     quantity: needsTicker ? row.quantity || null : null,
     avgBuyPrice: needsTicker ? row.avgBuyPrice || null : null,
     manualValue: needsTicker ? null : row.manualValue || null,
+    yieldRate: YIELD_TYPES.has(row.type) ? row.yieldRate || null : null,
     currency: row.currency,
     portfolioId: row.portfolioId ? Number(row.portfolioId) : null,
   };
@@ -102,14 +122,11 @@ export default function AssetsPage() {
       }
 
       const list = assetsResult.status === "fulfilled" ? (assetsResult.value as Asset[]) : [];
-      const tickers = list.map((a) => a.ticker).filter((t): t is string => !!t);
-      if (tickers.length > 0) {
-        try {
-          const q = await apiFetch(`/api/prices?tickers=${tickers.join(",")}`);
-          setQuotes(q as Record<string, Quote>);
-        } catch {
-          // les cours ne sont pas critiques pour afficher la page
-        }
+      try {
+        const q = await fetchAllQuotes(list);
+        setQuotes(q as Record<string, Quote>);
+      } catch {
+        // les cours ne sont pas critiques pour afficher la page
       }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Erreur de chargement.");
@@ -315,13 +332,31 @@ export default function AssetsPage() {
                   </td>
                   <td className="px-3 py-2">
                     {needsTicker ? (
-                      <input
-                        value={a.ticker ?? ""}
-                        onChange={(e) => updateAssetField(a.id, { ticker: e.target.value })}
-                        onBlur={() => saveAsset(a)}
-                        placeholder="AAPL"
-                        className="w-24 bg-transparent focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
-                      />
+                      a.type === "precious_metal" ? (
+                        <select
+                          value={a.ticker ?? ""}
+                          onChange={(e) => {
+                            updateAssetField(a.id, { ticker: e.target.value });
+                            saveAsset({ ...a, ticker: e.target.value });
+                          }}
+                          className="bg-transparent focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent max-w-[130px]"
+                        >
+                          <option value="">—</option>
+                          {METAL_TICKERS.map((m) => (
+                            <option key={m.value} value={m.value}>
+                              {m.label}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          value={a.ticker ?? ""}
+                          onChange={(e) => updateAssetField(a.id, { ticker: e.target.value })}
+                          onBlur={() => saveAsset(a)}
+                          placeholder={a.type === "crypto" ? "bitcoin" : "AAPL"}
+                          className="w-24 bg-transparent focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
+                        />
+                      )
                     ) : (
                       <span className="text-text-muted px-2">—</span>
                     )}
@@ -356,6 +391,18 @@ export default function AssetsPage() {
                       onBlur={() => saveAsset(a)}
                       className="w-28 bg-transparent focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent text-right tabular"
                     />
+                    {YIELD_TYPES.has(a.type) && (
+                      <input
+                        type="number"
+                        step="any"
+                        value={a.yieldRate ?? ""}
+                        onChange={(e) => updateAssetField(a.id, { yieldRate: e.target.value })}
+                        onBlur={() => saveAsset(a)}
+                        placeholder="rendement %"
+                        title="Rendement annuel (%)"
+                        className="w-20 mt-1 bg-transparent focus:bg-bg rounded px-2 py-1 outline-none focus:ring-1 focus:ring-accent text-right tabular text-xs text-text-muted"
+                      />
+                    )}
                   </td>
                   <td className="px-3 py-2">
                     <select
@@ -436,13 +483,28 @@ export default function AssetsPage() {
               </td>
               <td className="px-3 py-2">
                 {needsTickerDraft ? (
-                  <input
-                    value={draft.ticker}
-                    onChange={(e) => setDraft({ ...draft, ticker: e.target.value })}
-                    onBlur={commitDraft}
-                    placeholder="AAPL"
-                    className="w-24 bg-transparent focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
-                  />
+                  draft.type === "precious_metal" ? (
+                    <select
+                      value={draft.ticker}
+                      onChange={(e) => setDraft({ ...draft, ticker: e.target.value })}
+                      className="bg-transparent focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent max-w-[130px]"
+                    >
+                      <option value="">—</option>
+                      {METAL_TICKERS.map((m) => (
+                        <option key={m.value} value={m.value}>
+                          {m.label}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      value={draft.ticker}
+                      onChange={(e) => setDraft({ ...draft, ticker: e.target.value })}
+                      onBlur={commitDraft}
+                      placeholder={draft.type === "crypto" ? "bitcoin" : "AAPL"}
+                      className="w-24 bg-transparent focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
+                    />
+                  )
                 ) : (
                   <span className="text-text-muted px-2">—</span>
                 )}
@@ -476,6 +538,18 @@ export default function AssetsPage() {
                   onBlur={commitDraft}
                   className="w-28 bg-transparent focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent text-right tabular"
                 />
+                {YIELD_TYPES.has(draft.type) && (
+                  <input
+                    type="number"
+                    step="any"
+                    value={draft.yieldRate}
+                    onChange={(e) => setDraft({ ...draft, yieldRate: e.target.value })}
+                    onBlur={commitDraft}
+                    placeholder="rendement %"
+                    title="Rendement annuel (%)"
+                    className="w-20 mt-1 bg-transparent focus:bg-bg rounded px-2 py-1 outline-none focus:ring-1 focus:ring-accent text-right tabular text-xs text-text-muted"
+                  />
+                )}
               </td>
               <td className="px-3 py-2">
                 <select

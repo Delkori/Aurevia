@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { AlertTriangle, X } from "lucide-react";
 import { currentValue, totalDebt } from "@/lib/networth";
 import { apiFetch, ApiError } from "@/lib/api";
+import { fetchAllQuotes } from "@/lib/allQuotes";
 import GoalGalaxy from "@/components/GoalGalaxy";
 
 type Asset = {
@@ -12,6 +13,7 @@ type Asset = {
   quantity: string | null;
   avgBuyPrice: string | null;
   manualValue: string | null;
+  currency: string;
 };
 
 type Goal = {
@@ -38,14 +40,7 @@ export default function GoalsPage() {
       ])) as [Goal[], Asset[], { remainingBalance: string }[]];
       setGoals(goalsData);
 
-      const tickers = assetsData
-        .map((a) => a.ticker)
-        .filter((t): t is string => !!t);
-      const quotes = (
-        tickers.length > 0
-          ? await apiFetch(`/api/prices?tickers=${tickers.join(",")}`)
-          : {}
-      ) as Record<string, { price: number; currency: string } | null>;
+      const quotes = await fetchAllQuotes(assetsData);
 
       const total = assetsData.reduce(
         (sum, a) => sum + currentValue(a, a.ticker ? quotes[a.ticker] : null),

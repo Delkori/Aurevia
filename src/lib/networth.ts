@@ -8,7 +8,11 @@ export type AssetLike = {
 
 export type Quote = { price: number; currency: string } | null | undefined;
 
-const HAS_LIVE_PRICE = new Set(["stock", "etf", "crypto"]);
+const YAHOO_PRICE_TYPES = new Set(["stock", "etf", "precious_metal"]);
+const CRYPTO_PRICE_TYPES = new Set(["crypto"]);
+const HAS_LIVE_PRICE = new Set([...YAHOO_PRICE_TYPES, ...CRYPTO_PRICE_TYPES]);
+
+export { YAHOO_PRICE_TYPES, CRYPTO_PRICE_TYPES };
 
 /** Valeur actuelle d'un actif, en tenant compte du cours en direct si dispo. */
 export function currentValue(asset: AssetLike, quote: Quote): number {
@@ -54,7 +58,12 @@ export const ASSET_TYPE_LABELS: Record<string, string> = {
   stock: "Action",
   etf: "ETF",
   crypto: "Crypto",
+  precious_metal: "Métal précieux",
   real_estate: "Immobilier",
+  scpi: "SCPI",
+  private_equity: "Private equity / Crowdfunding",
+  art: "Œuvre d'art / Collection",
+  life_insurance: "Assurance-vie",
   cash: "Cash / Livret",
   other: "Autre",
 };

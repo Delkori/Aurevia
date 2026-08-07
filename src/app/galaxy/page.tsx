@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { AlertTriangle, X } from "lucide-react";
 import GalaxyView from "@/components/GalaxyView";
 import { apiFetch, ApiError } from "@/lib/api";
+import { fetchAllQuotes } from "@/lib/allQuotes";
 
 type Asset = {
   id: number;
@@ -59,7 +60,7 @@ export default function GalaxyPage() {
       const tickers = assetsData.map((a) => a.ticker).filter((t): t is string => !!t);
       if (tickers.length > 0) {
         try {
-          const q = await apiFetch(`/api/prices?tickers=${tickers.join(",")}`);
+          const q = await fetchAllQuotes(assetsData);
           setQuotes(q as Record<string, Quote>);
         } catch {
           // pas critique

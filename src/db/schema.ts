@@ -26,6 +26,7 @@ export const assets = pgTable("assets", {
   quantity: numeric("quantity"), // pour actions/etf/crypto
   avgBuyPrice: numeric("avg_buy_price"), // prix de revient moyen, pour calculer la plus-value
   manualValue: numeric("manual_value"), // pour immobilier / cash / autre
+  yieldRate: numeric("yield_rate"), // rendement annuel en %, ex: SCPI
   currency: text("currency").notNull().default("EUR"),
   portfolioId: integer("portfolio_id").references(() => portfolios.id, {
     onDelete: "set null",

@@ -13,6 +13,7 @@ import { formatMoney } from "@/lib/format";
 import { currentValue, totalDebt } from "@/lib/networth";
 import { projectNetWorth, monthsToReach } from "@/lib/projection";
 import { apiFetch, ApiError } from "@/lib/api";
+import { fetchAllQuotes } from "@/lib/allQuotes";
 import { AlertTriangle, X } from "lucide-react";
 
 type Asset = {
@@ -21,6 +22,7 @@ type Asset = {
   quantity: string | null;
   avgBuyPrice: string | null;
   manualValue: string | null;
+  currency: string;
 };
 
 type Goal = { id: number; name: string; targetAmount: string; color: string };
@@ -42,14 +44,7 @@ export default function ProjectionPage() {
         apiFetch("/api/goals"),
         apiFetch("/api/loans"),
       ])) as [Asset[], Goal[], { remainingBalance: string }[]];
-      const tickers = assetsData
-        .map((a) => a.ticker)
-        .filter((t): t is string => !!t);
-      const quotes = (
-        tickers.length > 0
-          ? await apiFetch(`/api/prices?tickers=${tickers.join(",")}`)
-          : {}
-      ) as Record<string, { price: number; currency: string } | null>;
+      const quotes = await fetchAllQuotes(assetsData);
       const total = assetsData.reduce(
         (sum, a) => sum + currentValue(a, a.ticker ? quotes[a.ticker] : null),
         0

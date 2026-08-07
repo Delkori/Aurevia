@@ -6,6 +6,7 @@ import { formatMoney } from "@/lib/format";
 import { currentValue, totalDebt } from "@/lib/networth";
 import { monthsToReach } from "@/lib/projection";
 import { apiFetch, ApiError } from "@/lib/api";
+import { fetchAllQuotes } from "@/lib/allQuotes";
 
 type Asset = {
   type: string;
@@ -13,6 +14,7 @@ type Asset = {
   quantity: string | null;
   avgBuyPrice: string | null;
   manualValue: string | null;
+  currency: string;
 };
 
 type Goal = { id: number; name: string; targetAmount: string; color: string };
@@ -34,14 +36,7 @@ export default function TimelinePage() {
       ])) as [Asset[], Goal[]];
       const loansData = (await apiFetch("/api/loans")) as { remainingBalance: string }[];
 
-      const tickers = (assetsData as (Asset & { ticker: string | null })[])
-        .map((a) => a.ticker)
-        .filter((t): t is string => !!t);
-      const quotes = (
-        tickers.length > 0
-          ? await apiFetch(`/api/prices?tickers=${tickers.join(",")}`)
-          : {}
-      ) as Record<string, { price: number; currency: string } | null>;
+      const quotes = await fetchAllQuotes(assetsData);
 
       const total = assetsData.reduce(
         (sum, a) => sum + currentValue(a, "ticker" in a && a.ticker ? quotes[a.ticker as string] : null),

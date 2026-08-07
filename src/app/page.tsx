@@ -8,6 +8,7 @@ import { ToastStack, useToasts } from "@/components/Toast";
 import { formatMoney, formatPercent } from "@/lib/format";
 import { currentValue, gain, costBasis, totalDebt } from "@/lib/networth";
 import { apiFetch, ApiError } from "@/lib/api";
+import { fetchAllQuotes } from "@/lib/allQuotes";
 import {
   getNotifiedGoalIds,
   markGoalNotified,
@@ -71,7 +72,7 @@ export default function DashboardPage() {
         .map((a) => a.ticker)
         .filter((t): t is string => !!t);
       if (tickers.length > 0) {
-        const q = await apiFetch(`/api/prices?tickers=${tickers.join(",")}`);
+        const q = await fetchAllQuotes(assetsRes as Asset[]);
         setQuotes(q as Record<string, Quote>);
       }
     } catch (err) {

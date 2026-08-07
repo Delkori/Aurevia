@@ -3,7 +3,8 @@ import { db } from "@/db";
 import { assets, loans, netWorthSnapshots } from "@/db/schema";
 import { asc, eq } from "drizzle-orm";
 import { getQuotes } from "@/lib/prices";
-import { currentValue, totalDebt } from "@/lib/networth";
+import { getCryptoQuotes } from "@/lib/cryptoPrices";
+import { currentValue, totalDebt, YAHOO_PRICE_TYPES, CRYPTO_PRICE_TYPES } from "@/lib/networth";
 import { handleApiError } from "@/lib/apiError";
 
 export async function GET() {
@@ -24,8 +25,29 @@ export async function POST() {
       db.select().from(assets),
       db.select().from(loans),
     ]);
-    const tickers = allAssets.map((a) => a.ticker).filter((t): t is string => !!t);
-    const quotes = await getQuotes(tickers);
+
+    const yahooTickers = allAssets
+      .filter((a) => YAHOO_PRICE_TYPES.has(a.type) && a.ticker)
+      .map((a) => a.ticker as string);
+    const cryptoAssets = allAssets.filter((a) => CRYPTO_PRICE_TYPES.has(a.type) && a.ticker);
+
+    const quotes: Record<string, { price: number; currency: string } | null> = {};
+    Object.assign(quotes, await getQuotes(yahooTickers));
+
+    if (cryptoAssets.length > 0) {
+      const byCurrency = new Map<string, Set<string>>();
+      for (const a of cryptoAssets) {
+        const cur = a.currency.toLowerCase();
+        if (!byCurrency.has(cur)) byCurrency.set(cur, new Set());
+        byCurrency.get(cur)!.add(a.ticker as string);
+      }
+      for (const [currency, ids] of byCurrency) {
+        const cryptoQuotes = await getCryptoQuotes(
+          [...ids].map((id) => ({ id, currency }))
+        );
+        Object.assign(quotes, cryptoQuotes);
+      }
+    }
 
     const assetsTotal = allAssets.reduce((sum, a) => {
       const quote = a.ticker ? quotes[a.ticker] : null;

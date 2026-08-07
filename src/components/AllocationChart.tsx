@@ -8,7 +8,12 @@ const COLORS: Record<string, string> = {
   stock: "#7c6af5",
   etf: "#5eead4",
   crypto: "#fb923c",
+  precious_metal: "#fbbf24",
   real_estate: "#60a5fa",
+  scpi: "#38bdf8",
+  private_equity: "#a78bfa",
+  art: "#fb7185",
+  life_insurance: "#34d399",
   cash: "#6b6b72",
   other: "#4f4f57",
 };
