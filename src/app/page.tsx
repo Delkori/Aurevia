@@ -54,23 +54,24 @@ export default function HomePage() {
   const api = async (url: string, method: string, body?: unknown) => {
     setError(null);
     try {
-      await apiFetch(url, { method, headers: { "Content-Type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) });
+      const res = await apiFetch(url, { method, headers: { "Content-Type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) });
       load();
+      return res;
     } catch (err) { setError(err instanceof ApiError ? err.message : "Erreur."); throw err; }
   };
 
   const actions = {
-    createPortfolio: (d: Record<string, unknown>) => api("/api/portfolios", "POST", d),
-    updatePortfolio: (id: number, d: Record<string, unknown>) => api(`/api/portfolios/${id}`, "PUT", d),
-    deletePortfolio: (id: number) => api(`/api/portfolios/${id}`, "DELETE"),
-    createAsset: (d: Record<string, unknown>) => api("/api/assets", "POST", d),
-    updateAsset: (id: number, d: Record<string, unknown>) => api(`/api/assets/${id}`, "PUT", d),
-    deleteAsset: (id: number) => api(`/api/assets/${id}`, "DELETE"),
-    createGoal: (d: Record<string, unknown>) => api("/api/goals", "POST", d),
-    updateGoal: (id: number, d: Record<string, unknown>) => api(`/api/goals/${id}`, "PUT", d),
-    deleteGoal: (id: number) => api(`/api/goals/${id}`, "DELETE"),
-    createFlow: (d: Record<string, unknown>) => api("/api/flows", "POST", d),
-    deleteFlow: (id: number) => api(`/api/flows/${id}`, "DELETE"),
+    createPortfolio: (d: Record<string, unknown>) => api("/api/portfolios", "POST", d) as Promise<Portfolio>,
+    updatePortfolio: (id: number, d: Record<string, unknown>) => api(`/api/portfolios/${id}`, "PUT", d) as Promise<void>,
+    deletePortfolio: (id: number) => api(`/api/portfolios/${id}`, "DELETE") as Promise<void>,
+    createAsset: (d: Record<string, unknown>) => api("/api/assets", "POST", d) as Promise<void>,
+    updateAsset: (id: number, d: Record<string, unknown>) => api(`/api/assets/${id}`, "PUT", d) as Promise<void>,
+    deleteAsset: (id: number) => api(`/api/assets/${id}`, "DELETE") as Promise<void>,
+    createGoal: (d: Record<string, unknown>) => api("/api/goals", "POST", d) as Promise<void>,
+    updateGoal: (id: number, d: Record<string, unknown>) => api(`/api/goals/${id}`, "PUT", d) as Promise<void>,
+    deleteGoal: (id: number) => api(`/api/goals/${id}`, "DELETE") as Promise<void>,
+    createFlow: (d: Record<string, unknown>) => api("/api/flows", "POST", d) as Promise<void>,
+    deleteFlow: (id: number) => api(`/api/flows/${id}`, "DELETE") as Promise<void>,
   };
 
   const updateSalary = async (v: number) => {

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Trash2 } from "lucide-react";
-import { formatMoney, formatPercent } from "@/lib/format";
+import { formatMoney } from "@/lib/format";
 import { ASSET_TYPE_LABELS } from "@/lib/networth";
 
 type Asset = { id: number; name: string; type: string; ticker: string | null; quantity: string | null; avgBuyPrice: string | null; manualValue: string | null; yieldRate: string | null; currency: string; portfolioId: number | null };
@@ -21,7 +21,7 @@ export type Selection =
   | null;
 
 export type Actions = {
-  createPortfolio: (data: Record<string, unknown>) => Promise<void>;
+  createPortfolio: (data: Record<string, unknown>) => Promise<Portfolio>;
   updatePortfolio: (id: number, data: Record<string, unknown>) => Promise<void>;
   deletePortfolio: (id: number) => Promise<void>;
   createAsset: (data: Record<string, unknown>) => Promise<void>;
@@ -71,8 +71,8 @@ function PortfolioForm({ initial, members, onSubmit, onDelete, onCancel }:
   const [memberId, setMemberId] = useState(String(initial?.memberId ?? ""));
   return (
     <form onSubmit={e => { e.preventDefault(); onSubmit({ name, color, memberId: memberId ? Number(memberId) : null }); }} className="space-y-1">
-      <p className="text-[10px] text-text-muted uppercase tracking-wide">{initial ? "Portefeuille" : "Nouveau portefeuille"}</p>
-      <Label>Nom</Label><Inp required value={name} onChange={e => setName(e.target.value)} placeholder="PEA, CTO…" />
+      <p className="text-[10px] text-text-muted uppercase tracking-wide">{initial ? "Planète" : "Nouvelle planète"}</p>
+      <Label>Nom</Label><Inp required value={name} onChange={e => setName(e.target.value)} placeholder="PEA, CTO, Salaire…" />
       {members.length > 0 && <><Label>Membre</Label><Sel value={memberId} onChange={e => setMemberId(e.target.value)}><option value="">Moi</option>{members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</Sel></>}
       <Label>Couleur</Label><ColorPick value={color} onChange={setColor} />
       <div className="flex gap-2 pt-3">{onDelete && <Btn type="button" variant="danger" onClick={onDelete}><Trash2 size={12} /></Btn>}<Btn type="submit" variant="accent" className="flex-1">{initial ? "Enregistrer" : "Créer"}</Btn><Btn type="button" onClick={onCancel}>Fermer</Btn></div>
@@ -93,7 +93,7 @@ function AssetForm({ initial, portfolios, defaultPortfolioId, onSubmit, onDelete
       <p className="text-[10px] text-text-muted uppercase tracking-wide">{initial ? "Actif" : "Nouvel actif"}</p>
       <Label>Nom</Label><Inp required value={f.name} onChange={e => setF({ ...f, name: e.target.value })} />
       <Label>Type</Label><Sel value={f.type} onChange={e => setF({ ...f, type: e.target.value })}>{Object.entries(ASSET_TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Sel>
-      <Label>Portefeuille</Label><Sel value={f.portfolioId} onChange={e => setF({ ...f, portfolioId: e.target.value })}><option value="">—</option>{portfolios.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</Sel>
+      <Label>Planète</Label><Sel value={f.portfolioId} onChange={e => setF({ ...f, portfolioId: e.target.value })}><option value="">—</option>{portfolios.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</Sel>
       {nt && <><Label>{f.type === "precious_metal" ? "Métal" : f.type === "crypto" ? "ID CoinGecko" : "Ticker"}</Label>
         {f.type === "precious_metal" ? <Sel value={f.ticker} onChange={e => setF({ ...f, ticker: e.target.value })}><option value="">—</option>{METAL_TICKERS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}</Sel>
           : <Inp value={f.ticker} onChange={e => setF({ ...f, ticker: e.target.value })} placeholder={f.type === "crypto" ? "bitcoin" : "AAPL"} />}
@@ -140,9 +140,9 @@ function FlowForm({ portfolios, goals, onSubmit, onCancel }:
     <form onSubmit={e => { e.preventDefault(); onSubmit({ ...f, sourceId: f.sourceId ? Number(f.sourceId) : null, targetId: f.targetId ? Number(f.targetId) : null }); }} className="space-y-1">
       <p className="text-[10px] text-text-muted uppercase tracking-wide">Nouveau flux</p>
       <Label>Nom (optionnel)</Label><Inp value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="Loyer, Épargne PEA…" />
-      <Label>Source</Label><Sel value={f.sourceType} onChange={e => setF({ ...f, sourceType: e.target.value, sourceId: "" })}><option value="salary">Salaire</option><option value="portfolio">Portefeuille</option></Sel>
+      <Label>Source</Label><Sel value={f.sourceType} onChange={e => setF({ ...f, sourceType: e.target.value, sourceId: "" })}><option value="salary">Salaire</option><option value="portfolio">Planète</option></Sel>
       {f.sourceType !== "salary" && <Sel value={f.sourceId} onChange={e => setF({ ...f, sourceId: e.target.value })}><option value="">—</option>{sources.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</Sel>}
-      <Label>Destination</Label><Sel value={f.targetType} onChange={e => setF({ ...f, targetType: e.target.value, targetId: "" })}><option value="portfolio">Portefeuille</option><option value="goal">Objectif</option><option value="expense">Dépense</option></Sel>
+      <Label>Destination</Label><Sel value={f.targetType} onChange={e => setF({ ...f, targetType: e.target.value, targetId: "" })}><option value="portfolio">Planète</option><option value="goal">Objectif</option><option value="expense">Dépense</option></Sel>
       {needsTargetPicker && <Sel value={f.targetId} onChange={e => setF({ ...f, targetId: e.target.value })}><option value="">—</option>{targets.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</Sel>}
       {f.targetType === "expense" && <Inp value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="Loyer, Courses, Transport…" />}
       <Label>Montant</Label><Inp required type="number" step="any" value={f.amount} onChange={e => setF({ ...f, amount: e.target.value })} placeholder="800" className="tabular" />
@@ -173,8 +173,8 @@ function SalaryForm({ currentSalary, onSubmit, onCancel }:
 }
 
 // ── Main Panel ───────────────────────────────────────────────────────────────
-export default function NodePanel({ selected, loans, portfolios, members, goals, flows, actions, onClear, createMode, setCreateMode, salary, onUpdateSalary, groups, grossTotal, debt }:
-  { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number }) {
+export default function NodePanel({ selected, loans, portfolios, members, goals, flows, actions, onClear, createMode, setCreateMode, salary, onUpdateSalary, groups, grossTotal, debt, onPortfolioCreated }:
+  { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number; onPortfolioCreated?: (p: Portfolio) => void }) {
 
   useEffect(() => { setCreateMode(null); }, [selected]); // eslint-disable-line
 
@@ -183,7 +183,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
   return (
     <div className="bg-surface/40 border-l border-border p-5 space-y-3 overflow-y-auto">
 
-      {createMode === "portfolio" && <PortfolioForm members={members} onSubmit={async d => { await actions.createPortfolio(d); clear(); }} onCancel={clear} />}
+      {createMode === "portfolio" && <PortfolioForm members={members} onSubmit={async d => { const p = await actions.createPortfolio(d); setCreateMode(null); if (onPortfolioCreated) onPortfolioCreated(p); else onClear(); }} onCancel={clear} />}
       {createMode === "asset" && <AssetForm portfolios={portfolios} defaultPortfolioId={selected?.kind === "portfolio" && selected.id !== "unassigned" ? selected.id as number : undefined} onSubmit={async d => { await actions.createAsset(d); clear(); }} onCancel={clear} />}
       {createMode === "goal" && <GoalForm members={members} onSubmit={async d => { await actions.createGoal(d); clear(); }} onCancel={clear} />}
       {createMode === "flow" && <FlowForm portfolios={portfolios} goals={goals} onSubmit={async d => { await actions.createFlow(d); clear(); }} onCancel={clear} />}
@@ -203,7 +203,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
             {loans.map(l => <div key={l.id} className="flex justify-between text-xs py-0.5"><span className="text-text-muted">{l.name}</span><span className="tabular text-negative">{formatMoney(Number(l.remainingBalance))}</span></div>)}
           </div>}
           {portfolios.length > 0 && <div className="pt-2 border-t border-border">
-            <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Portefeuilles</p>
+            <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Planètes</p>
             {portfolios.map(p => {
               const g = groups.find(gr => gr.key === p.id);
               return <div key={p.id} className="flex items-center justify-between text-xs py-1">
@@ -280,7 +280,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
           {/* Quick actions */}
           <div className="flex gap-2">
             <Btn variant="accent" className="flex-1" onClick={() => setCreateMode("edit-portfolio")}>Modifier</Btn>
-            <Btn onClick={() => { setCreateMode("asset"); }}>+ Actif</Btn>
+            <Btn onClick={() => { setCreateMode("asset"); }}>+ Satellite</Btn>
           </div>
 
           {/* Edit form (hidden by default) */}
@@ -292,7 +292,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
           {/* Assets list */}
           {(() => {
             const g = groups.find(gr => gr.key === selected.id);
-            if (!g || g.valued.length === 0) return <p className="text-xs text-text-muted border border-dashed border-border rounded-lg p-4 text-center">Aucun actif. Clique &quot;+ Actif&quot; pour en ajouter.</p>;
+            if (!g || g.valued.length === 0) return <p className="text-xs text-text-muted border border-dashed border-border rounded-lg p-4 text-center">Aucun satellite. Clique &quot;+ Satellite&quot; pour en ajouter.</p>;
             return <div className="pt-2 border-t border-border">
               <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Composition</p>
               {g.valued.sort((a, b) => b.value - a.value).map(v => {

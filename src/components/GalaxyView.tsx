@@ -7,7 +7,7 @@ import {
 } from "d3-force";
 import { FolderPlus, Plus, Star, ArrowRight, Download, RotateCcw, Wallet, TrendingUp, TrendingDown } from "lucide-react";
 import { formatMoney } from "@/lib/format";
-import { currentValue, gain, gainPercent, totalDebt, ASSET_TYPE_LABELS } from "@/lib/networth";
+import { currentValue, gain, gainPercent, totalDebt } from "@/lib/networth";
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
 import { getLogoUrl } from "@/lib/logos";
 import NodePanel, { type Selection, type Actions } from "@/components/NodePanel";
@@ -39,10 +39,27 @@ function bezierPoint(s: { x: number; y: number }, c: { x: number; y: number }, t
   return { x, y, angle: Math.atan2(dy, dx) * 180 / Math.PI };
 }
 
+type PlanetSkin = "tech" | "crypto" | "terrain" | "ocean" | "generic" | "empty";
+const SKIN_BY_TYPE: Record<string, PlanetSkin> = {
+  stock: "tech", etf: "tech",
+  crypto: "crypto",
+  precious_metal: "terrain", real_estate: "terrain", scpi: "terrain",
+  cash: "ocean", life_insurance: "ocean",
+  private_equity: "generic", art: "generic", other: "generic",
+};
+function dominantAssetSkin(valued: { asset: { type: string }; value: number }[]): PlanetSkin {
+  if (valued.length === 0) return "empty";
+  const byType = new Map<string, number>();
+  for (const v of valued) byType.set(v.asset.type, (byType.get(v.asset.type) ?? 0) + Math.max(0, v.value));
+  let best: string | null = null, bestVal = -1;
+  byType.forEach((val, type) => { if (val > bestVal) { bestVal = val; best = type; } });
+  return best ? (SKIN_BY_TYPE[best] ?? "generic") : "generic";
+}
+
 interface GNode extends SimulationNodeDatum {
   id: string; kind: string; label: string; r: number; color: string;
   portfolioKey?: number | "unassigned"; assetId?: number; goalId?: number; memberId?: number;
-  gainVal?: number; sub?: string; logoUrl?: string | null;
+  gainVal?: number; gainPct?: number; sub?: string; logoUrl?: string | null; skin?: PlanetSkin;
 }
 interface GLink { source: string; target: string }
 
@@ -146,14 +163,17 @@ export default function GalaxyView({
       const pid = `p-${g.key}`;
       const memberNode = g.portfolio.memberId ? `m-${g.portfolio.memberId}` : null;
       const totalGain = g.valued.reduce((s, v) => { const a = v.asset; return s + ((a.avgBuyPrice && Number(a.avgBuyPrice) > 0) ? gain(a, a.ticker ? quotes[a.ticker] : null) : 0); }, 0);
-      nodes.push({ id: pid, kind: "portfolio", label: g.portfolio.name, r: sr(g.total, maxPV, 24, 65), color: g.portfolio.color, portfolioKey: g.key, gainVal: totalGain, sub: formatMoney(g.total) });
+      const skin = dominantAssetSkin(g.valued);
+      nodes.push({ id: pid, kind: "portfolio", label: g.portfolio.name, r: sr(g.total, maxPV, 24, 65), color: g.portfolio.color, portfolioKey: g.key, gainVal: totalGain, sub: formatMoney(g.total), skin });
       links.push({ source: memberNode ?? "center", target: pid });
       if (expanded.has(g.key)) {
         const maxAV = Math.max(1, ...g.valued.map(v => v.value));
         for (const v of g.valued) {
           const a = v.asset, hasG = a.avgBuyPrice && Number(a.avgBuyPrice) > 0;
-          const gn = hasG ? gain(a, a.ticker ? quotes[a.ticker] : null) : 0;
-          nodes.push({ id: `a-${a.id}`, kind: "asset", label: a.name, r: sr(v.value, maxAV, 10, 28), color: g.portfolio.color, portfolioKey: g.key, assetId: a.id, gainVal: hasG ? gn : undefined, sub: formatMoney(v.value), logoUrl: getLogoUrl(a.type, a.ticker) });
+          const q = a.ticker ? quotes[a.ticker] : null;
+          const gn = hasG ? gain(a, q) : 0;
+          const gp = hasG ? gainPercent(a, q) : undefined;
+          nodes.push({ id: `a-${a.id}`, kind: "asset", label: a.name, r: sr(v.value, maxAV, 10, 28), color: g.portfolio.color, portfolioKey: g.key, assetId: a.id, gainVal: hasG ? gn : undefined, gainPct: gp, sub: formatMoney(v.value), logoUrl: getLogoUrl(a.type, a.ticker) });
           links.push({ source: pid, target: `a-${a.id}` });
         }
       }
@@ -368,8 +388,7 @@ export default function GalaxyView({
         <div className="px-3 py-3 space-y-0.5">
           <p className="text-[9px] text-text-muted uppercase tracking-wider px-1 mb-1.5">Créer</p>
           {[
-            { icon: FolderPlus, label: "Portefeuille", mode: "portfolio" },
-            { icon: Plus, label: "Actif", mode: "asset" },
+            { icon: FolderPlus, label: "Planète", mode: "portfolio" },
             { icon: Star, label: "Objectif", mode: "goal" },
             { icon: ArrowRight, label: "Flux mensuel", mode: "flow" },
           ].map(({ icon: Icon, label, mode }) => (
@@ -450,6 +469,14 @@ export default function GalaxyView({
             <clipPath id="clip-sal"><circle r={32} /></clipPath>
             <radialGradient id="vignette" cx="50%" cy="45%" r="72%"><stop offset="55%" stopColor="#000" stopOpacity={0} /><stop offset="100%" stopColor="#000" stopOpacity={0.55} /></radialGradient>
             <radialGradient id="rocket-trail" cx="50%" cy="50%" r="50%"><stop offset="0%" stopColor="#ffb870" stopOpacity={0.9} /><stop offset="100%" stopColor="#ffb870" stopOpacity={0} /></radialGradient>
+
+            {/* Planet skins by dominant asset type */}
+            <radialGradient id="sph-skin-tech" cx="38%" cy="28%" r="60%"><stop offset="0%" stopColor="#baffee" /><stop offset="25%" stopColor="#2dd4c8" /><stop offset="55%" stopColor="#0e8a80" /><stop offset="80%" stopColor="#0a3a38" /><stop offset="100%" stopColor="#041816" /></radialGradient>
+            <radialGradient id="sph-skin-crypto" cx="38%" cy="28%" r="60%"><stop offset="0%" stopColor="#f0c8ff" /><stop offset="25%" stopColor="#b060f0" /><stop offset="50%" stopColor="#7020b0" /><stop offset="75%" stopColor="#380860" /><stop offset="100%" stopColor="#140228" /></radialGradient>
+            <radialGradient id="sph-skin-terrain" cx="38%" cy="28%" r="60%"><stop offset="0%" stopColor="#e8d0a0" /><stop offset="25%" stopColor="#b08858" /><stop offset="50%" stopColor="#7a5c38" /><stop offset="75%" stopColor="#42301c" /><stop offset="100%" stopColor="#1a1208" /></radialGradient>
+            <radialGradient id="sph-skin-ocean" cx="38%" cy="28%" r="60%"><stop offset="0%" stopColor="#b8f0ff" /><stop offset="25%" stopColor="#38b8e0" /><stop offset="50%" stopColor="#1868a0" /><stop offset="75%" stopColor="#0c3860" /><stop offset="100%" stopColor="#041828" /></radialGradient>
+            <radialGradient id="sph-skin-empty" cx="38%" cy="28%" r="60%"><stop offset="0%" stopColor="#d8d4e8" /><stop offset="30%" stopColor="#9a92b8" /><stop offset="60%" stopColor="#5c5478" /><stop offset="100%" stopColor="#201c30" /></radialGradient>
+            <radialGradient id="glow-crypto" cx="50%" cy="50%" r="50%"><stop offset="0%" stopColor="#b060f0" stopOpacity={0.35} /><stop offset="60%" stopColor="#b060f0" stopOpacity={0.08} /><stop offset="100%" stopColor="#b060f0" stopOpacity={0} /></radialGradient>
 
             {nodes.filter(n => ["portfolio", "member", "goal"].includes(n.kind)).map(n => (
               <React.Fragment key={`sph-grp-${n.id}`}>
@@ -632,22 +659,55 @@ export default function GalaxyView({
 
                 {n.kind === "reste" && <><circle r={n.r} fill="url(#sph-reste)" /><circle r={n.r} fill="url(#sph-hl)" /><text y={-4} textAnchor="middle" fontSize={10} fontWeight={500} fill="#e0d8ff">Reste</text><text y={9} textAnchor="middle" fontSize={9} fill="rgba(200,185,255,0.8)">{formatMoney(resteAInvestir)}/m</text></>}
 
-                {n.kind === "portfolio" && <><clipPath id={`cp-${n.id}`}><circle r={n.r} /></clipPath><circle r={n.r + 5} fill={`url(#atmo-${n.id})`} /><circle r={n.r} fill={`url(#sph-${n.id})`} /><g clipPath={`url(#cp-${n.id})`}><circle r={n.r} fill={`url(#sph-${n.id})`} filter="url(#terrain)" opacity={0.7} /><circle r={n.r} fill={`url(#sph-${n.id})`} opacity={0.35} filter="url(#clouds)" /></g><circle r={n.r} fill="url(#sph-hl)" stroke={n.color} strokeOpacity={isExp ? 0.35 : 0.1} strokeWidth={isExp ? 1.5 : 0.5} /><text y={-6} textAnchor="middle" fontSize={11} fontWeight={600} fill="#fff" style={ts}>{n.label}</text><text y={9} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.7)">{n.sub}</text>{(n.gainVal ?? 0) !== 0 && <text y={22} textAnchor="middle" fontSize={8} fill={(n.gainVal ?? 0) >= 0 ? "#34d399" : "#fb7185"}>{(n.gainVal ?? 0) >= 0 ? "+" : ""}{formatMoney(n.gainVal ?? 0)}</text>}</>}
+                {n.kind === "portfolio" && (() => {
+                  const skin = n.skin ?? "generic";
+                  const skinFill = skin === "generic" ? `url(#sph-${n.id})` : `url(#sph-skin-${skin})`;
+                  const skinFilter = skin === "tech" ? "url(#circuits)" : skin === "ocean" ? "url(#turb-water)" : "url(#terrain)";
+                  return <>
+                    {isExp && <ellipse rx={n.r + 42} ry={(n.r + 42) * 0.55} fill="none" stroke={n.color} strokeOpacity={0.18} strokeWidth={1} strokeDasharray="2 7" />}
+                    <clipPath id={`cp-${n.id}`}><circle r={n.r} /></clipPath>
+                    <circle r={n.r + 5} fill={`url(#atmo-${n.id})`} />
+                    {skin === "crypto" && <circle r={n.r + 14 + Math.sin(t * 2) * 3} fill="url(#glow-crypto)" />}
+                    <circle r={n.r} fill={skinFill} />
+                    <g clipPath={`url(#cp-${n.id})`}>
+                      <circle r={n.r} fill={skinFill} filter={skinFilter} opacity={0.65} />
+                      {skin !== "tech" && <circle r={n.r} fill={skinFill} opacity={0.3} filter="url(#clouds)" />}
+                    </g>
+                    <circle r={n.r} fill="url(#sph-hl)" stroke={n.color} strokeOpacity={isExp ? 0.35 : 0.1} strokeWidth={isExp ? 1.5 : 0.5} />
+                    <text y={-6} textAnchor="middle" fontSize={11} fontWeight={600} fill="#fff" style={ts}>{n.label}</text>
+                    <text y={9} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.7)">{n.sub}</text>
+                    {(n.gainVal ?? 0) !== 0 && <text y={22} textAnchor="middle" fontSize={8} fill={(n.gainVal ?? 0) >= 0 ? "#34d399" : "#fb7185"}>{(n.gainVal ?? 0) >= 0 ? "+" : ""}{formatMoney(n.gainVal ?? 0)}</text>}
+                    {selected?.kind === "portfolio" && selected.id === n.portfolioKey && (
+                      <g transform={`translate(${n.r * 0.68},${n.r * 0.68})`} style={{ cursor: "pointer" }}
+                        onPointerDown={e => e.stopPropagation()}
+                        onClick={e => { e.stopPropagation(); setCreateMode("asset"); }}>
+                        <circle r={11} fill="#12121a" stroke="#9585ff" strokeWidth={1.2} />
+                        <Plus x={-6} y={-6} size={12} color="#b8a5ff" />
+                      </g>
+                    )}
+                  </>;
+                })()}
 
                 {n.kind === "goal" && <><clipPath id={`cp-${n.id}`}><circle r={n.r} /></clipPath><circle r={n.r + 5} fill={`url(#atmo-${n.id})`} /><circle r={n.r + 3} fill="none" stroke={n.color} strokeOpacity={0.1} strokeDasharray="3 4" /><circle r={n.r} fill={`url(#sph-${n.id})`} /><g clipPath={`url(#cp-${n.id})`}><circle r={n.r} fill={`url(#sph-${n.id})`} filter="url(#terrain)" opacity={0.6} /></g>{(n.color === "#fb923c" || n.color === "#fbbf24") && <><clipPath id={`clip-${n.id}`}><circle r={n.r} /></clipPath><g clipPath={`url(#clip-${n.id})`}><ellipse cx={0} cy={n.r * 0.55} rx={n.r * 0.9} ry={5} fill="#f5d280" opacity={0.35} /><ellipse cx={0} cy={n.r * 0.7} rx={n.r} ry={4} fill="#2898d4" opacity={0.2} filter="url(#turb-water)" /></g></>}<circle r={n.r} fill="url(#sph-hl)" />{(gp ?? 0) >= 1 && <circle r={n.r + 6} fill="none" stroke="#34d399" strokeOpacity={0.45} strokeWidth={1.5} />}<text y={-4} textAnchor="middle" fontSize={10} fontWeight={600} fill="#fff" style={ts}>{n.label.length > 12 ? n.label.slice(0, 11) + "…" : n.label}</text><text y={10} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.7)">{n.sub}</text></>}
 
                 {n.kind === "asset" && (() => {
                   const isPos = (n.gainVal ?? 0) >= 0;
-                  const hasLogo = !!n.logoUrl;
+                  const isCracked = (n.gainPct ?? 0) <= -20;
+                  const hasLogo = !!n.logoUrl && !isCracked;
                   const logoR = Math.max(8, n.r - 4);
                   return <>
-                    <circle r={n.r} fill={isPos ? "rgba(52,211,153,0.06)" : "rgba(251,113,133,0.06)"} stroke={isPos ? "rgba(52,211,153,0.25)" : "rgba(251,113,133,0.25)"} strokeWidth={0.6} />
+                    {isCracked ? <>
+                      <circle r={n.r} fill="rgba(120,116,130,0.14)" stroke="rgba(180,175,190,0.4)" strokeWidth={0.8} />
+                      {[[-0.6, -0.8, 0.1, 0.2], [0.3, -0.9, -0.2, 0.5], [-0.4, 0.3, 0.5, 0.9]].map((c, i) => (
+                        <line key={`crack-${n.id}-${i}`} x1={c[0] * n.r} y1={c[1] * n.r} x2={c[2] * n.r} y2={c[3] * n.r} stroke="rgba(200,195,210,0.5)" strokeWidth={0.7} />
+                      ))}
+                    </> : <circle r={n.r} fill={isPos ? "rgba(52,211,153,0.06)" : "rgba(251,113,133,0.06)"} stroke={isPos ? "rgba(52,211,153,0.25)" : "rgba(251,113,133,0.25)"} strokeWidth={0.6} />}
                     {hasLogo && <>
                       <clipPath id={`logo-${n.id}`}><circle r={logoR * 0.55} /></clipPath>
                       <image href={n.logoUrl!} x={-logoR * 0.55} y={-logoR * 0.75} width={logoR * 1.1} height={logoR * 1.1} clipPath={`url(#logo-${n.id})`} style={{ opacity: 0.9 }} />
                     </>}
-                    <text y={hasLogo ? n.r * 0.55 : -3} textAnchor="middle" fontSize={hasLogo ? 7.5 : 9} fontWeight={500} fill="#d8d8dc">{n.label.length > 11 ? n.label.slice(0, 10) + "…" : n.label}</text>
-                    {n.gainVal !== undefined && <text y={hasLogo ? n.r * 0.55 + 10 : 8} textAnchor="middle" fontSize={hasLogo ? 7 : 8} fill={n.gainVal >= 0 ? "#34d399" : "#fb7185"}>{n.gainVal >= 0 ? "+" : ""}{formatMoney(n.gainVal)}</text>}
+                    <text y={hasLogo ? n.r * 0.55 : -3} textAnchor="middle" fontSize={hasLogo ? 7.5 : 9} fontWeight={500} fill={isCracked ? "#c8c4d2" : "#d8d8dc"}>{n.label.length > 11 ? n.label.slice(0, 10) + "…" : n.label}</text>
+                    {n.gainVal !== undefined && <text y={hasLogo ? n.r * 0.55 + 10 : 8} textAnchor="middle" fontSize={hasLogo ? 7 : 8} fill={isCracked ? "#fb7185" : n.gainVal >= 0 ? "#34d399" : "#fb7185"} fontWeight={isCracked ? 700 : 400}>{n.gainVal >= 0 ? "+" : ""}{formatMoney(n.gainVal)}</text>}
                     {n.gainVal === undefined && <text y={hasLogo ? n.r * 0.55 + 10 : 8} textAnchor="middle" fontSize={hasLogo ? 7 : 8} fill="rgba(255,255,255,0.5)">{n.sub}</text>}
                   </>;
                 })()}
@@ -662,7 +722,8 @@ export default function GalaxyView({
       </div>
 
       {/* ── PANEL ── */}
-      <NodePanel selected={selected} loans={loans} portfolios={portfolios} members={members} goals={goals} flows={flows} actions={actions} onClear={() => setSelected(null)} createMode={createMode} setCreateMode={setCreateMode} salary={salary} onUpdateSalary={onUpdateSalary} groups={groups.map(g => ({ key: g.key, total: g.total, valued: g.valued }))} grossTotal={grossTotal} debt={debt} />
+      <NodePanel selected={selected} loans={loans} portfolios={portfolios} members={members} goals={goals} flows={flows} actions={actions} onClear={() => setSelected(null)} createMode={createMode} setCreateMode={setCreateMode} salary={salary} onUpdateSalary={onUpdateSalary} groups={groups.map(g => ({ key: g.key, total: g.total, valued: g.valued }))} grossTotal={grossTotal} debt={debt}
+        onPortfolioCreated={p => setSelected({ kind: "portfolio", id: p.id, name: p.name, color: p.color, total: 0, count: 0, memberId: p.memberId })} />
     </div>
   );
 }
