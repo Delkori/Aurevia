@@ -394,105 +394,200 @@ export default function GalaxyView({
           onPointerDown={onBgPointerDown} onPointerMove={onBgPointerMove} onPointerUp={onBgPointerUp} onPointerLeave={onBgPointerUp}
           onClick={() => { setSelected(null); setCreateMode(null); }}>
           <defs>
-            <filter id="gl" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2.5" /></filter>
-            <radialGradient id="cg" cx="35%" cy="30%" r="70%">
-              <stop offset="0%" stopColor="#c9c2ff" /><stop offset="55%" stopColor="#7c6af5" /><stop offset="100%" stopColor="#453a8a" />
+            <filter id="gl" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3" /></filter>
+            <filter id="glow-strong" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="6" result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
+            <filter id="turb-lava"><feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="3" seed="5"><animate attributeName="seed" values="1;20;1" dur="2s" repeatCount="indefinite" /></feTurbulence><feDisplacementMap in="SourceGraphic" scale="5" /></filter>
+            <filter id="turb-water"><feTurbulence type="fractalNoise" baseFrequency="0.02" numOctaves="2" seed="3"><animate attributeName="baseFrequency" values="0.02;0.03;0.02" dur="4s" repeatCount="indefinite" /></feTurbulence><feDisplacementMap in="SourceGraphic" scale="3" /></filter>
+
+            {/* Sphere gradients — 3D look with specular highlight */}
+            <radialGradient id="sph-center" cx="35%" cy="28%" r="65%">
+              <stop offset="0%" stopColor="#ffe8a0" /><stop offset="25%" stopColor="#e0c050" /><stop offset="55%" stopColor="#c08020" /><stop offset="100%" stopColor="#402800" />
             </radialGradient>
+            <radialGradient id="sph-salary" cx="38%" cy="28%" r="60%">
+              <stop offset="0%" stopColor="#8cf5a0" /><stop offset="35%" stopColor="#34b85a" /><stop offset="70%" stopColor="#1a7a35" /><stop offset="100%" stopColor="#0d4a1e" />
+            </radialGradient>
+            <radialGradient id="sph-expenses-ok" cx="38%" cy="28%" r="60%">
+              <stop offset="0%" stopColor="#ffa4a4" /><stop offset="40%" stopColor="#e05555" /><stop offset="80%" stopColor="#7a2020" /><stop offset="100%" stopColor="#3a0e0e" />
+            </radialGradient>
+            <radialGradient id="sph-expenses-lava" cx="38%" cy="28%" r="60%">
+              <stop offset="0%" stopColor="#ff6b35" /><stop offset="30%" stopColor="#e63c00" /><stop offset="60%" stopColor="#8b1a00" /><stop offset="100%" stopColor="#2a0800" />
+            </radialGradient>
+            <radialGradient id="sph-lava-glow" cx="50%" cy="50%" r="55%">
+              <stop offset="0%" stopColor="#ff4500" stopOpacity="0.4" /><stop offset="100%" stopColor="#ff4500" stopOpacity="0" />
+            </radialGradient>
+            <radialGradient id="sph-beach" cx="38%" cy="28%" r="60%">
+              <stop offset="0%" stopColor="#ffe4a8" /><stop offset="30%" stopColor="#f5c46a" /><stop offset="55%" stopColor="#2898d4" /><stop offset="85%" stopColor="#1565a0" /><stop offset="100%" stopColor="#0a3860" />
+            </radialGradient>
+            <radialGradient id="sph-reste" cx="38%" cy="28%" r="60%">
+              <stop offset="0%" stopColor="#c8b8ff" /><stop offset="40%" stopColor="#9585ff" /><stop offset="80%" stopColor="#5a45c0" /><stop offset="100%" stopColor="#251a60" />
+            </radialGradient>
+            <radialGradient id="sph-highlight" cx="30%" cy="22%" r="30%">
+              <stop offset="0%" stopColor="white" stopOpacity="0.45" /><stop offset="100%" stopColor="white" stopOpacity="0" />
+            </radialGradient>
+            <radialGradient id="sph-center-glow" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stopColor="#ffe8a0" stopOpacity="0.3" /><stop offset="100%" stopColor="#ffe8a0" stopOpacity="0" />
+            </radialGradient>
+
+            {/* Dynamic per-node gradients for portfolios */}
+            {nodes.filter(n => n.kind === "portfolio" || n.kind === "member" || n.kind === "goal").map(n => (
+              <radialGradient key={`sph-${n.id}`} id={`sph-${n.id}`} cx="38%" cy="28%" r="60%">
+                <stop offset="0%" stopColor={n.color} stopOpacity={1} />
+                <stop offset="40%" stopColor={n.color} stopOpacity={0.85} />
+                <stop offset="75%" stopColor={n.color} stopOpacity={0.45} />
+                <stop offset="100%" stopColor={n.color} stopOpacity={0.15} />
+              </radialGradient>
+            ))}
           </defs>
           <g ref={rootRef}>
-            {/* Links */}
+            {/* Structural links — visible! */}
             {links.map(l => {
               const s = nodeById.get(l.source), tg = nodeById.get(l.target);
               if (!s || !tg || s.x == null || tg.x == null) return null;
-              return <line key={`${s.id}-${tg.id}`} x1={s.x} y1={s.y} x2={tg.x} y2={tg.y} stroke={tg.color} strokeOpacity={0.06} strokeWidth={0.5} strokeDasharray={tg.kind === "goal" ? "2 3" : undefined} />;
+              const isGoal = tg.kind === "goal";
+              const isFlow = tg.kind === "salary" || tg.kind === "expenses" || tg.kind === "reste";
+              return <line key={`ln-${s.id}-${tg.id}`} x1={s.x} y1={s.y} x2={tg.x} y2={tg.y}
+                stroke={tg.color} strokeOpacity={isFlow ? 0.15 : 0.18} strokeWidth={isFlow ? 1 : 0.8}
+                strokeDasharray={isGoal ? "4 5" : isFlow ? "5 4" : undefined} />;
             })}
-            {/* Flow links */}
+            {/* Flow links (from DB) — brighter purple dashed */}
             {flowLinks.map((f, i) => {
               const s = nodeById.get(f.source), tg = nodeById.get(f.target);
               if (!s || !tg || s.x == null || tg.x == null) return null;
-              const mx = ((s.x ?? 0) + (tg.x ?? 0)) / 2, my = ((s.y ?? 0) + (tg.y ?? 0)) / 2 - 8;
+              const mx = ((s.x ?? 0) + (tg.x ?? 0)) / 2, my = ((s.y ?? 0) + (tg.y ?? 0)) / 2 - 10;
               return <g key={`fl-${i}`}>
-                <line x1={s.x} y1={s.y} x2={tg.x} y2={tg.y} stroke="#7c6af5" strokeOpacity={0.1} strokeWidth={0.8} strokeDasharray="4 4" />
-                <text x={mx} y={my} textAnchor="middle" fontSize={7.5} fill="#7c6af5" opacity={0.4}>{f.label}</text>
+                <line x1={s.x} y1={s.y} x2={tg.x} y2={tg.y} stroke="#7c6af5" strokeOpacity={0.25} strokeWidth={1.2} strokeDasharray="6 4" />
+                <text x={mx} y={my} textAnchor="middle" fontSize={9} fill="#7c6af5" opacity={0.7} fontWeight={500}>{f.label}</text>
               </g>;
             })}
-            {/* Rockets on flows */}
+            {/* Animated rockets on flow links */}
             {flowLinks.map((f, i) => {
               const s = nodeById.get(f.source), tg = nodeById.get(f.target);
               if (!s || !tg || s.x == null || tg.x == null) return null;
-              const p = (t / 5) % 1;
+              const speed = 3.5 + i * 0.7;
+              const p = (t / speed) % 1;
               const rx = (s.x ?? 0) + ((tg.x ?? 0) - (s.x ?? 0)) * p;
               const ry = (s.y ?? 0) + ((tg.y ?? 0) - (s.y ?? 0)) * p;
               const ang = Math.atan2((tg.y ?? 0) - (s.y ?? 0), (tg.x ?? 0) - (s.x ?? 0)) * 180 / Math.PI;
               return <g key={`rk-${i}`} transform={`translate(${rx},${ry}) rotate(${ang})`}>
-                <polygon points="-3,-2 3,0 -3,2" fill="#7c6af5" opacity={0.5} />
-                <circle cx={-4} r={1} fill="#fb923c" opacity={0.4} />
+                <polygon points="-4,-2.5 4,0 -4,2.5" fill="#7c6af5" opacity={0.7} />
+                <polygon points="-5,0 -9,-2.5 -7.5,0 -9,2.5" fill="#fb923c" opacity={0.4 + Math.sin(t * 12) * 0.2} />
               </g>;
             })}
-            {/* Dot particles on structural links */}
+            {/* Animated dot particles on ALL structural links */}
             {links.map(l => {
               const s = nodeById.get(l.source), tg = nodeById.get(l.target);
               if (!s || !tg || s.x == null || tg.x == null) return null;
-              const p = (t / 8) % 1;
-              return <circle key={`dot-${s.id}-${tg.id}`} cx={(s.x ?? 0) + ((tg.x ?? 0) - (s.x ?? 0)) * p} cy={(s.y ?? 0) + ((tg.y ?? 0) - (s.y ?? 0)) * p} r={0.8} fill={tg.color} opacity={0.2} />;
+              const speed = 6 + (s.id.charCodeAt(0) % 4);
+              const p = (t / speed) % 1;
+              const cx = (s.x ?? 0) + ((tg.x ?? 0) - (s.x ?? 0)) * p;
+              const cy = (s.y ?? 0) + ((tg.y ?? 0) - (s.y ?? 0)) * p;
+              return <circle key={`dot-${s.id}-${tg.id}`} cx={cx} cy={cy} r={1.5} fill={tg.color} opacity={0.5} filter="url(#gl)" />;
             })}
-            {/* Nodes */}
+            {/* Nodes — 3D spheres with themed skins */}
             {nodes.map(n => {
               if (n.x == null || n.y == null) return null;
               const isExp = n.kind === "portfolio" && n.portfolioKey !== undefined && expanded.has(n.portfolioKey);
               const gp = n.kind === "goal" && n.goalId != null ? Math.min(1, grandTotal / Number(goals.find(g => g.id === n.goalId)?.targetAmount || 1)) : null;
               const isSel = (selected?.kind === "goal" && n.goalId === selected.goal.id) || (selected?.kind === "portfolio" && n.portfolioKey === selected.id) || (selected?.kind === "asset" && n.assetId === selected.asset.id) || (selected?.kind === "member" && n.memberId === selected.member.id);
 
+              const investFlowTotal = flows.filter(f => f.sourceType === "salary" && f.targetType === "portfolio").reduce((s, f) => s + Number(f.amount), 0);
+              const expenseFlowTotal = flows.filter(f => f.targetType === "expense").reduce((s, f) => s + Number(f.amount), 0);
+              const isOverBudget = salary > 0 && expenseFlowTotal > salary;
+
               return <g key={n.id} className="nd" transform={`translate(${n.x},${n.y})`} style={{ cursor: "pointer" }}
                 onPointerDown={onPointerDown(n.id)} onClick={e => { e.stopPropagation(); handleClick(n); }}>
 
-                {/* Salary node */}
-                {(n.kind === "salary" || n.kind === "reste") && <>
-                  <circle r={n.r} fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.12)" strokeWidth={0.6} />
+                {/* ── Center: golden star with glow ── */}
+                {n.kind === "center" && <>
+                  <circle r={n.r + 20} fill="url(#sph-center-glow)" />
+                  <circle r={n.r} fill="url(#sph-center)" filter="url(#glow-strong)" />
+                  <circle r={n.r} fill="url(#sph-highlight)" />
                 </>}
 
-                {/* Expenses node */}
+                {/* ── Salary: green planet with vegetation ── */}
+                {n.kind === "salary" && <>
+                  <circle r={n.r} fill="url(#sph-salary)" />
+                  <circle r={n.r} fill="url(#sph-highlight)" />
+                  {/* Grass blades at bottom of planet */}
+                  <clipPath id="clip-sal"><circle cx={0} cy={0} r={n.r} /></clipPath>
+                  <g clipPath="url(#clip-sal)">
+                    {Array.from({ length: 14 }, (_, i) => {
+                      const x = -n.r + 3 + i * (n.r * 2 / 14);
+                      const h = 3 + (i * 7 % 5);
+                      return <line key={i} x1={x} y1={n.r - 1} x2={x + (i % 2 ? 1 : -1)} y2={n.r - 1 - h} stroke="#2dd45a" strokeWidth={1.2} strokeLinecap="round" opacity={0.5 + (i % 3) * 0.15} />;
+                    })}
+                  </g>
+                </>}
+
+                {/* ── Expenses: red or LAVA if over budget ── */}
                 {n.kind === "expenses" && <>
-                  <circle r={n.r} fill="rgba(248,113,113,0.06)" stroke="rgba(248,113,113,0.25)" strokeWidth={0.7} />
+                  {isOverBudget && <circle r={n.r + 14} fill="url(#sph-lava-glow)" />}
+                  {isOverBudget && <circle r={n.r + 5} fill="none" stroke="#ff4500" strokeOpacity={0.3} strokeDasharray="2 3" />}
+                  <circle r={n.r} fill={isOverBudget ? "url(#sph-expenses-lava)" : "url(#sph-expenses-ok)"} />
+                  {isOverBudget && <circle r={n.r} fill={`url(#sph-expenses-lava)`} filter="url(#turb-lava)" opacity={0.6} />}
+                  <circle r={n.r} fill="url(#sph-highlight)" />
                 </>}
 
-                {/* Goal node */}
+                {/* ── Reste à investir: purple nebula ── */}
+                {n.kind === "reste" && <>
+                  <circle r={n.r} fill="url(#sph-reste)" />
+                  <circle r={n.r} fill="url(#sph-highlight)" />
+                </>}
+
+                {/* ── Goal: themed sphere (beach skin for vacation-like goals) ── */}
                 {n.kind === "goal" && <>
-                  <circle r={n.r + 2} fill="none" stroke={n.color} strokeOpacity={0.1} strokeDasharray="2 3" />
-                  <circle r={n.r} fill={n.color} fillOpacity={0.04 + (gp ?? 0) * 0.18} stroke={n.color} strokeOpacity={isSel ? 0.6 : 0.25} strokeWidth={isSel ? 1.5 : 0.6} />
-                  {(gp ?? 0) >= 1 && <circle r={n.r + 5} fill="none" stroke="#34d399" strokeOpacity={0.3} strokeWidth={0.8} />}
+                  <circle r={n.r + 3} fill="none" stroke={n.color} strokeOpacity={0.12} strokeDasharray="3 4" />
+                  <circle r={n.r} fill={`url(#sph-${n.id})`} />
+                  {/* Beach details for goals with warm colors */}
+                  {(n.color === "#fb923c" || n.color === "#fbbf24") && <>
+                    <clipPath id={`clip-${n.id}`}><circle cx={0} cy={0} r={n.r} /></clipPath>
+                    <g clipPath={`url(#clip-${n.id})`}>
+                      <ellipse cx={0} cy={n.r * 0.55} rx={n.r * 0.9} ry={5} fill="#f5d280" opacity={0.4} />
+                      <ellipse cx={0} cy={n.r * 0.7} rx={n.r} ry={4} fill="#2898d4" opacity={0.25} filter="url(#turb-water)" />
+                    </g>
+                  </>}
+                  <circle r={n.r} fill="url(#sph-highlight)" />
+                  {(gp ?? 0) >= 1 && <circle r={n.r + 6} fill="none" stroke="#34d399" strokeOpacity={0.4} strokeWidth={1.2} />}
                 </>}
 
-                {/* Asset node (green = gain, red = loss) */}
-                {n.kind === "asset" && <>
-                  <circle r={n.r} fill={(n.gainVal ?? 0) >= 0 ? "rgba(52,211,153,0.04)" : "rgba(251,113,133,0.04)"} stroke={(n.gainVal ?? 0) >= 0 ? "rgba(52,211,153,0.2)" : "rgba(251,113,133,0.2)"} strokeWidth={0.6} />
-                </>}
+                {/* ── Asset: gain/loss colored sphere ── */}
+                {n.kind === "asset" && (() => {
+                  const isPos = (n.gainVal ?? 0) >= 0;
+                  return <>
+                    <circle r={n.r} fill={isPos ? "rgba(52,211,153,0.06)" : "rgba(251,113,133,0.06)"} stroke={isPos ? "rgba(52,211,153,0.25)" : "rgba(251,113,133,0.25)"} strokeWidth={0.6} />
+                    <circle r={2.5} fill={isPos ? "#34d399" : "#fb7185"} opacity={0.6} />
+                  </>;
+                })()}
 
-                {/* Member node */}
+                {/* ── Member: themed sphere ── */}
                 {n.kind === "member" && <>
-                  <circle r={n.r + 3} fill="none" stroke={n.color} strokeOpacity={0.08} strokeDasharray="3 3" />
-                  <circle r={n.r} fill={n.color} fillOpacity={0.1} stroke={n.color} strokeOpacity={isSel ? 0.5 : 0.3} strokeWidth={0.7} />
+                  <circle r={n.r} fill={`url(#sph-${n.id})`} />
+                  <circle r={n.r} fill="url(#sph-highlight)" />
                 </>}
 
-                {/* Center + Portfolio nodes */}
-                {(n.kind === "center" || n.kind === "portfolio") && <>
-                  <circle r={n.r + 4} fill="none" stroke={n.color} strokeOpacity={0.04} />
-                  <circle r={n.r} fill={n.kind === "center" ? "url(#cg)" : n.color} fillOpacity={n.kind === "center" ? 1 : 0.12} stroke={n.color} strokeOpacity={isExp || isSel ? 0.5 : 0.3} strokeWidth={isExp || isSel ? 1.2 : 0.6} filter={n.kind === "center" ? "url(#gl)" : undefined} />
+                {/* ── Portfolio: 3D sphere with specular highlight ── */}
+                {n.kind === "portfolio" && <>
+                  <circle r={n.r + 4} fill="none" stroke={n.color} strokeOpacity={0.06} />
+                  <circle r={n.r} fill={`url(#sph-${n.id})`} stroke={n.color} strokeOpacity={isExp || isSel ? 0.4 : 0.15} strokeWidth={isExp || isSel ? 1.2 : 0.5} />
+                  <circle r={n.r} fill="url(#sph-highlight)" />
                 </>}
 
-                {/* Labels */}
-                {n.kind !== "asset" && <text y={-4} textAnchor="middle" fontSize={n.kind === "center" ? 11 : 10} fontWeight={500} fill="#d8d8dc" opacity={0.9}>{n.label.length > 13 ? n.label.slice(0, 12) + "…" : n.label}</text>}
-                {n.kind === "salary" && <text y={10} textAnchor="middle" fontSize={8.5} fill="#8e8e96">{formatMoney(salary)}/mois</text>}
-                {n.kind === "reste" && <text y={10} textAnchor="middle" fontSize={8.5} fill="#9585ff">{formatMoney(Number(n.r))}</text>}
-                {n.kind === "expenses" && <text y={10} textAnchor="middle" fontSize={8.5} fill="#f87171">/mois</text>}
-                {n.kind === "portfolio" && <text y={10} textAnchor="middle" fontSize={8.5} fill="#6b6b72">{formatMoney(groups.find(g => g.key === n.portfolioKey)?.total ?? 0)}</text>}
-                {n.kind === "goal" && <text y={12} textAnchor="middle" fontSize={8.5} fill="#6b6b72">{((gp ?? 0) * 100).toFixed(0)}%</text>}
+                {/* ── Labels ── */}
+                {n.kind !== "asset" && <text y={-4} textAnchor="middle" fontSize={n.kind === "center" ? 12 : 10.5} fontWeight={600} fill="#f0f0f2" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.6)" }}>{n.label.length > 13 ? n.label.slice(0, 12) + "…" : n.label}</text>}
+                {n.kind === "salary" && <text y={10} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.7)">{formatMoney(salary)}/mois</text>}
+                {n.kind === "expenses" && <>
+                  <text y={isOverBudget ? 8 : 10} textAnchor="middle" fontSize={9} fill={isOverBudget ? "#ffaa70" : "rgba(255,255,255,0.7)"}>/mois</text>
+                  {isOverBudget && <text y={22} textAnchor="middle" fontSize={8} fill="#ff6b35" fontWeight={600}>ALERTE</text>}
+                </>}
+                {n.kind === "reste" && <text y={10} textAnchor="middle" fontSize={9} fill="rgba(200,185,255,0.8)">/mois</text>}
+                {n.kind === "portfolio" && <text y={10} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.65)">{formatMoney(groups.find(g => g.key === n.portfolioKey)?.total ?? 0)}</text>}
+                {n.kind === "goal" && <text y={12} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.7)">{((gp ?? 0) * 100).toFixed(0)}%</text>}
                 {n.kind === "asset" && <>
                   <text y={-4} textAnchor="middle" fontSize={9} fontWeight={500} fill="#d8d8dc">{n.label.length > 11 ? n.label.slice(0, 10) + "…" : n.label}</text>
-                  <text y={8} textAnchor="middle" fontSize={7.5} fill={(n.gainVal ?? 0) >= 0 ? "#34d399" : "#fb7185"} opacity={0.8}>{(n.gainVal ?? 0) >= 0 ? "+" : ""}{formatMoney(n.gainVal ?? 0)}</text>
+                  <text y={8} textAnchor="middle" fontSize={7.5} fill={(n.gainVal ?? 0) >= 0 ? "#34d399" : "#fb7185"} opacity={0.9}>{(n.gainVal ?? 0) >= 0 ? "+" : ""}{formatMoney(n.gainVal ?? 0)}</text>
                 </>}
-                {n.kind === "center" && <text y={10} textAnchor="middle" fontSize={9} fill="#8e8e96">{formatMoney(grandTotal)}</text>}
-                {n.kind === "member" && <text y={10} textAnchor="middle" fontSize={8.5} fill="#8e8e96">{n.label}</text>}
+                {n.kind === "center" && <text y={12} textAnchor="middle" fontSize={10} fill="rgba(255,230,160,0.85)" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.5)" }}>{formatMoney(grandTotal)}</text>}
+                {n.kind === "member" && <text y={10} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.7)">{n.label}</text>}
               </g>;
             })}
           </g>
