@@ -5,7 +5,7 @@ import {
   forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY,
   type Simulation, type SimulationNodeDatum,
 } from "d3-force";
-import { FolderPlus, Plus, Star, ArrowRight, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff } from "lucide-react";
+import { FolderPlus, Plus, Star, ArrowRight, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, Sparkles } from "lucide-react";
 import { formatMoney } from "@/lib/format";
 import { currentValue, gain, gainPercent, totalDebt } from "@/lib/networth";
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
@@ -518,6 +518,7 @@ export default function GalaxyView({
             { icon: ArrowRight, label: "Flux", mode: "flow" },
             { icon: Users, label: "Membres", mode: "member" },
             { icon: Link2, label: "Liens", mode: "link" },
+            { icon: Sparkles, label: "Modèles", mode: "templates" },
           ].map(({ icon: Icon, label, mode }) => {
             const active = mode === "link" ? linkMode : createMode === mode;
             return <button key={mode} onClick={() => {
