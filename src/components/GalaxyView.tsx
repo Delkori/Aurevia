@@ -642,6 +642,10 @@ export default function GalaxyView({
               const s = nodeById.get(l.source), tg = nodeById.get(l.target);
               if (!s || !tg || s.x == null || tg.x == null) return null;
               const seed = hashSeed(s.id, tg.id), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
+              const isMemberOwned = s.kind === "member" && (tg.kind === "portfolio" || tg.kind === "goal");
+              if (isMemberOwned) {
+                return <path key={`ln-${s.id}-${tg.id}`} d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke={s.color} strokeOpacity={0.4} strokeWidth={1.8} strokeDasharray={tg.kind === "goal" ? "5 4" : undefined} filter="url(#gl)" />;
+              }
               return <path key={`ln-${s.id}-${tg.id}`} d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke={tg.color} strokeOpacity={tg.kind === "expense-item" ? 0.1 : 0.22} strokeWidth={tg.kind === "expense-item" ? 0.5 : 1} strokeDasharray={tg.kind === "goal" ? "4 5" : undefined} />;
             })}
             {flowLinks.map((f, i) => {
