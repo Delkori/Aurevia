@@ -463,6 +463,20 @@ export default function GalaxyView({
   const budgetRatio = salary > 0 ? totalExpenseFlows / salary : 0; // 0..1+ (1+ = deficit)
   const tauxEpargne = salary > 0 ? Math.round((salary - totalExpenseFlows) / salary * 100) : 0;
 
+  // Score de structure /100 — purement organisationnel (diversification, dette,
+  // concentration, taux d'épargne), aucune recommandation d'investissement.
+  const structureScore = (() => {
+    if (grossTotal <= 0) return null;
+    const savingsPart = salary > 0 ? Math.min(25, Math.max(0, tauxEpargne / 40 * 25)) : 12.5;
+    const skins = new Set(groups.filter(g => g.total > 0).map(g => planetSkin(g.portfolio.name, g.valued)));
+    const diversificationPart = Math.min(25, skins.size * 6);
+    const debtRatio = grossTotal > 0 ? debt / grossTotal : 0;
+    const debtPart = Math.max(0, 25 - debtRatio * 100 / 4);
+    const largestShare = grossTotal > 0 ? Math.max(0, ...groups.map(g => g.total)) / grossTotal : 0;
+    const concentrationPart = largestShare <= 0.3 ? 25 : Math.max(0, 25 - (largestShare - 0.3) / 0.7 * 25);
+    return Math.round(savingsPart + diversificationPart + debtPart + concentrationPart);
+  })();
+
   return (
     <div className="grid h-full" style={{ gridTemplateColumns: "160px 1fr 280px" }}>
       {/* ── LEFT MENU ── */}
@@ -482,6 +496,17 @@ export default function GalaxyView({
               <span className="tabular text-negative">{formatMoney(debt)}</span>
             </div>}
           </div>}
+          {structureScore !== null && (
+            <div className="mt-2.5 pt-2 border-t border-border/60" title="Score organisationnel : diversification, dette, concentration, épargne — pas un conseil d'investissement.">
+              <div className="flex items-center justify-between text-[10px]">
+                <span className="text-text-muted">Score structure</span>
+                <span className={`tabular font-semibold ${structureScore >= 70 ? "text-positive" : structureScore >= 45 ? "text-accent" : "text-negative"}`}>{structureScore}/100</span>
+              </div>
+              <div className="h-1 rounded bg-bg mt-1 overflow-hidden">
+                <div className="h-full rounded" style={{ width: `${structureScore}%`, background: structureScore >= 70 ? "#34d399" : structureScore >= 45 ? "#7c6af5" : "#f87171" }} />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Create actions */}
