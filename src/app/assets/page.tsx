@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { Fragment, useEffect, useState, useCallback } from "react";
 import { Plus, Trash2, AlertTriangle, X } from "lucide-react";
 import { formatMoney } from "@/lib/format";
 import { currentValue, gain, ASSET_TYPE_LABELS } from "@/lib/networth";
@@ -90,8 +90,6 @@ export default function AssetsPage() {
   const [error, setError] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<number | "draft" | null>(null);
   const [draft, setDraft] = useState<DraftRow>(emptyDraft);
-  const [newPortfolioName, setNewPortfolioName] = useState("");
-  const hasAutoAddedRow = useRef(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -138,27 +136,6 @@ export default function AssetsPage() {
   useEffect(() => {
     load();
   }, [load]);
-
-  const createPortfolio = async (): Promise<number | null> => {
-    if (!newPortfolioName.trim()) return null;
-    try {
-      const colors = ["#7c6af5", "#5eead4", "#fb923c", "#4ade80", "#f0abfc"];
-      const created = (await apiFetch("/api/portfolios", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: newPortfolioName.trim(),
-          color: colors[portfolios.length % colors.length],
-        }),
-      })) as Portfolio;
-      setPortfolios((prev) => [created, ...prev]);
-      setNewPortfolioName("");
-      return created.id;
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Impossible de créer le portefeuille.");
-      return null;
-    }
-  };
 
   // Sauvegarde une ligne existante (auto-save au blur / au changement)
   const saveAsset = async (asset: Asset) => {
@@ -222,16 +199,30 @@ export default function AssetsPage() {
     }
   };
 
-  const rows = assets;
   const needsTickerDraft = TYPES_WITH_TICKER.has(draft.type);
+
+  const groups = (() => {
+    const byPortfolio = new Map<number | "none", Asset[]>();
+    for (const a of assets) {
+      const key = a.portfolioId ?? "none";
+      if (!byPortfolio.has(key)) byPortfolio.set(key, []);
+      byPortfolio.get(key)!.push(a);
+    }
+    const list: { portfolio: Portfolio | null; items: Asset[] }[] = portfolios.map((p) => ({ portfolio: p, items: byPortfolio.get(p.id) ?? [] }));
+    const unassigned = byPortfolio.get("none") ?? [];
+    if (unassigned.length > 0) list.push({ portfolio: null, items: unassigned });
+    return list;
+  })();
+
+  const groupTotal = (items: Asset[]) =>
+    items.reduce((s, a) => s + currentValue(a, a.ticker ? quotes[a.ticker] : null), 0);
 
   return (
     <div className="p-8 md:p-10 max-w-6xl mx-auto space-y-6">
       <header>
-        <h1 className="text-2xl font-semibold font-[family-name:var(--font-heading)]">Actifs</h1>
+        <h1 className="text-2xl font-semibold font-[family-name:var(--font-heading)]">Vue tableau</h1>
         <p className="text-sm text-text-muted mt-1">
-          Remplis directement une ligne pour ajouter un actif — ça s&apos;enregistre
-          automatiquement.
+          Tes planètes et leurs actifs, en tableau — pratique pour tout vérifier d&apos;un coup. Les planètes se créent dans la galaxie ; ici tu remplis directement une ligne pour ajouter un actif, ça s&apos;enregistre automatiquement.
         </p>
       </header>
 
@@ -247,21 +238,6 @@ export default function AssetsPage() {
           </button>
         </div>
       )}
-
-      <div className="mb-2 flex items-center gap-2">
-        <input
-          value={newPortfolioName}
-          onChange={(e) => setNewPortfolioName(e.target.value)}
-          placeholder="Nom d'un nouveau portefeuille (ex : PEA)"
-          className="w-64 bg-surface border border-border rounded-md px-3 py-2 text-sm"
-        />
-        <button
-          onClick={createPortfolio}
-          className="flex items-center gap-2 text-sm px-3 py-2 rounded-md border border-border text-text-muted hover:text-text hover:bg-surface-hover"
-        >
-          <Plus size={14} /> Créer le portefeuille
-        </button>
-      </div>
 
       <div className="bg-surface border border-border rounded-lg overflow-x-auto">
         <table className="w-full text-sm min-w-[900px]">
@@ -280,7 +256,18 @@ export default function AssetsPage() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((a) => {
+            {groups.map(({ portfolio, items }) => (
+              <Fragment key={portfolio?.id ?? "none"}>
+                <tr className="bg-bg/60">
+                  <td colSpan={10} className="px-4 py-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
+                    <span className="inline-flex items-center gap-2">
+                      {portfolio && <span className="w-2 h-2 rounded-full shrink-0" style={{ background: portfolio.color }} />}
+                      {portfolio ? portfolio.name : "Sans planète"}
+                      <span className="text-text-muted font-normal normal-case ml-2 tabular">{formatMoney(groupTotal(items))}</span>
+                    </span>
+                  </td>
+                </tr>
+                {items.map((a) => {
               const needsTicker = TYPES_WITH_TICKER.has(a.type);
               const quote = a.ticker ? quotes[a.ticker] : null;
               const value = currentValue(a, quote);
@@ -442,6 +429,8 @@ export default function AssetsPage() {
                 </tr>
               );
             })}
+              </Fragment>
+            ))}
 
             {/* Ligne brouillon toujours disponible pour ajouter un actif */}
             <tr className="bg-accent-soft/40">
@@ -580,7 +569,7 @@ export default function AssetsPage() {
             </tr>
           </tbody>
         </table>
-        {!loading && rows.length === 0 && (
+        {!loading && assets.length === 0 && (
           <p className="text-sm text-text-muted px-5 py-6 text-center">
             Aucun actif pour l&apos;instant — remplis la ligne surlignée ci-dessus pour
             commencer.

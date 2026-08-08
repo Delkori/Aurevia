@@ -16,7 +16,7 @@ export default function Sidebar() {
       <div className="flex-1" />
       <Link
         href="/assets"
-        title="Actifs (tableau)"
+        title="Vue tableau"
         className={`w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-hover ${pathname === "/assets" ? "bg-accent/15 text-accent" : ""}`}
       >
         <Wallet size={15} />

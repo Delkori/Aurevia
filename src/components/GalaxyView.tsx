@@ -202,10 +202,7 @@ export default function GalaxyView({
       flowLinks.push({ source: "salary", target: "reste", label: formatMoney(resteAInvestir) });
     }
 
-    const memberIds = new Set<number>();
-    portfolios.forEach(p => { if (p.memberId) memberIds.add(p.memberId); });
-    goals.forEach(g => { if (g.memberId) memberIds.add(g.memberId); });
-    members.filter(m => memberIds.has(m.id)).forEach(m => {
+    members.forEach(m => {
       nodes.push({ id: `m-${m.id}`, kind: "member", label: m.name, r: 24, color: m.color, memberId: m.id });
       links.push({ source: "center", target: `m-${m.id}` });
     });
@@ -215,7 +212,7 @@ export default function GalaxyView({
       const memberNode = g.portfolio.memberId ? `m-${g.portfolio.memberId}` : null;
       const totalGain = g.valued.reduce((s, v) => { const a = v.asset; return s + ((a.avgBuyPrice && Number(a.avgBuyPrice) > 0) ? gain(a, a.ticker ? quotes[a.ticker] : null) : 0); }, 0);
       const skin = planetSkin(g.portfolio.name, g.valued);
-      nodes.push({ id: pid, kind: "portfolio", label: g.portfolio.name, r: sr(g.total, maxPV, 24, 65), color: g.portfolio.color, portfolioKey: g.key, gainVal: totalGain, sub: formatMoney(g.total), skin });
+      nodes.push({ id: pid, kind: "portfolio", label: g.portfolio.name, r: sr(g.total, maxPV, 20, 78), color: g.portfolio.color, portfolioKey: g.key, gainVal: totalGain, sub: formatMoney(g.total), skin });
       links.push({ source: memberNode ?? "center", target: pid });
       if (expanded.has(g.key)) {
         const maxAV = Math.max(1, ...g.valued.map(v => v.value));
@@ -235,7 +232,7 @@ export default function GalaxyView({
       const memberNode = goal.memberId ? `m-${goal.memberId}` : null;
       const linkedPortfolioIds = goalLinks.filter(gl => gl.goalId === goal.id).map(gl => gl.portfolioId);
       const prog = goalProgress(goal);
-      nodes.push({ id: `g-${goal.id}`, kind: "goal", label: goal.name, r: sr(Number(goal.targetAmount), maxGT, 18, 52), color: goal.color, goalId: goal.id, sub: `${Math.round(prog * 100)}%` });
+      nodes.push({ id: `g-${goal.id}`, kind: "goal", label: goal.name, r: sr(Number(goal.targetAmount), maxGT, 16, 60), color: goal.color, goalId: goal.id, sub: `${Math.round(prog * 100)}%` });
       links.push({ source: memberNode ?? "center", target: `g-${goal.id}` });
       linkedPortfolioIds.forEach(pid => { if (nodes.find(n => n.id === `p-${pid}`)) goalLinkEdges.push({ source: `g-${goal.id}`, target: `p-${pid}` }); });
     }
@@ -468,19 +465,20 @@ export default function GalaxyView({
           <p className="text-[9px] text-text-muted uppercase tracking-wider px-1 mb-1.5">Créer</p>
           {[
             { icon: FolderPlus, label: "Planète", mode: "portfolio" },
-            { icon: Star, label: "Objectif", mode: "goal" },
-            { icon: ArrowRight, label: "Flux mensuel", mode: "flow" },
-            { icon: Users, label: "Membre du foyer", mode: "member" },
-          ].map(({ icon: Icon, label, mode }) => (
-            <button key={mode} onClick={() => { setSelected(null); setCreateMode(mode); }}
-              className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs transition-colors ${createMode === mode ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text hover:bg-surface-hover"}`}>
+            { icon: Star, label: "Objectifs", mode: "goal" },
+            { icon: ArrowRight, label: "Flux", mode: "flow" },
+            { icon: Users, label: "Membres", mode: "member" },
+            { icon: Link2, label: "Liens", mode: "link" },
+          ].map(({ icon: Icon, label, mode }) => {
+            const active = mode === "link" ? linkMode : createMode === mode;
+            return <button key={mode} onClick={() => {
+              if (mode === "link") { setSelected(null); setCreateMode(null); setLinkSourceNode(null); setLinkMode(m => !m); }
+              else { setSelected(null); setLinkMode(false); setLinkSourceNode(null); setCreateMode(mode); }
+            }}
+              className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs transition-colors ${active ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text hover:bg-surface-hover"}`}>
               <Icon size={13} className="shrink-0" />{label}
-            </button>
-          ))}
-          <button onClick={() => { setSelected(null); setCreateMode(null); setLinkSourceNode(null); setLinkMode(m => !m); }}
-            className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs transition-colors ${linkMode ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text hover:bg-surface-hover"}`}>
-            <Link2 size={13} className="shrink-0" />Lier deux planètes
-          </button>
+            </button>;
+          })}
           {linkMode && <p className="text-[10px] text-accent px-2 pt-1">
             {linkSourceNode ? `Clique la destination (depuis "${linkSourceNode.label}")…` : "Clique la planète source…"}
           </p>}
@@ -676,7 +674,7 @@ export default function GalaxyView({
               if (n.x == null || n.y == null) return null;
               const isExp = n.kind === "portfolio" && n.portfolioKey !== undefined && expanded.has(n.portfolioKey);
               const gp = n.kind === "goal" && n.goalId != null ? (() => { const goal = goals.find(g => g.id === n.goalId); return goal ? goalProgress(goal) : null; })() : null;
-              const ts = { textShadow: "0 1px 4px rgba(0,0,0,0.6)" } as const;
+              const ts = { textShadow: "0 1px 3px rgba(0,0,0,0.95), 0 0 8px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,1)" } as const;
 
               return <g key={n.id} className="nd" transform={`translate(${n.x},${n.y})`} style={{ cursor: "pointer" }}
                 onPointerDown={onNodeDown(n.id)} onClick={e => { e.stopPropagation(); handleClick(n, e as unknown as React.MouseEvent); }}>
@@ -727,8 +725,9 @@ export default function GalaxyView({
                     <g clipPath="url(#clip-sal)">{Array.from({ length: 18 }, (_, i) => <line key={i} x1={-n.r + 3 + i * 3.5} y1={n.r - 1} x2={-n.r + 3 + i * 3.5 + (i % 2 ? 1 : -1)} y2={n.r - 1 - (3 + (i * 7 % 7))} stroke="#30e060" strokeWidth={1.3} strokeLinecap="round" opacity={0.4 + (i % 3) * 0.2} />)}</g>
                   </>}
                   <circle r={n.r} fill="url(#sph-hl)" />
+                  {SALARY_IMAGE && <rect x={-n.r * 0.95} y={-15} width={n.r * 1.9} height={27} rx={5} fill="rgba(6,6,10,0.55)" />}
                   <text y={-5} textAnchor="middle" fontSize={11} fontWeight={600} fill="#fff" style={ts}>Salaire</text>
-                  <text y={9} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.75)">{formatMoney(salary)}/mois</text>
+                  <text y={9} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.9)" style={ts}>{formatMoney(salary)}/mois</text>
                 </>}
 
                 {n.kind === "expenses" && (() => {
@@ -776,12 +775,13 @@ export default function GalaxyView({
                       return <circle key={`proj-${i}`} cx={px} cy={py} r={1.8 - phase} fill="#ff5500" opacity={1 - phase} />;
                     })}
                     {/* Warning shake effect on text */}
+                    {tierImage && <rect x={-R * 0.95} y={-15} width={R * 1.9} height={tier !== "calm" && tier !== "warning" ? 42 : 27} rx={5} fill="rgba(6,6,10,0.55)" />}
                     <g transform={isOverBudget ? `translate(${Math.sin(t * 20) * 0.8},0)` : undefined}>
                       <text y={-5} textAnchor="middle" fontSize={10} fontWeight={600} fill="#fff" style={ts}>Dépenses</text>
-                      <text y={9} textAnchor="middle" fontSize={9} fill={isOverBudget ? "#ffaa70" : tier === "warning" ? "#ffd280" : "rgba(255,255,255,0.7)"}>{totalExpenseFlows > 0 ? formatMoney(totalExpenseFlows) : "0 €"}/m</text>
-                      {tier === "critical" && <text y={24} textAnchor="middle" fontSize={9} fill="#ff2200" fontWeight={700} opacity={0.7 + Math.sin(t * 8) * 0.3}>DÉFICIT CRITIQUE</text>}
-                      {tier === "eruption" && <text y={24} textAnchor="middle" fontSize={9} fill="#ff6b35" fontWeight={700} opacity={0.6 + Math.sin(t * 6) * 0.4}>DÉFICIT</text>}
-                      {tier === "warning" && <text y={22} textAnchor="middle" fontSize={8} fill="#ffb84d" fontWeight={600}>{Math.round(budgetRatio * 100)}% du budget</text>}
+                      <text y={9} textAnchor="middle" fontSize={9} fill={isOverBudget ? "#ffaa70" : tier === "warning" ? "#ffd280" : "rgba(255,255,255,0.85)"} style={ts}>{totalExpenseFlows > 0 ? formatMoney(totalExpenseFlows) : "0 €"}/m</text>
+                      {tier === "critical" && <text y={24} textAnchor="middle" fontSize={9} fill="#ff2200" fontWeight={700} opacity={0.7 + Math.sin(t * 8) * 0.3} style={ts}>DÉFICIT CRITIQUE</text>}
+                      {tier === "eruption" && <text y={24} textAnchor="middle" fontSize={9} fill="#ff6b35" fontWeight={700} opacity={0.6 + Math.sin(t * 6) * 0.4} style={ts}>DÉFICIT</text>}
+                      {tier === "warning" && <text y={22} textAnchor="middle" fontSize={8} fill="#ffb84d" fontWeight={600} style={ts}>{Math.round(budgetRatio * 100)}% du budget</text>}
                     </g>
                     <g transform={`translate(${R * 0.68},${R * 0.68})`} style={{ cursor: "pointer" }}
                       onPointerDown={e => e.stopPropagation()}
@@ -857,9 +857,10 @@ export default function GalaxyView({
                     </>}
 
                     <circle r={n.r} fill="url(#sph-hl)" stroke={n.color} strokeOpacity={isExp ? 0.35 : 0.1} strokeWidth={isExp ? 1.5 : 0.5} />
+                    {imageHref && <rect x={-n.r * 0.95} y={-15} width={n.r * 1.9} height={(n.gainVal ?? 0) !== 0 ? 40 : 27} rx={5} fill="rgba(6,6,10,0.55)" />}
                     <text y={-6} textAnchor="middle" fontSize={11} fontWeight={600} fill="#fff" style={ts}>{n.label}</text>
-                    <text y={9} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.7)">{n.sub}</text>
-                    {(n.gainVal ?? 0) !== 0 && <text y={22} textAnchor="middle" fontSize={8} fill={(n.gainVal ?? 0) >= 0 ? "#34d399" : "#fb7185"}>{(n.gainVal ?? 0) >= 0 ? "+" : ""}{formatMoney(n.gainVal ?? 0)}</text>}
+                    <text y={9} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.85)" style={ts}>{n.sub}</text>
+                    {(n.gainVal ?? 0) !== 0 && <text y={22} textAnchor="middle" fontSize={8} fill={(n.gainVal ?? 0) >= 0 ? "#34d399" : "#fb7185"} style={ts}>{(n.gainVal ?? 0) >= 0 ? "+" : ""}{formatMoney(n.gainVal ?? 0)}</text>}
                     {selected?.kind === "portfolio" && selected.id === n.portfolioKey && (
                       <g transform={`translate(${n.r * 0.68},${n.r * 0.68})`} style={{ cursor: "pointer" }}
                         onPointerDown={e => e.stopPropagation()}
@@ -885,8 +886,9 @@ export default function GalaxyView({
                     </>}
                     <circle r={n.r} fill="url(#sph-hl)" />
                     {(gp ?? 0) >= 1 && <circle r={n.r + 6} fill="none" stroke="#34d399" strokeOpacity={0.45} strokeWidth={1.5} />}
+                    {isVacation && <rect x={-n.r * 0.95} y={-13} width={n.r * 1.9} height={26} rx={5} fill="rgba(6,6,10,0.55)" />}
                     <text y={-4} textAnchor="middle" fontSize={10} fontWeight={600} fill="#fff" style={ts}>{n.label.length > 12 ? n.label.slice(0, 11) + "…" : n.label}</text>
-                    <text y={10} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.7)">{n.sub}</text>
+                    <text y={10} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.85)" style={ts}>{n.sub}</text>
                   </>;
                 })()}
 
