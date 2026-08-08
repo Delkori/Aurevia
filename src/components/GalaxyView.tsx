@@ -5,7 +5,7 @@ import {
   forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY,
   type Simulation, type SimulationNodeDatum,
 } from "d3-force";
-import { FolderPlus, Plus, Star, ArrowRight, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X } from "lucide-react";
+import { FolderPlus, Plus, Star, ArrowRight, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff } from "lucide-react";
 import { formatMoney } from "@/lib/format";
 import { currentValue, gain, gainPercent, totalDebt } from "@/lib/networth";
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
@@ -546,6 +546,10 @@ export default function GalaxyView({
             <input type="checkbox" checked={showCountdown} onChange={e => setShowCountdown(e.target.checked)} />
             Jours avant versement
           </label>
+          <button onClick={() => setExpanded(prev => prev.size > 0 ? new Set() : new Set(groups.map(g => g.key)))} className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-muted hover:text-text hover:bg-surface-hover">
+            {expanded.size > 0 ? <EyeOff size={13} /> : <Eye size={13} />}
+            {expanded.size > 0 ? "Masquer les satellites" : "Afficher les satellites"}
+          </button>
           <button onClick={onRefresh} className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-muted hover:text-text hover:bg-surface-hover">
             <RefreshCw size={13} />Actualiser
           </button>
