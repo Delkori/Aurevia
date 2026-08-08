@@ -450,12 +450,92 @@ export default function GalaxyView({
   const exportPdf = async () => {
     const svg = svgRef.current; if (!svg) return;
     const { default: jsPDF } = await import("jspdf");
+    const W = 1400, H = 1000;
     const canvas = document.createElement("canvas"); const ctx = canvas.getContext("2d")!;
-    canvas.width = 1400; canvas.height = 1000;
-    ctx.fillStyle = "#0a0a0e"; ctx.fillRect(0, 0, 1400, 1000);
+    canvas.width = W; canvas.height = H;
+    ctx.fillStyle = "#0a0a0e"; ctx.fillRect(0, 0, W, H);
     const img = new Image();
-    img.onload = () => { ctx.drawImage(img, 0, 0, 1400, 800); ctx.fillStyle = "#e2e2e6"; ctx.font = "bold 24px sans-serif"; ctx.fillText("Aurevia — Patrimoine", 40, 850); ctx.font = "16px sans-serif"; ctx.fillStyle = "#8e8e96"; ctx.fillText(`Net : ${formatMoney(grandTotal)} · Actifs : ${formatMoney(grossTotal)} · Crédits : ${formatMoney(debt)}`, 40, 880); const pdf = new jsPDF({ orientation: "landscape", unit: "px", format: [1400, 1000] }); pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, 1400, 1000); pdf.save("aurevia.pdf"); };
-    img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(new XMLSerializer().serializeToString(svg))));
+    await new Promise<void>(resolve => {
+      img.onload = () => resolve();
+      img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(new XMLSerializer().serializeToString(svg))));
+    });
+    ctx.drawImage(img, 0, 0, W, 820);
+    ctx.fillStyle = "#e2e2e6"; ctx.font = "bold 26px sans-serif";
+    ctx.fillText("Aurevia — Patrimoine", 40, 865);
+    ctx.font = "15px sans-serif"; ctx.fillStyle = "#8e8e96";
+    const dateStr = new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
+    ctx.fillText(dateStr, W - 200, 865);
+    ctx.font = "16px sans-serif"; ctx.fillStyle = "#b8b8c2";
+    ctx.fillText(`Net : ${formatMoney(grandTotal)}   ·   Actifs bruts : ${formatMoney(grossTotal)}   ·   Crédits : ${formatMoney(debt)}`, 40, 900);
+    if (totalRevenue > 0) ctx.fillText(`Revenus mensuels : ${formatMoney(totalRevenue)}   ·   Dépenses : ${formatMoney(totalExpenseFlows)}   ·   Épargne : ${tauxEpargne}%`, 40, 930);
+    if (structureScore !== null) { ctx.fillStyle = structureScore >= 70 ? "#34d399" : structureScore >= 45 ? "#9585ff" : "#f87171"; ctx.font = "bold 16px sans-serif"; ctx.fillText(`Score de structure : ${structureScore}/100`, 40, 965); }
+
+    const pdf = new jsPDF({ orientation: "landscape", unit: "px", format: [W, H] });
+    pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, W, H);
+
+    // ── Page 2: detailed breakdown table ──
+    pdf.addPage([W, H], "landscape");
+    pdf.setFillColor(10, 10, 14); pdf.rect(0, 0, W, H, "F");
+    let y = 60;
+    pdf.setTextColor(226, 226, 230); pdf.setFont("helvetica", "bold"); pdf.setFontSize(22);
+    pdf.text("Détail du patrimoine", 40, y); y += 20;
+    pdf.setDrawColor(60, 60, 68); pdf.line(40, y, W - 40, y); y += 34;
+
+    pdf.setFontSize(14); pdf.text("Planètes", 40, y); y += 22;
+    pdf.setFont("helvetica", "normal"); pdf.setFontSize(11);
+    for (const g of groups) {
+      if (g.total <= 0 && g.valued.length === 0) continue;
+      pdf.setTextColor(200, 200, 208);
+      pdf.text(String(g.portfolio.name), 50, y);
+      pdf.setTextColor(150, 150, 160);
+      pdf.text(`${g.valued.length} actif${g.valued.length > 1 ? "s" : ""}`, 320, y);
+      pdf.setTextColor(226, 226, 230);
+      pdf.text(formatMoney(g.total), W - 100, y, { align: "right" });
+      y += 18;
+      if (y > H - 60) { pdf.addPage([W, H], "landscape"); pdf.setFillColor(10, 10, 14); pdf.rect(0, 0, W, H, "F"); y = 60; }
+    }
+
+    if (debt > 0) {
+      y += 12; pdf.setTextColor(248, 113, 113); pdf.setFont("helvetica", "bold"); pdf.setFontSize(12);
+      pdf.text(`Crédits en cours : ${formatMoney(debt)}`, 50, y); y += 12;
+    }
+
+    if (goals.length > 0) {
+      y += 26; pdf.setTextColor(226, 226, 230); pdf.setFont("helvetica", "bold"); pdf.setFontSize(14);
+      pdf.text("Objectifs", 40, y); y += 22;
+      pdf.setFont("helvetica", "normal"); pdf.setFontSize(11);
+      for (const g of goals) {
+        const prog = Math.round(goalProgress(g) * 100);
+        pdf.setTextColor(200, 200, 208);
+        pdf.text(String(g.name), 50, y);
+        pdf.setTextColor(150, 150, 160);
+        pdf.text(`${formatMoney(Number(g.targetAmount))} visé`, 320, y);
+        pdf.setTextColor(prog >= 100 ? 52 : 149, prog >= 100 ? 211 : 133, prog >= 100 ? 153 : 255);
+        pdf.text(`${prog}%`, W - 100, y, { align: "right" });
+        y += 18;
+        if (y > H - 60) { pdf.addPage([W, H], "landscape"); pdf.setFillColor(10, 10, 14); pdf.rect(0, 0, W, H, "F"); y = 60; }
+      }
+    }
+
+    if (members.length > 0) {
+      y += 26; pdf.setTextColor(226, 226, 230); pdf.setFont("helvetica", "bold"); pdf.setFontSize(14);
+      pdf.text("Membres du foyer", 40, y); y += 22;
+      pdf.setFont("helvetica", "normal"); pdf.setFontSize(11);
+      for (const m of members) {
+        pdf.setTextColor(200, 200, 208);
+        pdf.text(String(m.name), 50, y);
+        pdf.setTextColor(150, 150, 160);
+        pdf.text(String(m.role || ""), 320, y);
+        if (m.salary) { pdf.setTextColor(226, 226, 230); pdf.text(formatMoney(Number(m.salary)), W - 100, y, { align: "right" }); }
+        y += 18;
+        if (y > H - 60) { pdf.addPage([W, H], "landscape"); pdf.setFillColor(10, 10, 14); pdf.rect(0, 0, W, H, "F"); y = 60; }
+      }
+    }
+
+    pdf.setFontSize(9); pdf.setTextColor(110, 110, 118);
+    pdf.text("Score de structure organisationnel — ne constitue pas un conseil en investissement.", 40, H - 30);
+
+    pdf.save("aurevia.pdf");
   };
 
   const budgetRatio = totalRevenue > 0 ? totalExpenseFlows / totalRevenue : 0; // 0..1+ (1+ = deficit)
