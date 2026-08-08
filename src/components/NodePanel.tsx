@@ -403,7 +403,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
             <p className="text-[10px] text-text-muted">
               {selected.linkedPortfolioIds.length > 0
                 ? "La progression est calculée sur la somme de ces planètes."
-                : "Aucun lien : la progression utilise le patrimoine net total."}
+                : "Aucun lien : la progression est à 0%. Coche une planète ci-dessous pour la relier à cet objectif."}
             </p>
             {portfolios.map(p => {
               const link = goalLinks.find(gl => gl.goalId === selected.goal.id && gl.portfolioId === p.id);

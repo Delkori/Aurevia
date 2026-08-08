@@ -17,7 +17,7 @@ type Portfolio = { id: number; name: string; color: string; memberId: number | n
 type Goal = { id: number; name: string; targetAmount: string; targetDate: string | null; color: string; memberId: number | null };
 type Loan = { id: number; name: string; remainingBalance: string; currency: string; assetId: number | null };
 type Member = { id: number; name: string; role: string; color: string; salary: string | null };
-type Flow = { id: number; name: string | null; sourceType: string; sourceId: number | null; targetType: string; targetId: number | null; amount: string; frequency: string; memberId: number | null };
+type Flow = { id: number; name: string | null; sourceType: string; sourceId: number | null; targetType: string; targetId: number | null; amount: string; frequency: string; memberId: number | null; createdAt: string };
 type GoalLink = { id: number; goalId: number; portfolioId: number };
 type Quote = { price: number; currency: string } | null;
 
@@ -54,6 +54,19 @@ const EXPENSES_IMAGES = {
   eruption: "/planet-skins/expenses-eruption.png",
   critical: "/planet-skins/expenses-critical.png",
 };
+function daysUntilNextOccurrence(createdAt: string, frequency: string): number {
+  const now = new Date();
+  const next = new Date(createdAt);
+  if (Number.isNaN(next.getTime())) return NaN;
+  let guard = 0;
+  while (next.getTime() <= now.getTime() && guard < 1000) {
+    if (frequency === "weekly") next.setDate(next.getDate() + 7);
+    else if (frequency === "yearly") next.setFullYear(next.getFullYear() + 1);
+    else next.setMonth(next.getMonth() + 1);
+    guard++;
+  }
+  return Math.max(0, Math.ceil((next.getTime() - now.getTime()) / 86400000));
+}
 function isVacationGoal(name: string) {
   const n = name.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
   return /vacance|voyage|plage|maldives|croisiere/.test(n);
@@ -135,6 +148,7 @@ export default function GalaxyView({
   const [pendingLink, setPendingLink] = useState<{ sourceType: string; sourceId: number | null; sourceLabel: string; targetType: string; targetId: number; targetLabel: string } | null>(null);
   const [linkAmount, setLinkAmount] = useState("");
   const [linkFrequency, setLinkFrequency] = useState("monthly");
+  const [showCountdown, setShowCountdown] = useState(false);
   const t = useAnimClock();
   const simRef = useRef<Simulation<GNode, GLink> | null>(null);
   const nodesMapRef = useRef<Map<string, GNode>>(new Map());
@@ -165,16 +179,16 @@ export default function GalaxyView({
 
   const goalProgress = useCallback((goal: Goal) => {
     const linkedIds = goalLinks.filter(gl => gl.goalId === goal.id).map(gl => gl.portfolioId);
-    if (linkedIds.length === 0) return Math.min(1, grandTotal / Number(goal.targetAmount));
+    if (linkedIds.length === 0) return 0;
     const linkedTotal = linkedIds.reduce((s, pid) => s + (groups.find(g => g.key === pid)?.total ?? 0), 0);
     return Math.min(1, linkedTotal / Number(goal.targetAmount));
-  }, [goalLinks, groups, grandTotal]);
+  }, [goalLinks, groups]);
 
   // Build graph
   const { targetNodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows } = useMemo(() => {
     const nodes: GNode[] = [];
     const links: GLink[] = [];
-    const flowLinks: { source: string; target: string; label: string }[] = [];
+    const flowLinks: { source: string; target: string; label: string; days?: number; isSalarySource?: boolean }[] = [];
 
     if (salary > 0) nodes.push({ id: "salary", kind: "salary", label: "Salaire", r: 32, color: "#34d399" });
     nodes.push({ id: "center", kind: "center", label: "Patrimoine", r: CENTER_R, color: "#7c6af5" });
@@ -246,7 +260,7 @@ export default function GalaxyView({
       const sId = f.sourceType === "salary" ? "salary" : f.sourceType === "portfolio" ? `p-${f.sourceId}` : f.sourceType === "member_salary" ? `ms-${f.sourceId}` : null;
       const tId = f.targetType === "portfolio" ? `p-${f.targetId}` : f.targetType === "goal" ? `g-${f.targetId}` : null;
       if (sId && tId && nodes.find(n => n.id === sId) && nodes.find(n => n.id === tId))
-        flowLinks.push({ source: sId, target: tId, label: formatMoney(Number(f.amount)) });
+        flowLinks.push({ source: sId, target: tId, label: formatMoney(Number(f.amount)), days: daysUntilNextOccurrence(f.createdAt, f.frequency), isSalarySource: f.sourceType === "salary" || f.sourceType === "member_salary" });
     });
 
     return { targetNodes: nodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows };
@@ -447,7 +461,6 @@ export default function GalaxyView({
   };
 
   const budgetRatio = salary > 0 ? totalExpenseFlows / salary : 0; // 0..1+ (1+ = deficit)
-  const isWarning = budgetRatio > 0.8 && budgetRatio <= 1; // approaching limit
   const tauxEpargne = salary > 0 ? Math.round((salary - totalExpenseFlows) / salary * 100) : 0;
 
   return (
@@ -529,6 +542,10 @@ export default function GalaxyView({
 
         {/* Bottom actions */}
         <div className="px-3 py-3 border-t border-border space-y-0.5">
+          <label className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-muted hover:text-text cursor-pointer">
+            <input type="checkbox" checked={showCountdown} onChange={e => setShowCountdown(e.target.checked)} />
+            Jours avant versement
+          </label>
           <button onClick={onRefresh} className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-muted hover:text-text hover:bg-surface-hover">
             <RefreshCw size={13} />Actualiser
           </button>
@@ -635,6 +652,11 @@ export default function GalaxyView({
               return <g key={`fl-${i}`}>
                 <path d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke="#9585ff" strokeOpacity={0.3} strokeWidth={1.5} strokeDasharray="6 4" />
                 <text x={mid.x} y={mid.y - 12} textAnchor="middle" fontSize={10} fill="#b8a5ff" opacity={0.75} fontWeight={500}>{f.label}</text>
+                {showCountdown && f.days !== undefined && !Number.isNaN(f.days) && (
+                  <text x={mid.x} y={mid.y + 2} textAnchor="middle" fontSize={8} fill="#fbbf24" opacity={0.85} fontWeight={600}>
+                    {f.days === 0 ? "aujourd'hui" : `dans ${f.days}j`}
+                  </text>
+                )}
               </g>;
             })}
             {flowLinks.map((f, i) => {
@@ -650,8 +672,17 @@ export default function GalaxyView({
               return <g key={`rk-${i}`}>
                 {trail.map((pt, ti) => <circle key={`tr-${i}-${ti}`} cx={pt.x} cy={pt.y} r={3.5 - ti * 0.7} fill="url(#rocket-trail)" opacity={0.55 - ti * 0.12} />)}
                 <g transform={`translate(${head.x},${head.y}) rotate(${head.angle})`}>
-                  <polygon points="-5,-3 6,0 -5,3" fill="#b8a5ff" opacity={0.9} />
-                  <polygon points="-6,0 -11,-3 -9,0 -11,3" fill="#fb923c" opacity={0.5 + Math.sin(t * 14) * 0.25} />
+                  {f.isSalarySource ? <>
+                    <rect x={-8} y={-3.5} width={13} height={7} rx={1.5} fill="#9585ff" opacity={0.9} />
+                    <rect x={-5.5} y={-2.3} width={2.6} height={4.6} fill="#2a2140" opacity={0.7} />
+                    <rect x={-1.5} y={-2.3} width={2.6} height={4.6} fill="#2a2140" opacity={0.7} />
+                    <rect x={2.5} y={-2.3} width={2.6} height={4.6} fill="#2a2140" opacity={0.7} />
+                    <polygon points="5,-3.5 10,0 5,3.5" fill="#b8a5ff" opacity={0.9} />
+                    <polygon points="-8,0 -13,-2.5 -11.5,0 -13,2.5" fill="#fb923c" opacity={0.5 + Math.sin(t * 10) * 0.25} />
+                  </> : <>
+                    <polygon points="-5,-3 6,0 -5,3" fill="#b8a5ff" opacity={0.9} />
+                    <polygon points="-6,0 -11,-3 -9,0 -11,3" fill="#fb923c" opacity={0.5 + Math.sin(t * 14) * 0.25} />
+                  </>}
                 </g>
               </g>;
             })}
@@ -747,7 +778,8 @@ export default function GalaxyView({
                 {n.kind === "expenses" && (() => {
                   const R = n.r;
                   const tier: "calm" | "warning" | "eruption" | "critical" =
-                    budgetRatio > 1.3 ? "critical" : budgetRatio > 1 ? "eruption" : isWarning ? "warning" : "calm";
+                    totalExpenseFlows <= 0 ? "calm" :
+                    budgetRatio > 1.3 ? "critical" : budgetRatio > 1 ? "eruption" : "warning";
                   const tierImage = tier !== "calm" ? EXPENSES_IMAGES[tier] : null;
                   const isOverBudget = tier === "eruption" || tier === "critical";
                   return <>
@@ -789,13 +821,13 @@ export default function GalaxyView({
                       return <circle key={`proj-${i}`} cx={px} cy={py} r={1.8 - phase} fill="#ff5500" opacity={1 - phase} />;
                     })}
                     {/* Warning shake effect on text */}
-                    {tierImage && <rect x={-R * 0.95} y={-15} width={R * 1.9} height={tier !== "calm" && tier !== "warning" ? 42 : 27} rx={5} fill="rgba(6,6,10,0.55)" />}
+                    {tierImage && <rect x={-R * 0.95} y={-15} width={R * 1.9} height={salary > 0 ? 42 : 27} rx={5} fill="rgba(6,6,10,0.55)" />}
                     <g transform={isOverBudget ? `translate(${Math.sin(t * 20) * 0.8},0)` : undefined}>
                       <text y={-5} textAnchor="middle" fontSize={10} fontWeight={600} fill="#fff" style={ts}>Dépenses</text>
                       <text y={9} textAnchor="middle" fontSize={9} fill={isOverBudget ? "#ffaa70" : tier === "warning" ? "#ffd280" : "rgba(255,255,255,0.85)"} style={ts}>{totalExpenseFlows > 0 ? formatMoney(totalExpenseFlows) : "0 €"}/m</text>
-                      {tier === "critical" && <text y={24} textAnchor="middle" fontSize={9} fill="#ff2200" fontWeight={700} opacity={0.7 + Math.sin(t * 8) * 0.3} style={ts}>DÉFICIT CRITIQUE</text>}
-                      {tier === "eruption" && <text y={24} textAnchor="middle" fontSize={9} fill="#ff6b35" fontWeight={700} opacity={0.6 + Math.sin(t * 6) * 0.4} style={ts}>DÉFICIT</text>}
-                      {tier === "warning" && <text y={22} textAnchor="middle" fontSize={8} fill="#ffb84d" fontWeight={600} style={ts}>{Math.round(budgetRatio * 100)}% du budget</text>}
+                      {salary > 0 && <text y={22} textAnchor="middle" fontSize={8} fill={tier === "critical" ? "#ff2200" : tier === "eruption" ? "#ff6b35" : "#ffb84d"} fontWeight={600} style={ts}>{Math.round(budgetRatio * 100)}% du salaire</text>}
+                      {tier === "critical" && <text y={34} textAnchor="middle" fontSize={9} fill="#ff2200" fontWeight={700} opacity={0.7 + Math.sin(t * 8) * 0.3} style={ts}>DÉFICIT CRITIQUE</text>}
+                      {tier === "eruption" && <text y={34} textAnchor="middle" fontSize={9} fill="#ff6b35" fontWeight={700} opacity={0.6 + Math.sin(t * 6) * 0.4} style={ts}>DÉFICIT</text>}
                     </g>
                     <g transform={`translate(${R * 0.68},${R * 0.68})`} style={{ cursor: "pointer" }}
                       onPointerDown={e => e.stopPropagation()}
