@@ -5,7 +5,7 @@ import {
   forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY,
   type Simulation, type SimulationNodeDatum,
 } from "d3-force";
-import { FolderPlus, Plus, Star, ArrowRight, Download, RotateCcw, Wallet, TrendingUp, TrendingDown, Users } from "lucide-react";
+import { FolderPlus, Plus, Star, ArrowRight, Download, RotateCcw, Wallet, TrendingUp, TrendingDown, Users, Link2, X } from "lucide-react";
 import { formatMoney } from "@/lib/format";
 import { currentValue, gain, gainPercent, totalDebt } from "@/lib/networth";
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
@@ -113,6 +113,11 @@ export default function GalaxyView({
   const [expanded, setExpanded] = useState<Set<number | "unassigned">>(new Set());
   const [selected, setSelected] = useState<Selection>(null);
   const [createMode, setCreateMode] = useState<string | null>(null);
+  const [linkMode, setLinkMode] = useState(false);
+  const [linkSourceNode, setLinkSourceNode] = useState<{ id: string; kind: string; portfolioKey?: number | "unassigned"; label: string } | null>(null);
+  const [pendingLink, setPendingLink] = useState<{ sourceType: string; sourceId: number | null; sourceLabel: string; targetType: string; targetId: number; targetLabel: string } | null>(null);
+  const [linkAmount, setLinkAmount] = useState("");
+  const [linkFrequency, setLinkFrequency] = useState("monthly");
   const t = useAnimClock();
   const simRef = useRef<Simulation<GNode, GLink> | null>(null);
   const nodesMapRef = useRef<Map<string, GNode>>(new Map());
@@ -353,6 +358,30 @@ export default function GalaxyView({
       if (Math.sqrt(dx * dx + dy * dy) > 5) { dragStartPos.current = null; return; }
     }
     dragStartPos.current = null;
+
+    if (linkMode) {
+      const isSalary = n.kind === "salary";
+      const isPortfolio = n.kind === "portfolio" && n.portfolioKey !== undefined && n.portfolioKey !== "unassigned";
+      const isGoal = n.kind === "goal" && n.goalId != null;
+      const eligibleSource = isSalary || isPortfolio;
+      const eligibleTarget = isPortfolio || isGoal;
+      if (!linkSourceNode) {
+        if (eligibleSource) setLinkSourceNode({ id: n.id, kind: n.kind, portfolioKey: n.portfolioKey, label: n.label });
+        return;
+      }
+      if (n.id === linkSourceNode.id) { setLinkSourceNode(null); return; }
+      if (eligibleTarget) {
+        const sourceType = linkSourceNode.kind === "salary" ? "salary" : "portfolio";
+        const sourceId = linkSourceNode.kind === "salary" ? null : (linkSourceNode.portfolioKey as number);
+        const targetType = isGoal ? "goal" : "portfolio";
+        const targetId = isGoal ? n.goalId! : (n.portfolioKey as number);
+        setPendingLink({ sourceType, sourceId, sourceLabel: linkSourceNode.label, targetType, targetId, targetLabel: n.label });
+        setLinkSourceNode(null);
+        setLinkMode(false);
+      }
+      return;
+    }
+
     setCreateMode(null);
     if (n.kind === "center") setSelected({ kind: "total", total: grandTotal, grossTotal, debt });
     else if (n.kind === "salary") { setCreateMode("salary"); setSelected({ kind: "total", total: grandTotal, grossTotal, debt }); }
@@ -432,6 +461,13 @@ export default function GalaxyView({
               <Icon size={13} className="shrink-0" />{label}
             </button>
           ))}
+          <button onClick={() => { setSelected(null); setCreateMode(null); setLinkSourceNode(null); setLinkMode(m => !m); }}
+            className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs transition-colors ${linkMode ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text hover:bg-surface-hover"}`}>
+            <Link2 size={13} className="shrink-0" />Lier deux planètes
+          </button>
+          {linkMode && <p className="text-[10px] text-accent px-2 pt-1">
+            {linkSourceNode ? `Clique la destination (depuis "${linkSourceNode.label}")…` : "Clique la planète source…"}
+          </p>}
         </div>
 
         {/* Salary */}
@@ -481,7 +517,7 @@ export default function GalaxyView({
       <div className="relative overflow-hidden" style={{ background: "radial-gradient(ellipse at 30% 20%, rgba(124,106,245,0.16), transparent 45%), radial-gradient(ellipse at 75% 65%, rgba(45,180,190,0.10), transparent 42%), radial-gradient(ellipse at 15% 80%, rgba(200,90,60,0.06), transparent 35%), #06060a" }}>
         <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full h-full select-none touch-none block absolute inset-0"
           onPointerDown={onBgDown} onPointerMove={onBgMove} onPointerUp={onBgUp} onPointerLeave={onBgUp}
-          onClick={() => { setSelected(null); setCreateMode(null); }}>
+          onClick={() => { if (linkSourceNode) { setLinkSourceNode(null); return; } setSelected(null); setCreateMode(null); }}>
           <defs>
             <filter id="gl" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3" /></filter>
             <filter id="glow-strong" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="6" result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
@@ -512,6 +548,28 @@ export default function GalaxyView({
             <radialGradient id="sph-skin-ocean" cx="38%" cy="28%" r="60%"><stop offset="0%" stopColor="#b8f0ff" /><stop offset="25%" stopColor="#38b8e0" /><stop offset="50%" stopColor="#1868a0" /><stop offset="75%" stopColor="#0c3860" /><stop offset="100%" stopColor="#041828" /></radialGradient>
             <radialGradient id="sph-skin-empty" cx="38%" cy="28%" r="60%"><stop offset="0%" stopColor="#d8d4e8" /><stop offset="30%" stopColor="#9a92b8" /><stop offset="60%" stopColor="#5c5478" /><stop offset="100%" stopColor="#201c30" /></radialGradient>
             <radialGradient id="glow-crypto" cx="50%" cy="50%" r="50%"><stop offset="0%" stopColor="#b060f0" stopOpacity={0.35} /><stop offset="60%" stopColor="#b060f0" stopOpacity={0.08} /><stop offset="100%" stopColor="#b060f0" stopOpacity={0} /></radialGradient>
+
+            {/* Full-surface skin patterns — much more visible than the old subtle filters */}
+            <pattern id="pat-tech" width="13" height="13" patternUnits="userSpaceOnUse">
+              <path d="M0 6.5 H13 M6.5 0 V13" stroke="#5cfff0" strokeWidth="0.7" opacity="0.55" />
+              <circle cx="6.5" cy="6.5" r="1.1" fill="#baffee" opacity="0.85" />
+            </pattern>
+            <pattern id="pat-terrain" width="17" height="17" patternUnits="userSpaceOnUse">
+              <circle cx="4" cy="4" r="2.3" fill="#20130a" opacity="0.6" />
+              <circle cx="12" cy="10" r="1.6" fill="#180d06" opacity="0.55" />
+              <circle cx="7" cy="14" r="1.1" fill="#2a1c10" opacity="0.5" />
+              <circle cx="14" cy="3" r="1" fill="#160b05" opacity="0.45" />
+            </pattern>
+            <pattern id="pat-ocean" width="22" height="11" patternUnits="userSpaceOnUse">
+              <path d="M0 5.5 Q5.5 2 11 5.5 T22 5.5" stroke="#d0f7ff" strokeWidth="1" fill="none" opacity="0.45" />
+            </pattern>
+            <pattern id="pat-crypto" width="11" height="11" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+              <line x1="0" y1="0" x2="0" y2="11" stroke="#e8c0ff" strokeWidth="1.6" opacity="0.4" />
+            </pattern>
+            <pattern id="pat-empty" width="19" height="19" patternUnits="userSpaceOnUse">
+              <circle cx="5" cy="5" r="1.3" fill="#a8a2ba" opacity="0.4" />
+              <circle cx="13" cy="12" r="0.9" fill="#8a84a0" opacity="0.35" />
+            </pattern>
 
             {nodes.filter(n => ["portfolio", "member", "goal"].includes(n.kind)).map(n => (
               <React.Fragment key={`sph-grp-${n.id}`}>
@@ -590,6 +648,9 @@ export default function GalaxyView({
                 <circle cx={pt.x} cy={pt.y} r={2.5} fill="#34d399" opacity={0.85} filter="url(#gl)" />
               </g>;
             })}
+
+            {/* Link mode source highlight */}
+            {linkSourceNode && (() => { const tg = nodeById.get(linkSourceNode.id); if (!tg || tg.x == null) return null; return <circle cx={tg.x} cy={tg.y} r={tg.r + 10} fill="none" stroke="#34d399" strokeWidth={2} strokeDasharray="3 4"><animate attributeName="r" values={`${tg.r + 6};${tg.r + 14};${tg.r + 6}`} dur="1s" repeatCount="indefinite" /></circle>; })()}
 
             {/* Magnetic snap halo */}
             {snapTarget && (() => { const tg = nodeById.get(snapTarget); if (!tg || tg.x == null) return null; return <g><circle cx={tg.x} cy={tg.y} r={tg.r + 20} fill="none" stroke="#9585ff" strokeOpacity={0.6} strokeWidth={2.5} strokeDasharray="4 3"><animate attributeName="r" values={`${tg.r + 14};${tg.r + 24};${tg.r + 14}`} dur="0.7s" repeatCount="indefinite" /></circle><circle cx={tg.x} cy={tg.y} r={tg.r + 12} fill="rgba(149,133,255,0.06)" /></g>; })()}
@@ -726,6 +787,7 @@ export default function GalaxyView({
                     <g clipPath={`url(#cp-${n.id})`}>
                       <circle r={n.r} fill={skinFill} filter={skinFilter} opacity={0.65} />
                       {skin !== "tech" && <circle r={n.r} fill={skinFill} opacity={0.3} filter="url(#clouds)" />}
+                      {skin !== "generic" && <circle r={n.r} fill={`url(#pat-${skin})`} />}
 
                       {skin === "ocean" && <>
                         {[0.22, 0.5, 0.78].map((ry, i) => (
@@ -810,6 +872,29 @@ export default function GalaxyView({
           <rect x={0} y={0} width={W} height={H} fill="url(#vignette)" pointerEvents="none" />
         </svg>
         <p className="absolute bottom-3 left-1/2 -translate-x-1/2 text-[10px] text-white/20 pointer-events-none">Molette = zoom · glisser pour déplacer · glisser un actif vers un portefeuille pour le réassigner</p>
+
+        {pendingLink && (
+          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-surface border border-border rounded-xl p-4 w-64 shadow-xl space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-medium">{pendingLink.sourceLabel} → {pendingLink.targetLabel}</p>
+              <button onClick={() => { setPendingLink(null); setLinkAmount(""); }} className="text-text-muted hover:text-text"><X size={14} /></button>
+            </div>
+            <label className="text-[10px] text-text-muted uppercase tracking-wide block">Montant</label>
+            <input autoFocus type="number" step="any" value={linkAmount} onChange={e => setLinkAmount(e.target.value)} placeholder="200"
+              className="w-full bg-bg border border-border rounded-md px-3 py-2 text-sm tabular" />
+            <label className="text-[10px] text-text-muted uppercase tracking-wide block">Fréquence</label>
+            <select value={linkFrequency} onChange={e => setLinkFrequency(e.target.value)} className="w-full bg-bg border border-border rounded-md px-3 py-2 text-sm">
+              <option value="monthly">Mensuel</option><option value="weekly">Hebdo</option><option value="yearly">Annuel</option>
+            </select>
+            <div className="flex gap-2 pt-1">
+              <button onClick={() => { setPendingLink(null); setLinkAmount(""); }} className="text-xs px-3 py-2 rounded-md font-medium border border-border text-text-muted hover:text-text">Annuler</button>
+              <button disabled={!linkAmount} onClick={async () => {
+                await actions.createFlow({ sourceType: pendingLink.sourceType, sourceId: pendingLink.sourceId, targetType: pendingLink.targetType, targetId: pendingLink.targetId, amount: linkAmount, frequency: linkFrequency, name: null });
+                setPendingLink(null); setLinkAmount("");
+              }} className="flex-1 text-xs px-3 py-2 rounded-md font-medium bg-accent text-white hover:opacity-90 disabled:opacity-40">Créer le lien</button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── PANEL ── */}
