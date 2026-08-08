@@ -153,16 +153,20 @@ function FlowForm({ portfolios, goals, members, defaultTargetType, onSubmit, onC
   const sources = f.sourceType === "portfolio" ? portfolios.map(p => ({ id: p.id, name: p.name }))
     : f.sourceType === "member_salary" ? membersWithSalary.map(m => ({ id: m.id, name: `Salaire de ${m.name}` }))
     : [];
-  const needsTargetPicker = f.targetType !== "expense";
+  const needsTargetPicker = f.targetType !== "expense" && f.targetType !== "income";
+  const isIncome = f.targetType === "income";
   return (
-    <form onSubmit={e => { e.preventDefault(); onSubmit({ ...f, sourceId: f.sourceId ? Number(f.sourceId) : null, targetId: f.targetId ? Number(f.targetId) : null }); }} className="space-y-1">
+    <form onSubmit={e => { e.preventDefault(); onSubmit({ ...f, sourceType: isIncome ? "external" : f.sourceType, sourceId: isIncome ? null : (f.sourceId ? Number(f.sourceId) : null), targetId: f.targetId ? Number(f.targetId) : null }); }} className="space-y-1">
       <p className="text-[10px] text-text-muted uppercase tracking-wide">Nouveau flux</p>
       <Label>Nom (optionnel)</Label><Inp value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="Loyer, Épargne PEA…" />
-      <Label>Source</Label><Sel value={f.sourceType} onChange={e => setF({ ...f, sourceType: e.target.value, sourceId: "" })}><option value="salary">Salaire</option><option value="portfolio">Planète</option>{membersWithSalary.length > 0 && <option value="member_salary">Salaire d&apos;un membre</option>}</Sel>
-      {f.sourceType !== "salary" && <Sel value={f.sourceId} onChange={e => setF({ ...f, sourceId: e.target.value })}><option value="">—</option>{sources.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</Sel>}
-      <Label>Destination</Label><Sel value={f.targetType} onChange={e => setF({ ...f, targetType: e.target.value, targetId: "" })}><option value="portfolio">Planète</option><option value="goal">Objectif</option><option value="expense">Dépense</option></Sel>
+      {!isIncome && <>
+        <Label>Source</Label><Sel value={f.sourceType} onChange={e => setF({ ...f, sourceType: e.target.value, sourceId: "" })}><option value="salary">Salaire</option><option value="portfolio">Planète</option>{membersWithSalary.length > 0 && <option value="member_salary">Salaire d&apos;un membre</option>}</Sel>
+        {f.sourceType !== "salary" && <Sel value={f.sourceId} onChange={e => setF({ ...f, sourceId: e.target.value })}><option value="">—</option>{sources.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</Sel>}
+      </>}
+      <Label>Destination</Label><Sel value={f.targetType} onChange={e => setF({ ...f, targetType: e.target.value, targetId: "" })}><option value="portfolio">Planète</option><option value="goal">Objectif</option><option value="expense">Dépense</option><option value="income">Revenu</option></Sel>
       {needsTargetPicker && <Sel value={f.targetId} onChange={e => setF({ ...f, targetId: e.target.value })}><option value="">—</option>{targets.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</Sel>}
       {f.targetType === "expense" && <Inp value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="Loyer, Courses, Transport…" />}
+      {isIncome && <Inp value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="Loyer perçu, Retraite, Rente…" />}
       <Label>Montant</Label><Inp required type="number" step="any" value={f.amount} onChange={e => setF({ ...f, amount: e.target.value })} placeholder="800" className="tabular" />
       <Label>Fréquence</Label><Sel value={f.frequency} onChange={e => setF({ ...f, frequency: e.target.value })}><option value="monthly">Mensuel</option><option value="weekly">Hebdo</option><option value="yearly">Annuel</option></Sel>
       <div className="flex gap-2 pt-3"><Btn type="submit" variant="accent" className="flex-1">Créer</Btn><Btn type="button" onClick={onCancel}>Fermer</Btn></div>
@@ -268,6 +272,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
       {createMode === "goal" && <GoalForm members={members} onSubmit={async d => { await actions.createGoal(d); clear(); }} onCancel={clear} />}
       {createMode === "flow" && <FlowForm portfolios={portfolios} goals={goals} members={members} onSubmit={async d => { await actions.createFlow(d); clear(); }} onCancel={clear} />}
       {createMode === "expense" && <FlowForm portfolios={portfolios} goals={goals} members={members} defaultTargetType="expense" onSubmit={async d => { await actions.createFlow(d); clear(); }} onCancel={clear} />}
+      {createMode === "income" && <FlowForm portfolios={portfolios} goals={goals} members={members} defaultTargetType="income" onSubmit={async d => { await actions.createFlow(d); clear(); }} onCancel={clear} />}
 
       {createMode === "salary" && <SalaryForm currentSalary={salary} onSubmit={async v => { await onUpdateSalary(v); clear(); }} onCancel={clear} />}
       {createMode === "member" && <MemberForm onSubmit={async d => { await actions.createMember(d); clear(); }} onCancel={clear} />}
@@ -308,10 +313,15 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
           {flows.length > 0 && <div className="pt-2 border-t border-border">
             <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Flux mensuels</p>
             {flows.map(f => {
-              const sName = f.sourceType === "salary" ? "Salaire" : portfolios.find(p => p.id === f.sourceId)?.name || "?";
+              const sName = f.targetType === "income" ? (f.name || "Revenu")
+                : f.sourceType === "salary" ? "Salaire"
+                : f.sourceType === "member_salary" ? `Salaire de ${members.find(m => m.id === f.sourceId)?.name ?? "?"}`
+                : f.sourceType === "external" ? "Externe"
+                : portfolios.find(p => p.id === f.sourceId)?.name || "?";
               const tName = f.targetType === "portfolio" ? portfolios.find(p => p.id === f.targetId)?.name
                 : f.targetType === "goal" ? goals.find(g => g.id === f.targetId)?.name
-                : f.targetType === "expense" ? (f.name || "Dépense") : "?";
+                : f.targetType === "expense" ? (f.name || "Dépense")
+                : f.targetType === "income" ? "Revenus" : "?";
               return <div key={f.id} className="flex justify-between text-xs py-0.5">
                 <span className="text-text-muted">{sName} → {tName}</span>
                 <span className="tabular text-accent">{formatMoney(Number(f.amount))}</span>

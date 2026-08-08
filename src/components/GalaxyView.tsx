@@ -185,22 +185,32 @@ export default function GalaxyView({
   }, [goalLinks, groups]);
 
   // Build graph
-  const { targetNodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows } = useMemo(() => {
+  const { targetNodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows, totalRevenue } = useMemo(() => {
     const nodes: GNode[] = [];
     const links: GLink[] = [];
     const flowLinks: { source: string; target: string; label: string; days?: number; isSalarySource?: boolean }[] = [];
 
-    if (salary > 0) nodes.push({ id: "salary", kind: "salary", label: "Salaire", r: 32, color: "#34d399" });
+    const incomeFlows = flows.filter(f => f.targetType === "income");
+    const totalIncomeItems = incomeFlows.reduce((s, f) => s + Number(f.amount), 0);
+    const totalRevenue = salary + totalIncomeItems;
+
+    if (totalRevenue > 0) nodes.push({ id: "salary", kind: "salary", label: "Revenus", r: 32, color: "#34d399", sub: formatMoney(totalRevenue) });
     nodes.push({ id: "center", kind: "center", label: "Patrimoine", r: CENTER_R, color: "#7c6af5" });
-    if (salary > 0) links.push({ source: "salary", target: "center" });
+    if (totalRevenue > 0) links.push({ source: "salary", target: "center" });
+
+    incomeFlows.forEach(inf => {
+      const iid = `inc-${inf.id}`;
+      nodes.push({ id: iid, kind: "income-item", label: inf.name || "Revenu", r: 10 + Math.min(8, Number(inf.amount) / 200), color: "#34d399", sub: formatMoney(Number(inf.amount)) });
+      links.push({ source: "salary", target: iid });
+    });
 
     const expFlows = flows.filter(f => f.targetType === "expense");
     const totalExpenseFlows = expFlows.reduce((s, f) => s + Number(f.amount), 0);
     const salInvest = flows.filter(f => f.sourceType === "salary" && (f.targetType === "portfolio" || f.targetType === "goal"));
     const totalInvest = salInvest.reduce((s, f) => s + Number(f.amount), 0);
-    const resteAInvestir = salary > 0 ? Math.max(0, salary - totalInvest - totalExpenseFlows) : 0;
+    const resteAInvestir = totalRevenue > 0 ? Math.max(0, totalRevenue - totalInvest - totalExpenseFlows) : 0;
 
-    if (salary > 0) {
+    if (totalRevenue > 0) {
       nodes.push({ id: "expenses", kind: "expenses", label: "Dépenses", r: 22 + Math.min(18, totalExpenseFlows / 80), color: "#f87171" });
       links.push({ source: "salary", target: "expenses" });
       if (totalExpenseFlows > 0) flowLinks.push({ source: "salary", target: "expenses", label: formatMoney(totalExpenseFlows) });
@@ -210,7 +220,7 @@ export default function GalaxyView({
         links.push({ source: "expenses", target: eid });
       });
     }
-    if (salary > 0 && resteAInvestir > 0) {
+    if (totalRevenue > 0 && resteAInvestir > 0) {
       nodes.push({ id: "reste", kind: "reste", label: "Reste", r: 18, color: "#9585ff" });
       links.push({ source: "salary", target: "reste" });
       flowLinks.push({ source: "salary", target: "reste", label: formatMoney(resteAInvestir) });
@@ -256,14 +266,14 @@ export default function GalaxyView({
     }
 
     flows.forEach(f => {
-      if (f.targetType === "expense") return;
+      if (f.targetType === "expense" || f.targetType === "income") return;
       const sId = f.sourceType === "salary" ? "salary" : f.sourceType === "portfolio" ? `p-${f.sourceId}` : f.sourceType === "member_salary" ? `ms-${f.sourceId}` : null;
       const tId = f.targetType === "portfolio" ? `p-${f.targetId}` : f.targetType === "goal" ? `g-${f.targetId}` : null;
       if (sId && tId && nodes.find(n => n.id === sId) && nodes.find(n => n.id === tId))
         flowLinks.push({ source: sId, target: tId, label: formatMoney(Number(f.amount)), days: daysUntilNextOccurrence(f.createdAt, f.frequency), isSalarySource: f.sourceType === "salary" || f.sourceType === "member_salary" });
     });
 
-    return { targetNodes: nodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows };
+    return { targetNodes: nodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows, totalRevenue };
   }, [groups, maxPV, expanded, goals, maxGT, members, portfolios, flows, quotes, salary, goalLinks, goalProgress]);
 
   // Simulation
@@ -284,7 +294,7 @@ export default function GalaxyView({
 
     if (!simRef.current) {
       simRef.current = forceSimulation<GNode>(nodes)
-        .force("charge", forceManyBody().strength(d => { const k = (d as GNode).kind; return k === "expense-item" ? -30 : k === "asset" ? -60 : -180; }))
+        .force("charge", forceManyBody().strength(d => { const k = (d as GNode).kind; return k === "expense-item" || k === "income-item" ? -30 : k === "asset" ? -60 : -180; }))
         .force("collide", forceCollide<GNode>().radius(d => d.r + 16))
         .force("x", forceX<GNode>(CX).strength(0.02))
         .force("y", forceY<GNode>(CY).strength(0.02))
@@ -293,7 +303,7 @@ export default function GalaxyView({
 
     simRef.current.force("link", forceLink<GNode, GLink>(links).id(d => d.id).distance(l => {
       const tgt = typeof l.target === "object" ? l.target : nm.get(l.target as unknown as string);
-      return tgt?.kind === "expense-item" ? 45 : tgt?.kind === "asset" ? 65 : tgt?.kind === "member" ? 130 : 180;
+      return tgt?.kind === "expense-item" || tgt?.kind === "income-item" ? 45 : tgt?.kind === "asset" ? 65 : tgt?.kind === "member" ? 130 : 180;
     }).strength(0.3));
     simRef.current.force("goalLink", forceLink<GNode, GLink>(goalLinkEdges).id(d => d.id).distance(160).strength(0.08));
     simRef.current.alpha(0.7).restart();
@@ -418,7 +428,7 @@ export default function GalaxyView({
     setCreateMode(null);
     if (n.kind === "center") setSelected({ kind: "total", total: grandTotal, grossTotal, debt });
     else if (n.kind === "salary") { setCreateMode("salary"); setSelected({ kind: "total", total: grandTotal, grossTotal, debt }); }
-    else if (n.kind === "expenses" || n.kind === "expense-item" || n.kind === "reste") setSelected({ kind: "total", total: grandTotal, grossTotal, debt });
+    else if (n.kind === "expenses" || n.kind === "expense-item" || n.kind === "income-item" || n.kind === "reste") setSelected({ kind: "total", total: grandTotal, grossTotal, debt });
     else if (n.kind === "portfolio" && n.portfolioKey !== undefined) {
       const g = groups.find(gr => gr.key === n.portfolioKey)!;
       toggle(n.portfolioKey);
@@ -460,14 +470,14 @@ export default function GalaxyView({
     img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(new XMLSerializer().serializeToString(svg))));
   };
 
-  const budgetRatio = salary > 0 ? totalExpenseFlows / salary : 0; // 0..1+ (1+ = deficit)
-  const tauxEpargne = salary > 0 ? Math.round((salary - totalExpenseFlows) / salary * 100) : 0;
+  const budgetRatio = totalRevenue > 0 ? totalExpenseFlows / totalRevenue : 0; // 0..1+ (1+ = deficit)
+  const tauxEpargne = totalRevenue > 0 ? Math.round((totalRevenue - totalExpenseFlows) / totalRevenue * 100) : 0;
 
   // Score de structure /100 — purement organisationnel (diversification, dette,
   // concentration, taux d'épargne), aucune recommandation d'investissement.
   const structureScore = (() => {
     if (grossTotal <= 0) return null;
-    const savingsPart = salary > 0 ? Math.min(25, Math.max(0, tauxEpargne / 40 * 25)) : 12.5;
+    const savingsPart = totalRevenue > 0 ? Math.min(25, Math.max(0, tauxEpargne / 40 * 25)) : 12.5;
     const skins = new Set(groups.filter(g => g.total > 0).map(g => planetSkin(g.portfolio.name, g.valued)));
     const diversificationPart = Math.min(25, skins.size * 6);
     const debtRatio = grossTotal > 0 ? debt / grossTotal : 0;
@@ -485,7 +495,7 @@ export default function GalaxyView({
         <div className="px-4 pt-4 pb-3 border-b border-border">
           <p className="text-lg font-[family-name:var(--font-mono-num)] tabular font-semibold">{formatMoney(grandTotal)}</p>
           <p className="text-[10px] text-text-muted mt-0.5">Patrimoine net</p>
-          {salary > 0 && <div className="flex gap-3 mt-2">
+          {totalRevenue > 0 && <div className="flex gap-3 mt-2">
             <div className="flex items-center gap-1 text-[10px]">
               <TrendingUp size={10} className="text-positive" />
               <span className="text-text-muted">Épargne</span>
@@ -540,29 +550,12 @@ export default function GalaxyView({
           <button onClick={() => { setSelected(null); setCreateMode("salary"); }}
             className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs ${createMode === "salary" ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text hover:bg-surface-hover"}`}>
             <Wallet size={13} className="shrink-0" />
-            Salaire
+            Salaire principal
             {salary > 0 && <span className="ml-auto text-[10px] tabular text-text-muted">{formatMoney(salary)}</span>}
           </button>
+          <p className="text-[9px] text-text-muted px-2 mt-1">Ajoute d&apos;autres revenus (loyers, retraite, rente…) via le bouton + sur la planète Revenus.</p>
         </div>
 
-        {/* Portfolios summary */}
-        {portfolios.length > 0 && <div className="px-3 py-2 border-t border-border">
-          <p className="text-[9px] text-text-muted uppercase tracking-wider px-1 mb-1.5">Portefeuilles</p>
-          {portfolios.map(p => {
-            const g = groups.find(gr => gr.key === p.id);
-            return <button key={p.id} onClick={() => {
-              const grp = groups.find(gr => gr.key === p.id)!;
-              setCreateMode(null);
-              if (!expanded.has(p.id)) toggle(p.id);
-              setSelected({ kind: "portfolio", id: p.id, name: p.name, color: p.color, total: grp.total, count: grp.valued.length, memberId: p.memberId });
-            }}
-              className="flex items-center gap-2 w-full px-2 py-1 rounded-md text-xs text-text-muted hover:text-text hover:bg-surface-hover">
-              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />
-              <span className="truncate">{p.name}</span>
-              <span className="ml-auto text-[10px] tabular">{formatMoney(g?.total ?? 0)}</span>
-            </button>;
-          })}
-        </div>}
 
         <div className="flex-1" />
 
@@ -677,7 +670,8 @@ export default function GalaxyView({
                 const ownerColor = s.kind === "center" ? "#ffcc55" : s.color;
                 return <path key={`ln-${s.id}-${tg.id}`} d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke={ownerColor} strokeOpacity={0.45} strokeWidth={1.8} strokeDasharray={tg.kind === "goal" ? "5 4" : undefined} filter="url(#gl)" />;
               }
-              return <path key={`ln-${s.id}-${tg.id}`} d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke={tg.color} strokeOpacity={tg.kind === "expense-item" ? 0.1 : 0.22} strokeWidth={tg.kind === "expense-item" ? 0.5 : 1} strokeDasharray={tg.kind === "goal" ? "4 5" : undefined} />;
+              const isItemNode = tg.kind === "expense-item" || tg.kind === "income-item";
+              return <path key={`ln-${s.id}-${tg.id}`} d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke={tg.color} strokeOpacity={isItemNode ? 0.1 : 0.22} strokeWidth={isItemNode ? 0.5 : 1} strokeDasharray={tg.kind === "goal" ? "4 5" : undefined} />;
             })}
             {flowLinks.map((f, i) => {
               const s = nodeById.get(f.source), tg = nodeById.get(f.target);
@@ -721,7 +715,7 @@ export default function GalaxyView({
                 </g>
               </g>;
             })}
-            {links.filter(l => nodeById.get(l.target)?.kind !== "expense-item").map(l => {
+            {links.filter(l => nodeById.get(l.target)?.kind !== "expense-item" && nodeById.get(l.target)?.kind !== "income-item").map(l => {
               const s = nodeById.get(l.source), tg = nodeById.get(l.target);
               if (!s || !tg || s.x == null || tg.x == null) return null;
               const seed = hashSeed(s.id, tg.id), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
@@ -806,9 +800,17 @@ export default function GalaxyView({
                   </>}
                   <circle r={n.r} fill="url(#sph-hl)" />
                   {SALARY_IMAGE && <rect x={-n.r * 0.95} y={-15} width={n.r * 1.9} height={27} rx={5} fill="rgba(6,6,10,0.55)" />}
-                  <text y={-5} textAnchor="middle" fontSize={11} fontWeight={600} fill="#fff" style={ts}>Salaire</text>
-                  <text y={9} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.9)" style={ts}>{formatMoney(salary)}/mois</text>
+                  <text y={-5} textAnchor="middle" fontSize={11} fontWeight={600} fill="#fff" style={ts}>Revenus</text>
+                  <text y={9} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.9)" style={ts}>{n.sub}/mois</text>
+                  <g transform={`translate(${n.r * 0.68},${n.r * 0.68})`} style={{ cursor: "pointer" }}
+                    onPointerDown={e => e.stopPropagation()}
+                    onClick={e => { e.stopPropagation(); setSelected(null); setCreateMode("income"); }}>
+                    <circle r={11} fill="#12121a" stroke="#34d399" strokeWidth={1.2} />
+                    <Plus x={-6} y={-6} size={12} color="#6ee7b7" />
+                  </g>
                 </>}
+
+                {n.kind === "income-item" && <><circle r={n.r} fill="rgba(52,211,153,0.1)" stroke="rgba(52,211,153,0.25)" strokeWidth={0.5} /><text y={-1} textAnchor="middle" fontSize={8} fill="rgba(255,255,255,0.7)">{n.label.length > 10 ? n.label.slice(0, 9) + "…" : n.label}</text><text y={8} textAnchor="middle" fontSize={7} fill="rgba(52,211,153,0.85)">{n.sub}</text></>}
 
                 {n.kind === "expenses" && (() => {
                   const R = n.r;
@@ -856,11 +858,11 @@ export default function GalaxyView({
                       return <circle key={`proj-${i}`} cx={px} cy={py} r={1.8 - phase} fill="#ff5500" opacity={1 - phase} />;
                     })}
                     {/* Warning shake effect on text */}
-                    {tierImage && <rect x={-R * 0.95} y={-15} width={R * 1.9} height={salary > 0 ? 42 : 27} rx={5} fill="rgba(6,6,10,0.55)" />}
+                    {tierImage && <rect x={-R * 0.95} y={-15} width={R * 1.9} height={totalRevenue > 0 ? 42 : 27} rx={5} fill="rgba(6,6,10,0.55)" />}
                     <g transform={isOverBudget ? `translate(${Math.sin(t * 20) * 0.8},0)` : undefined}>
                       <text y={-5} textAnchor="middle" fontSize={10} fontWeight={600} fill="#fff" style={ts}>Dépenses</text>
                       <text y={9} textAnchor="middle" fontSize={9} fill={isOverBudget ? "#ffaa70" : tier === "warning" ? "#ffd280" : "rgba(255,255,255,0.85)"} style={ts}>{totalExpenseFlows > 0 ? formatMoney(totalExpenseFlows) : "0 €"}/m</text>
-                      {salary > 0 && <text y={22} textAnchor="middle" fontSize={8} fill={tier === "critical" ? "#ff2200" : tier === "eruption" ? "#ff6b35" : "#ffb84d"} fontWeight={600} style={ts}>{Math.round(budgetRatio * 100)}% du salaire</text>}
+                      {totalRevenue > 0 && <text y={22} textAnchor="middle" fontSize={8} fill={tier === "critical" ? "#ff2200" : tier === "eruption" ? "#ff6b35" : "#ffb84d"} fontWeight={600} style={ts}>{Math.round(budgetRatio * 100)}% des revenus</text>}
                       {tier === "critical" && <text y={34} textAnchor="middle" fontSize={9} fill="#ff2200" fontWeight={700} opacity={0.7 + Math.sin(t * 8) * 0.3} style={ts}>DÉFICIT CRITIQUE</text>}
                       {tier === "eruption" && <text y={34} textAnchor="middle" fontSize={9} fill="#ff6b35" fontWeight={700} opacity={0.6 + Math.sin(t * 6) * 0.4} style={ts}>DÉFICIT</text>}
                     </g>
