@@ -41,6 +41,9 @@ function bezierPoint(s: { x: number; y: number }, c: { x: number; y: number }, t
 }
 
 type PlanetSkin = "tech" | "crypto" | "terrain" | "ocean" | "generic" | "empty";
+const SKIN_IMAGE: Partial<Record<PlanetSkin, string>> = {
+  tech: "/planet-skins/tech.png",
+};
 const SKIN_BY_TYPE: Record<string, PlanetSkin> = {
   stock: "tech", etf: "tech",
   crypto: "crypto",
@@ -776,39 +779,53 @@ export default function GalaxyView({
 
                 {n.kind === "portfolio" && (() => {
                   const skin = n.skin ?? "generic";
+                  const imageHref = SKIN_IMAGE[skin];
                   const skinFill = skin === "generic" ? `url(#sph-${n.id})` : `url(#sph-skin-${skin})`;
                   const skinFilter = skin === "tech" ? "url(#circuits)" : skin === "ocean" ? "url(#turb-water)" : "url(#terrain)";
                   return <>
                     {isExp && <ellipse rx={n.r + 42} ry={(n.r + 42) * 0.55} fill="none" stroke={n.color} strokeOpacity={0.18} strokeWidth={1} strokeDasharray="2 7" />}
                     <clipPath id={`cp-${n.id}`}><circle r={n.r} /></clipPath>
                     <circle r={n.r + 5} fill={`url(#atmo-${n.id})`} />
-                    {skin === "crypto" && <circle r={n.r + 14 + Math.sin(t * 2) * 3} fill="url(#glow-crypto)" />}
-                    <circle r={n.r} fill={skinFill} />
-                    <g clipPath={`url(#cp-${n.id})`}>
-                      <circle r={n.r} fill={skinFill} filter={skinFilter} opacity={0.65} />
-                      {skin !== "tech" && <circle r={n.r} fill={skinFill} opacity={0.3} filter="url(#clouds)" />}
-                      {skin !== "generic" && <circle r={n.r} fill={`url(#pat-${skin})`} />}
+                    {skin === "crypto" && !imageHref && <circle r={n.r + 14 + Math.sin(t * 2) * 3} fill="url(#glow-crypto)" />}
 
-                      {skin === "ocean" && <>
-                        {[0.22, 0.5, 0.78].map((ry, i) => (
-                          <ellipse key={`wave-${i}`} cx={Math.sin(t * 0.6 + i * 2) * n.r * 0.12} cy={n.r * (ry - 0.5) * 1.5} rx={n.r * 1.05} ry={2.5 + i * 0.8} fill="#d0f7ff" opacity={0.16 + (i === 1 ? 0.1 : 0)} />
+                    {imageHref ? (
+                      <g clipPath={`url(#cp-${n.id})`}>
+                        <image href={imageHref} x={-n.r} y={-n.r} width={n.r * 2} height={n.r * 2} preserveAspectRatio="xMidYMid slice" />
+                      </g>
+                    ) : <>
+                      <circle r={n.r} fill={skinFill} />
+                      <g clipPath={`url(#cp-${n.id})`}>
+                        <circle r={n.r} fill={skinFill} filter={skinFilter} opacity={0.65} />
+                        {skin !== "tech" && <circle r={n.r} fill={skinFill} opacity={0.3} filter="url(#clouds)" />}
+                        {skin !== "generic" && <circle r={n.r} fill={`url(#pat-${skin})`} />}
+
+                        {skin === "ocean" && <>
+                          {[0.22, 0.5, 0.78].map((ry, i) => (
+                            <ellipse key={`wave-${i}`} cx={Math.sin(t * 0.6 + i * 2) * n.r * 0.12} cy={n.r * (ry - 0.5) * 1.5} rx={n.r * 1.05} ry={2.5 + i * 0.8} fill="#d0f7ff" opacity={0.16 + (i === 1 ? 0.1 : 0)} />
+                          ))}
+                          <ellipse cx={-n.r * 0.32} cy={n.r * 0.2} rx={n.r * 0.24} ry={n.r * 0.11} fill="#245a34" opacity={0.65} />
+                          <ellipse cx={-n.r * 0.32} cy={n.r * 0.14} rx={n.r * 0.1} ry={n.r * 0.05} fill="#3a8a4c" opacity={0.5} />
+                        </>}
+
+                        {skin === "terrain" && [[-0.32, -0.22, 0.15], [0.26, 0.12, 0.11], [0.02, 0.38, 0.09]].map((c, i) => (
+                          <ellipse key={`cr-${i}`} cx={c[0] * n.r} cy={c[1] * n.r} rx={c[2] * n.r} ry={c[2] * n.r * 0.6} fill="#241608" opacity={0.45} />
                         ))}
-                        <ellipse cx={-n.r * 0.32} cy={n.r * 0.2} rx={n.r * 0.24} ry={n.r * 0.11} fill="#245a34" opacity={0.65} />
-                        <ellipse cx={-n.r * 0.32} cy={n.r * 0.14} rx={n.r * 0.1} ry={n.r * 0.05} fill="#3a8a4c" opacity={0.5} />
-                      </>}
 
-                      {skin === "terrain" && [[-0.32, -0.22, 0.15], [0.26, 0.12, 0.11], [0.02, 0.38, 0.09]].map((c, i) => (
-                        <ellipse key={`cr-${i}`} cx={c[0] * n.r} cy={c[1] * n.r} rx={c[2] * n.r} ry={c[2] * n.r * 0.6} fill="#241608" opacity={0.45} />
-                      ))}
+                        {skin === "crypto" && Array.from({ length: 6 }, (_, i) => {
+                          const ang = (i / 6) * Math.PI * 2;
+                          const pulse = 0.5 + 0.5 * Math.sin(t * 3 + i);
+                          return <line key={`ve-${i}`} x1={0} y1={0} x2={Math.cos(ang) * n.r * 0.95} y2={Math.sin(ang) * n.r * 0.95} stroke="#e8c0ff" strokeWidth={0.7 + pulse * 0.9} opacity={0.25 + pulse * 0.45} />;
+                        })}
+                      </g>
 
-                      {skin === "crypto" && Array.from({ length: 6 }, (_, i) => {
-                        const ang = (i / 6) * Math.PI * 2;
-                        const pulse = 0.5 + 0.5 * Math.sin(t * 3 + i);
-                        return <line key={`ve-${i}`} x1={0} y1={0} x2={Math.cos(ang) * n.r * 0.95} y2={Math.sin(ang) * n.r * 0.95} stroke="#e8c0ff" strokeWidth={0.7 + pulse * 0.9} opacity={0.25 + pulse * 0.45} />;
+                      {skin === "empty" && Array.from({ length: 3 }, (_, i) => {
+                        const ang = (i / 3) * Math.PI * 2 + t * 0.35;
+                        const rr = n.r + 15;
+                        return <circle key={`rock-${i}`} cx={Math.cos(ang) * rr} cy={Math.sin(ang) * rr * 0.55} r={1.6 + i * 0.6} fill="#8a84a0" opacity={0.55} />;
                       })}
-                    </g>
+                    </>}
 
-                    {skin === "tech" && <>
+                    {skin === "tech" && !imageHref && <>
                       {Array.from({ length: 5 }, (_, i) => {
                         const ang = (i / 5) * Math.PI * 2 + t * 0.15;
                         return <line key={`tc-${i}`} x1={Math.cos(ang) * n.r * 0.12} y1={Math.sin(ang) * n.r * 0.12} x2={Math.cos(ang) * n.r * 0.92} y2={Math.sin(ang) * n.r * 0.92} stroke="#5cfff0" strokeWidth={0.6} opacity={0.35 + Math.sin(t * 2 + i) * 0.2} clipPath={`url(#cp-${n.id})`} />;
@@ -819,12 +836,6 @@ export default function GalaxyView({
                       })}
                       <ellipse rx={n.r * 1.38} ry={n.r * 0.3} fill="none" stroke="#5cfff0" strokeOpacity={0.3} strokeWidth={1} transform={`rotate(${(t * 6) % 360})`} />
                     </>}
-
-                    {skin === "empty" && Array.from({ length: 3 }, (_, i) => {
-                      const ang = (i / 3) * Math.PI * 2 + t * 0.35;
-                      const rr = n.r + 15;
-                      return <circle key={`rock-${i}`} cx={Math.cos(ang) * rr} cy={Math.sin(ang) * rr * 0.55} r={1.6 + i * 0.6} fill="#8a84a0" opacity={0.55} />;
-                    })}
 
                     <circle r={n.r} fill="url(#sph-hl)" stroke={n.color} strokeOpacity={isExp ? 0.35 : 0.1} strokeWidth={isExp ? 1.5 : 0.5} />
                     <text y={-6} textAnchor="middle" fontSize={11} fontWeight={600} fill="#fff" style={ts}>{n.label}</text>
