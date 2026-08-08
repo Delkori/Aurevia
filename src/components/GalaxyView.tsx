@@ -5,7 +5,7 @@ import {
   forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY,
   type Simulation, type SimulationNodeDatum,
 } from "d3-force";
-import { FolderPlus, Plus, Star, ArrowRight, Download, RotateCcw, Wallet, TrendingUp, TrendingDown, Users, Link2, X } from "lucide-react";
+import { FolderPlus, Plus, Star, ArrowRight, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X } from "lucide-react";
 import { formatMoney } from "@/lib/format";
 import { currentValue, gain, gainPercent, totalDebt } from "@/lib/networth";
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
@@ -15,8 +15,8 @@ import NodePanel, { type Selection, type Actions } from "@/components/NodePanel"
 type Asset = { id: number; name: string; type: string; ticker: string | null; quantity: string | null; avgBuyPrice: string | null; manualValue: string | null; yieldRate: string | null; currency: string; portfolioId: number | null };
 type Portfolio = { id: number; name: string; color: string; memberId: number | null };
 type Goal = { id: number; name: string; targetAmount: string; targetDate: string | null; color: string; memberId: number | null };
-type Loan = { id: number; name: string; remainingBalance: string; currency: string };
-type Member = { id: number; name: string; role: string; color: string };
+type Loan = { id: number; name: string; remainingBalance: string; currency: string; assetId: number | null };
+type Member = { id: number; name: string; role: string; color: string; salary: string | null };
 type Flow = { id: number; name: string | null; sourceType: string; sourceId: number | null; targetType: string; targetId: number | null; amount: string; frequency: string; memberId: number | null };
 type GoalLink = { id: number; goalId: number; portfolioId: number };
 type Quote = { price: number; currency: string } | null;
@@ -121,17 +121,17 @@ const STARS = Array.from({ length: 180 }, (_, i) => ({
 }));
 
 export default function GalaxyView({
-  assets, portfolios, goals, loans, members, flows, goalLinks, quotes, actions, salary, onUpdateSalary,
+  assets, portfolios, goals, loans, members, flows, goalLinks, quotes, actions, salary, onUpdateSalary, onRefresh,
 }: {
   assets: Asset[]; portfolios: Portfolio[]; goals: Goal[]; loans: Loan[];
   members: Member[]; flows: Flow[]; goalLinks: GoalLink[]; quotes: Record<string, Quote>;
-  actions: Actions; salary: number; onUpdateSalary: (v: number) => Promise<void>;
+  actions: Actions; salary: number; onUpdateSalary: (v: number) => Promise<void>; onRefresh: () => void;
 }) {
   const [expanded, setExpanded] = useState<Set<number | "unassigned">>(new Set());
   const [selected, setSelected] = useState<Selection>(null);
   const [createMode, setCreateMode] = useState<string | null>(null);
   const [linkMode, setLinkMode] = useState(false);
-  const [linkSourceNode, setLinkSourceNode] = useState<{ id: string; kind: string; portfolioKey?: number | "unassigned"; label: string } | null>(null);
+  const [linkSourceNode, setLinkSourceNode] = useState<{ id: string; kind: string; portfolioKey?: number | "unassigned"; memberId?: number; label: string } | null>(null);
   const [pendingLink, setPendingLink] = useState<{ sourceType: string; sourceId: number | null; sourceLabel: string; targetType: string; targetId: number; targetLabel: string } | null>(null);
   const [linkAmount, setLinkAmount] = useState("");
   const [linkFrequency, setLinkFrequency] = useState("monthly");
@@ -205,6 +205,10 @@ export default function GalaxyView({
     members.forEach(m => {
       nodes.push({ id: `m-${m.id}`, kind: "member", label: m.name, r: 24, color: m.color, memberId: m.id });
       links.push({ source: "center", target: `m-${m.id}` });
+      if (m.salary && Number(m.salary) > 0) {
+        nodes.push({ id: `ms-${m.id}`, kind: "member-salary", label: `Salaire de ${m.name}`, r: 22, color: m.color, memberId: m.id, sub: formatMoney(Number(m.salary)) });
+        links.push({ source: `m-${m.id}`, target: `ms-${m.id}` });
+      }
     });
 
     for (const g of groups) {
@@ -239,7 +243,7 @@ export default function GalaxyView({
 
     flows.forEach(f => {
       if (f.targetType === "expense") return;
-      const sId = f.sourceType === "salary" ? "salary" : f.sourceType === "portfolio" ? `p-${f.sourceId}` : null;
+      const sId = f.sourceType === "salary" ? "salary" : f.sourceType === "portfolio" ? `p-${f.sourceId}` : f.sourceType === "member_salary" ? `ms-${f.sourceId}` : null;
       const tId = f.targetType === "portfolio" ? `p-${f.targetId}` : f.targetType === "goal" ? `g-${f.targetId}` : null;
       if (sId && tId && nodes.find(n => n.id === sId) && nodes.find(n => n.id === tId))
         flowLinks.push({ source: sId, target: tId, label: formatMoney(Number(f.amount)) });
@@ -375,18 +379,19 @@ export default function GalaxyView({
 
     if (linkMode) {
       const isSalary = n.kind === "salary";
+      const isMemberSalary = n.kind === "member-salary" && n.memberId != null;
       const isPortfolio = n.kind === "portfolio" && n.portfolioKey !== undefined && n.portfolioKey !== "unassigned";
       const isGoal = n.kind === "goal" && n.goalId != null;
-      const eligibleSource = isSalary || isPortfolio;
+      const eligibleSource = isSalary || isMemberSalary || isPortfolio;
       const eligibleTarget = isPortfolio || isGoal;
       if (!linkSourceNode) {
-        if (eligibleSource) setLinkSourceNode({ id: n.id, kind: n.kind, portfolioKey: n.portfolioKey, label: n.label });
+        if (eligibleSource) setLinkSourceNode({ id: n.id, kind: n.kind, portfolioKey: n.portfolioKey, memberId: n.memberId, label: n.label });
         return;
       }
       if (n.id === linkSourceNode.id) { setLinkSourceNode(null); return; }
       if (eligibleTarget) {
-        const sourceType = linkSourceNode.kind === "salary" ? "salary" : "portfolio";
-        const sourceId = linkSourceNode.kind === "salary" ? null : (linkSourceNode.portfolioKey as number);
+        const sourceType = linkSourceNode.kind === "salary" ? "salary" : linkSourceNode.kind === "member-salary" ? "member_salary" : "portfolio";
+        const sourceId = linkSourceNode.kind === "salary" ? null : linkSourceNode.kind === "member-salary" ? (linkSourceNode.memberId as number) : (linkSourceNode.portfolioKey as number);
         const targetType = isGoal ? "goal" : "portfolio";
         const targetId = isGoal ? n.goalId! : (n.portfolioKey as number);
         setPendingLink({ sourceType, sourceId, sourceLabel: linkSourceNode.label, targetType, targetId, targetLabel: n.label });
@@ -419,6 +424,12 @@ export default function GalaxyView({
       const member = members.find(m => m.id === n.memberId)!;
       const mTotal = portfolios.filter(p => p.memberId === member.id).reduce((s, p) => s + (groups.find(gr => gr.key === p.id)?.total ?? 0), 0);
       setSelected({ kind: "member", member, total: mTotal });
+    }
+    else if (n.kind === "member-salary" && n.memberId != null) {
+      const member = members.find(m => m.id === n.memberId)!;
+      const mTotal = portfolios.filter(p => p.memberId === member.id).reduce((s, p) => s + (groups.find(gr => gr.key === p.id)?.total ?? 0), 0);
+      setSelected({ kind: "member", member, total: mTotal });
+      setCreateMode("edit-member");
     }
   };
 
@@ -518,6 +529,9 @@ export default function GalaxyView({
 
         {/* Bottom actions */}
         <div className="px-3 py-3 border-t border-border space-y-0.5">
+          <button onClick={onRefresh} className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-muted hover:text-text hover:bg-surface-hover">
+            <RefreshCw size={13} />Actualiser
+          </button>
           <button onClick={autoLayout} className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-muted hover:text-text hover:bg-surface-hover">
             <RotateCcw size={13} />Rangement auto
           </button>
@@ -914,7 +928,32 @@ export default function GalaxyView({
                   </>;
                 })()}
 
-                {n.kind === "member" && <><circle r={n.r} fill={`url(#sph-${n.id})`} /><circle r={n.r} fill="url(#sph-hl)" /><text y={4} textAnchor="middle" fontSize={10} fontWeight={500} fill="#fff">{n.label}</text></>}
+                {n.kind === "member" && (() => {
+                  const bob = Math.sin(t * 1.4 + n.r) * 1;
+                  return <>
+                    <circle r={n.r} fill={`url(#sph-${n.id})`} />
+                    <circle r={n.r} fill="url(#sph-hl)" />
+                    <g transform={`translate(0, ${-n.r - 13 + bob})`}>
+                      <line x1={-2.2} y1={7} x2={-2.6} y2={12} stroke="#e8e8ee" strokeWidth={2} strokeLinecap="round" />
+                      <line x1={2.2} y1={7} x2={2.6} y2={12} stroke="#e8e8ee" strokeWidth={2} strokeLinecap="round" />
+                      <rect x={-3.4} y={-2} width={6.8} height={9.5} rx={2.6} fill="#f0f0f5" stroke={n.color} strokeWidth={0.7} />
+                      <line x1={-3.4} y1={1.5} x2={2} y2={3.5} stroke="#e8e8ee" strokeWidth={1.7} strokeLinecap="round" />
+                      <line x1={3.4} y1={1.5} x2={-2} y2={3.5} stroke="#e8e8ee" strokeWidth={1.7} strokeLinecap="round" />
+                      <circle cy={-5.2} r={4.3} fill="#f5f5fa" stroke={n.color} strokeWidth={0.6} />
+                      <ellipse cx={0.4} cy={-5.2} rx={2.7} ry={2.4} fill="#2a3550" />
+                      <ellipse cx={-0.4} cy={-6} rx={0.8} ry={0.6} fill="rgba(255,255,255,0.5)" />
+                    </g>
+                    <text y={4} textAnchor="middle" fontSize={10} fontWeight={500} fill="#fff" style={ts}>{n.label}</text>
+                  </>;
+                })()}
+
+                {n.kind === "member-salary" && <>
+                  <circle r={n.r + 3} fill="none" stroke="rgba(100,255,150,0.08)" />
+                  <circle r={n.r} fill="url(#sph-salary)" />
+                  <circle r={n.r} fill="url(#sph-hl)" />
+                  <text y={-4} textAnchor="middle" fontSize={9} fontWeight={600} fill="#fff" style={ts}>{n.label.length > 14 ? n.label.slice(0, 13) + "…" : n.label}</text>
+                  <text y={9} textAnchor="middle" fontSize={8} fill="rgba(255,255,255,0.85)" style={ts}>{n.sub}/mois</text>
+                </>}
               </g>;
             })}
           </g>

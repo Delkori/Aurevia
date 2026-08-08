@@ -43,6 +43,13 @@
       "when": 1786136526144,
       "tag": "0005_small_living_mummy",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786204473256,
+      "tag": "0006_ordinary_zaladane",
+      "breakpoints": true
     }
   ]
 }

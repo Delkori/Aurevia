@@ -19,6 +19,7 @@ export async function POST(req: NextRequest) {
       name: body.name,
       role: body.role || "owner",
       color: body.color || "#7c6af5",
+      salary: body.salary || null,
     }).returning();
     return NextResponse.json(created, { status: 201 });
   } catch (err) { return handleApiError(err); }

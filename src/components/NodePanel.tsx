@@ -8,8 +8,8 @@ import { ASSET_TYPE_LABELS } from "@/lib/networth";
 type Asset = { id: number; name: string; type: string; ticker: string | null; quantity: string | null; avgBuyPrice: string | null; manualValue: string | null; yieldRate: string | null; currency: string; portfolioId: number | null };
 type Portfolio = { id: number; name: string; color: string; memberId: number | null };
 type Goal = { id: number; name: string; targetAmount: string; targetDate: string | null; color: string; memberId: number | null };
-type Loan = { id: number; name: string; remainingBalance: string; currency: string };
-type Member = { id: number; name: string; role: string; color: string };
+type Loan = { id: number; name: string; remainingBalance: string; currency: string; assetId: number | null };
+type Member = { id: number; name: string; role: string; color: string; salary: string | null };
 type Flow = { id: number; name: string | null; sourceType: string; sourceId: number | null; targetType: string; targetId: number | null; amount: string; frequency: string; memberId: number | null };
 type GoalLink = { id: number; goalId: number; portfolioId: number };
 
@@ -38,6 +38,7 @@ export type Actions = {
   createMember: (data: Record<string, unknown>) => Promise<void>;
   updateMember: (id: number, data: Record<string, unknown>) => Promise<void>;
   deleteMember: (id: number) => Promise<void>;
+  deleteLoan: (id: number) => Promise<void>;
 };
 
 const TYPES_WITH_TICKER = new Set(["stock", "etf", "crypto", "precious_metal"]);
@@ -134,19 +135,22 @@ function GoalForm({ initial, progress, members, onSubmit, onDelete, onCancel }:
 }
 
 // ── Flow Form ────────────────────────────────────────────────────────────────
-function FlowForm({ portfolios, goals, defaultTargetType, onSubmit, onCancel }:
-  { portfolios: Portfolio[]; goals: Goal[]; defaultTargetType?: string; onSubmit: (d: Record<string, unknown>) => void; onCancel: () => void }) {
+function FlowForm({ portfolios, goals, members, defaultTargetType, onSubmit, onCancel }:
+  { portfolios: Portfolio[]; goals: Goal[]; members: Member[]; defaultTargetType?: string; onSubmit: (d: Record<string, unknown>) => void; onCancel: () => void }) {
   const [f, setF] = useState({ sourceType: "salary", sourceId: "", targetType: defaultTargetType ?? "portfolio", targetId: "", amount: "", frequency: "monthly", name: "" });
+  const membersWithSalary = members.filter(m => m.salary && Number(m.salary) > 0);
   const targets = f.targetType === "portfolio" ? portfolios.map(p => ({ id: p.id, name: p.name }))
     : f.targetType === "goal" ? goals.map(g => ({ id: g.id, name: g.name }))
     : [];
-  const sources = f.sourceType === "portfolio" ? portfolios.map(p => ({ id: p.id, name: p.name })) : [];
+  const sources = f.sourceType === "portfolio" ? portfolios.map(p => ({ id: p.id, name: p.name }))
+    : f.sourceType === "member_salary" ? membersWithSalary.map(m => ({ id: m.id, name: `Salaire de ${m.name}` }))
+    : [];
   const needsTargetPicker = f.targetType !== "expense";
   return (
     <form onSubmit={e => { e.preventDefault(); onSubmit({ ...f, sourceId: f.sourceId ? Number(f.sourceId) : null, targetId: f.targetId ? Number(f.targetId) : null }); }} className="space-y-1">
       <p className="text-[10px] text-text-muted uppercase tracking-wide">Nouveau flux</p>
       <Label>Nom (optionnel)</Label><Inp value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="Loyer, Épargne PEA…" />
-      <Label>Source</Label><Sel value={f.sourceType} onChange={e => setF({ ...f, sourceType: e.target.value, sourceId: "" })}><option value="salary">Salaire</option><option value="portfolio">Planète</option></Sel>
+      <Label>Source</Label><Sel value={f.sourceType} onChange={e => setF({ ...f, sourceType: e.target.value, sourceId: "" })}><option value="salary">Salaire</option><option value="portfolio">Planète</option>{membersWithSalary.length > 0 && <option value="member_salary">Salaire d&apos;un membre</option>}</Sel>
       {f.sourceType !== "salary" && <Sel value={f.sourceId} onChange={e => setF({ ...f, sourceId: e.target.value })}><option value="">—</option>{sources.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</Sel>}
       <Label>Destination</Label><Sel value={f.targetType} onChange={e => setF({ ...f, targetType: e.target.value, targetId: "" })}><option value="portfolio">Planète</option><option value="goal">Objectif</option><option value="expense">Dépense</option></Sel>
       {needsTargetPicker && <Sel value={f.targetId} onChange={e => setF({ ...f, targetId: e.target.value })}><option value="">—</option>{targets.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</Sel>}
@@ -185,12 +189,16 @@ function MemberForm({ initial, onSubmit, onDelete, onCancel }:
   const [name, setName] = useState(initial?.name ?? "");
   const [role, setRole] = useState(initial?.role ?? "spouse");
   const [color, setColor] = useState(initial?.color ?? COLORS[1]);
+  const [salary, setSalary] = useState(initial?.salary ?? "");
   return (
-    <form onSubmit={e => { e.preventDefault(); onSubmit({ name, role, color }); }} className="space-y-1">
+    <form onSubmit={e => { e.preventDefault(); onSubmit({ name, role, color, salary: salary || null }); }} className="space-y-1">
       <p className="text-[10px] text-text-muted uppercase tracking-wide">{initial ? "Membre" : "Nouveau membre du foyer"}</p>
       <Label>Nom</Label><Inp required value={name} onChange={e => setName(e.target.value)} placeholder="Léa, Tom…" />
       <Label>Rôle</Label><Sel value={role} onChange={e => setRole(e.target.value)}>{ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}</Sel>
       <Label>Couleur</Label><ColorPick value={color} onChange={setColor} />
+      <Label>Salaire mensuel net (optionnel)</Label>
+      <Inp type="number" step="any" value={salary} onChange={e => setSalary(e.target.value)} placeholder="1800" className="tabular" />
+      <p className="text-[10px] text-text-muted">Si renseigné, une planète Salaire dédiée apparaît près de ce membre — tu peux y créer des flux vers ses propres planètes.</p>
       <div className="flex gap-2 pt-3">{onDelete && <Btn type="button" variant="danger" onClick={onDelete}><Trash2 size={12} /></Btn>}<Btn type="submit" variant="accent" className="flex-1">{initial ? "Enregistrer" : "Créer"}</Btn><Btn type="button" onClick={onCancel}>Fermer</Btn></div>
     </form>
   );
@@ -210,8 +218,8 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
       {createMode === "portfolio" && <PortfolioForm members={members} onSubmit={async d => { const p = await actions.createPortfolio(d); setCreateMode(null); if (onPortfolioCreated) onPortfolioCreated(p); else onClear(); }} onCancel={clear} />}
       {createMode === "asset" && <AssetForm portfolios={portfolios} defaultPortfolioId={selected?.kind === "portfolio" && selected.id !== "unassigned" ? selected.id as number : undefined} onSubmit={async d => { await actions.createAsset(d); clear(); }} onCancel={clear} />}
       {createMode === "goal" && <GoalForm members={members} onSubmit={async d => { await actions.createGoal(d); clear(); }} onCancel={clear} />}
-      {createMode === "flow" && <FlowForm portfolios={portfolios} goals={goals} onSubmit={async d => { await actions.createFlow(d); clear(); }} onCancel={clear} />}
-      {createMode === "expense" && <FlowForm portfolios={portfolios} goals={goals} defaultTargetType="expense" onSubmit={async d => { await actions.createFlow(d); clear(); }} onCancel={clear} />}
+      {createMode === "flow" && <FlowForm portfolios={portfolios} goals={goals} members={members} onSubmit={async d => { await actions.createFlow(d); clear(); }} onCancel={clear} />}
+      {createMode === "expense" && <FlowForm portfolios={portfolios} goals={goals} members={members} defaultTargetType="expense" onSubmit={async d => { await actions.createFlow(d); clear(); }} onCancel={clear} />}
 
       {createMode === "salary" && <SalaryForm currentSalary={salary} onSubmit={async v => { await onUpdateSalary(v); clear(); }} onCancel={clear} />}
       {createMode === "member" && <MemberForm onSubmit={async d => { await actions.createMember(d); clear(); }} onCancel={clear} />}
@@ -312,7 +320,18 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
           {/* Edit form (hidden by default) */}
           {createMode === "edit-portfolio" && <PortfolioForm initial={{ name: selected.name, color: selected.color, memberId: selected.memberId }} members={members}
             onSubmit={async d => { await actions.updatePortfolio(selected.id as number, d); clear(); }}
-            onDelete={async () => { if (!confirm(`Supprimer "${selected.name}" ?`)) return; await actions.deletePortfolio(selected.id as number); clear(); }}
+            onDelete={async () => {
+              if (!confirm(`Supprimer "${selected.name}" ?`)) return;
+              const assetIds = new Set((groups.find(g => g.key === selected.id)?.valued ?? []).map(v => v.asset.id));
+              const linkedLoans = loans.filter(l => l.assetId != null && assetIds.has(l.assetId));
+              if (linkedLoans.length > 0) {
+                const names = linkedLoans.map(l => `${l.name} (${formatMoney(Number(l.remainingBalance))})`).join(", ");
+                if (confirm(`Cette planète a un crédit lié : ${names}. Le supprimer aussi ? (Annuler = le garder, non rattaché à une planète)`)) {
+                  for (const l of linkedLoans) await actions.deleteLoan(l.id);
+                }
+              }
+              await actions.deletePortfolio(selected.id as number); clear();
+            }}
             onCancel={() => setCreateMode(null)} />}
 
           {/* Assets list */}

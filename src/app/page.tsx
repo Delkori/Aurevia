@@ -10,7 +10,7 @@ type Asset = { id: number; name: string; type: string; ticker: string | null; qu
 type Portfolio = { id: number; name: string; color: string; memberId: number | null };
 type Goal = { id: number; name: string; targetAmount: string; targetDate: string | null; color: string; memberId: number | null };
 type Loan = { id: number; name: string; remainingBalance: string; principal: string; interestRate: string | null; monthlyPayment: string | null; assetId: number | null; currency: string };
-type Member = { id: number; name: string; role: string; color: string };
+type Member = { id: number; name: string; role: string; color: string; salary: string | null };
 type Flow = { id: number; name: string | null; sourceType: string; sourceId: number | null; targetType: string; targetId: number | null; amount: string; frequency: string; memberId: number | null };
 type GoalLink = { id: number; goalId: number; portfolioId: number };
 type Quote = { price: number; currency: string } | null;
@@ -80,6 +80,7 @@ export default function HomePage() {
     createMember: (d: Record<string, unknown>) => api("/api/members", "POST", d) as Promise<void>,
     updateMember: (id: number, d: Record<string, unknown>) => api(`/api/members/${id}`, "PUT", d) as Promise<void>,
     deleteMember: (id: number) => api(`/api/members/${id}`, "DELETE") as Promise<void>,
+    deleteLoan: (id: number) => api(`/api/loans/${id}`, "DELETE") as Promise<void>,
   };
 
   const updateSalary = async (v: number) => {
@@ -103,6 +104,7 @@ export default function HomePage() {
           members={members} flows={flows} goalLinks={goalLinks} quotes={quotes} actions={actions}
           salary={Number(settings.monthly_salary) || 0}
           onUpdateSalary={updateSalary}
+          onRefresh={load}
         />
       </div>
     </div>
