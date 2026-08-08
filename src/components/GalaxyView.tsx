@@ -706,10 +706,15 @@ export default function GalaxyView({
             {links.filter(l => nodeById.get(l.target)?.kind !== "expense-item" && nodeById.get(l.target)?.kind !== "income-item").map(l => {
               const s = nodeById.get(l.source), tg = nodeById.get(l.target);
               if (!s || !tg || s.x == null || tg.x == null) return null;
+              // Ownership links (patrimoine/membre → planète) run their traveling dot in reverse:
+              // visually, the planet's value flows back INTO the owner, not away from it.
+              const isOwnershipLink = (s.kind === "member" || s.kind === "center") && (tg.kind === "portfolio" || tg.kind === "goal");
+              const from = isOwnershipLink ? tg : s, to = isOwnershipLink ? s : tg;
               const seed = hashSeed(s.id, tg.id), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
               const sp = 5 + (s.id.charCodeAt(0) % 4), p = (t / sp) % 1;
-              const pt = bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, p);
-              return <circle key={`dot-${s.id}-${tg.id}`} cx={pt.x} cy={pt.y} r={2} fill={tg.color} opacity={0.5} filter="url(#gl)" />;
+              const pt = bezierPoint({ x: from.x!, y: from.y! }, c, { x: to.x!, y: to.y! }, p);
+              const dotColor = isOwnershipLink ? (s.kind === "center" ? "#ffcc55" : s.color) : tg.color;
+              return <circle key={`dot-${s.id}-${tg.id}`} cx={pt.x} cy={pt.y} r={isOwnershipLink ? 2.6 : 2} fill={dotColor} opacity={isOwnershipLink ? 0.75 : 0.5} filter="url(#gl)" />;
             })}
 
             {/* Goal ↔ planet validation links */}
