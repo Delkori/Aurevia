@@ -1,11 +1,11 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY,
   type Simulation, type SimulationNodeDatum,
 } from "d3-force";
-import { FolderPlus, Plus, Star, ArrowRight, Download, RotateCcw, Wallet, TrendingUp, TrendingDown } from "lucide-react";
+import { FolderPlus, Plus, Star, ArrowRight, Download, RotateCcw, Wallet, TrendingUp, TrendingDown, Users } from "lucide-react";
 import { formatMoney } from "@/lib/format";
 import { currentValue, gain, gainPercent, totalDebt } from "@/lib/networth";
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
@@ -141,12 +141,12 @@ export default function GalaxyView({
   const maxPV = Math.max(1, ...groups.map(g => g.total));
   const maxGT = Math.max(1, ...goals.map(g => Number(g.targetAmount)));
 
-  const goalProgress = (goal: Goal) => {
+  const goalProgress = useCallback((goal: Goal) => {
     const linkedIds = goalLinks.filter(gl => gl.goalId === goal.id).map(gl => gl.portfolioId);
     if (linkedIds.length === 0) return Math.min(1, grandTotal / Number(goal.targetAmount));
     const linkedTotal = linkedIds.reduce((s, pid) => s + (groups.find(g => g.key === pid)?.total ?? 0), 0);
     return Math.min(1, linkedTotal / Number(goal.targetAmount));
-  };
+  }, [goalLinks, groups, grandTotal]);
 
   // Build graph
   const { targetNodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows } = useMemo(() => {
@@ -425,6 +425,7 @@ export default function GalaxyView({
             { icon: FolderPlus, label: "Planète", mode: "portfolio" },
             { icon: Star, label: "Objectif", mode: "goal" },
             { icon: ArrowRight, label: "Flux mensuel", mode: "flow" },
+            { icon: Users, label: "Membre du foyer", mode: "member" },
           ].map(({ icon: Icon, label, mode }) => (
             <button key={mode} onClick={() => { setSelected(null); setCreateMode(mode); }}
               className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs transition-colors ${createMode === mode ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text hover:bg-surface-hover"}`}>

@@ -35,6 +35,9 @@ export type Actions = {
   deleteFlow: (id: number) => Promise<void>;
   createGoalLink: (data: Record<string, unknown>) => Promise<void>;
   deleteGoalLink: (id: number) => Promise<void>;
+  createMember: (data: Record<string, unknown>) => Promise<void>;
+  updateMember: (id: number, data: Record<string, unknown>) => Promise<void>;
+  deleteMember: (id: number) => Promise<void>;
 };
 
 const TYPES_WITH_TICKER = new Set(["stock", "etf", "crypto", "precious_metal"]);
@@ -175,6 +178,24 @@ function SalaryForm({ currentSalary, onSubmit, onCancel }:
   );
 }
 
+// ── Member Form ──────────────────────────────────────────────────────────────
+const ROLES = [{ value: "owner", label: "Moi" }, { value: "spouse", label: "Conjoint·e" }, { value: "child", label: "Enfant" }, { value: "other", label: "Autre" }];
+function MemberForm({ initial, onSubmit, onDelete, onCancel }:
+  { initial?: Member; onSubmit: (d: Record<string, unknown>) => void; onDelete?: () => void; onCancel: () => void }) {
+  const [name, setName] = useState(initial?.name ?? "");
+  const [role, setRole] = useState(initial?.role ?? "spouse");
+  const [color, setColor] = useState(initial?.color ?? COLORS[1]);
+  return (
+    <form onSubmit={e => { e.preventDefault(); onSubmit({ name, role, color }); }} className="space-y-1">
+      <p className="text-[10px] text-text-muted uppercase tracking-wide">{initial ? "Membre" : "Nouveau membre du foyer"}</p>
+      <Label>Nom</Label><Inp required value={name} onChange={e => setName(e.target.value)} placeholder="Léa, Tom…" />
+      <Label>Rôle</Label><Sel value={role} onChange={e => setRole(e.target.value)}>{ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}</Sel>
+      <Label>Couleur</Label><ColorPick value={color} onChange={setColor} />
+      <div className="flex gap-2 pt-3">{onDelete && <Btn type="button" variant="danger" onClick={onDelete}><Trash2 size={12} /></Btn>}<Btn type="submit" variant="accent" className="flex-1">{initial ? "Enregistrer" : "Créer"}</Btn><Btn type="button" onClick={onCancel}>Fermer</Btn></div>
+    </form>
+  );
+}
+
 // ── Main Panel ───────────────────────────────────────────────────────────────
 export default function NodePanel({ selected, loans, portfolios, members, goals, flows, goalLinks, actions, onClear, createMode, setCreateMode, salary, onUpdateSalary, groups, grossTotal, debt, onPortfolioCreated }:
   { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; goalLinks: GoalLink[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number; onPortfolioCreated?: (p: Portfolio) => void }) {
@@ -193,6 +214,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
       {createMode === "expense" && <FlowForm portfolios={portfolios} goals={goals} defaultTargetType="expense" onSubmit={async d => { await actions.createFlow(d); clear(); }} onCancel={clear} />}
 
       {createMode === "salary" && <SalaryForm currentSalary={salary} onSubmit={async v => { await onUpdateSalary(v); clear(); }} onCancel={clear} />}
+      {createMode === "member" && <MemberForm onSubmit={async d => { await actions.createMember(d); clear(); }} onCancel={clear} />}
 
       {!createMode && !selected && (
         <div className="space-y-3">
@@ -418,14 +440,21 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
         </div>
       )}
 
-      {!createMode && selected?.kind === "member" && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded-full" style={{ background: selected.member.color }} />
-            <h3 className="font-medium font-[family-name:var(--font-heading)] text-sm">{selected.member.name}</h3>
-          </div>
-          <p className="text-2xl font-[family-name:var(--font-mono-num)] tabular">{formatMoney(selected.total)}</p>
-          <p className="text-xs text-text-muted">Portefeuilles et objectifs rattachés à ce membre.</p>
+      {selected?.kind === "member" && (
+        <div className="space-y-3">
+          {createMode !== "edit-member" && <>
+            <div className="flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full" style={{ background: selected.member.color }} />
+              <h3 className="font-medium font-[family-name:var(--font-heading)] text-sm">{selected.member.name}</h3>
+            </div>
+            <p className="text-2xl font-[family-name:var(--font-mono-num)] tabular">{formatMoney(selected.total)}</p>
+            <p className="text-xs text-text-muted">Portefeuilles et objectifs rattachés à ce membre.</p>
+            <Btn variant="accent" className="w-full" onClick={() => setCreateMode("edit-member")}>Modifier</Btn>
+          </>}
+          {createMode === "edit-member" && <MemberForm initial={selected.member}
+            onSubmit={async d => { await actions.updateMember(selected.member.id, d); clear(); }}
+            onDelete={async () => { if (!confirm(`Supprimer "${selected.member.name}" ?`)) return; await actions.deleteMember(selected.member.id); clear(); }}
+            onCancel={() => setCreateMode(null)} />}
         </div>
       )}
     </div>

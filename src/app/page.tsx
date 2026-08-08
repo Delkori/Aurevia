@@ -77,6 +77,9 @@ export default function HomePage() {
     deleteFlow: (id: number) => api(`/api/flows/${id}`, "DELETE") as Promise<void>,
     createGoalLink: (d: Record<string, unknown>) => api("/api/goal-links", "POST", d) as Promise<void>,
     deleteGoalLink: (id: number) => api(`/api/goal-links/${id}`, "DELETE") as Promise<void>,
+    createMember: (d: Record<string, unknown>) => api("/api/members", "POST", d) as Promise<void>,
+    updateMember: (id: number, d: Record<string, unknown>) => api(`/api/members/${id}`, "PUT", d) as Promise<void>,
+    deleteMember: (id: number) => api(`/api/members/${id}`, "DELETE") as Promise<void>,
   };
 
   const updateSalary = async (v: number) => {
