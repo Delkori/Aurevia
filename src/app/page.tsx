@@ -54,6 +54,16 @@ export default function HomePage() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Instantané quotidien silencieux pour construire l'historique du patrimoine.
+  useEffect(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    const key = "aurevia:lastSnapshotDate";
+    if (localStorage.getItem(key) === today) return;
+    apiFetch("/api/snapshot", { method: "POST" })
+      .then(() => localStorage.setItem(key, today))
+      .catch(() => {});
+  }, []);
+
   const api = async (url: string, method: string, body?: unknown) => {
     setError(null);
     try {

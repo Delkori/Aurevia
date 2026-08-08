@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Settings, Wallet } from "lucide-react";
+import { Settings, Wallet, TrendingUp } from "lucide-react";
 
 export default function Sidebar() {
   const pathname = usePathname();
@@ -20,6 +20,13 @@ export default function Sidebar() {
         className={`w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-hover ${pathname === "/assets" ? "bg-accent/15 text-accent" : ""}`}
       >
         <Wallet size={15} />
+      </Link>
+      <Link
+        href="/timeline"
+        title="Historique & Agenda"
+        className={`w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-hover ${pathname === "/timeline" ? "bg-accent/15 text-accent" : ""}`}
+      >
+        <TrendingUp size={15} />
       </Link>
       <Link
         href="/settings"

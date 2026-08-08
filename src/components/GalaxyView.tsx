@@ -10,6 +10,7 @@ import { formatMoney } from "@/lib/format";
 import { currentValue, gain, gainPercent, totalDebt } from "@/lib/networth";
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
 import { getLogoUrl } from "@/lib/logos";
+import { daysUntilNextOccurrence } from "@/lib/dates";
 import NodePanel, { type Selection, type Actions } from "@/components/NodePanel";
 
 type Asset = { id: number; name: string; type: string; ticker: string | null; quantity: string | null; avgBuyPrice: string | null; manualValue: string | null; yieldRate: string | null; currency: string; portfolioId: number | null };
@@ -54,19 +55,6 @@ const EXPENSES_IMAGES = {
   eruption: "/planet-skins/expenses-eruption.png",
   critical: "/planet-skins/expenses-critical.png",
 };
-function daysUntilNextOccurrence(createdAt: string, frequency: string): number {
-  const now = new Date();
-  const next = new Date(createdAt);
-  if (Number.isNaN(next.getTime())) return NaN;
-  let guard = 0;
-  while (next.getTime() <= now.getTime() && guard < 1000) {
-    if (frequency === "weekly") next.setDate(next.getDate() + 7);
-    else if (frequency === "yearly") next.setFullYear(next.getFullYear() + 1);
-    else next.setMonth(next.getMonth() + 1);
-    guard++;
-  }
-  return Math.max(0, Math.ceil((next.getTime() - now.getTime()) / 86400000));
-}
 function isVacationGoal(name: string) {
   const n = name.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
   return /vacance|voyage|plage|maldives|croisiere/.test(n);
