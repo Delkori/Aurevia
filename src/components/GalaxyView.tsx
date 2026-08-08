@@ -43,7 +43,21 @@ function bezierPoint(s: { x: number; y: number }, c: { x: number; y: number }, t
 type PlanetSkin = "tech" | "crypto" | "terrain" | "ocean" | "generic" | "empty";
 const SKIN_IMAGE: Partial<Record<PlanetSkin, string>> = {
   tech: "/planet-skins/tech.png",
+  ocean: "/planet-skins/ocean.png",
+  terrain: "/planet-skins/terrain.png",
+  crypto: "/planet-skins/crypto.png",
 };
+const SALARY_IMAGE = "/planet-skins/salary.png";
+const VACANCES_IMAGE = "/planet-skins/vacances.png";
+const EXPENSES_IMAGES = {
+  warning: "/planet-skins/expenses-warning.png",
+  eruption: "/planet-skins/expenses-eruption.png",
+  critical: "/planet-skins/expenses-critical.png",
+};
+function isVacationGoal(name: string) {
+  const n = name.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  return /vacance|voyage|plage|maldives|croisiere/.test(n);
+}
 const SKIN_BY_TYPE: Record<string, PlanetSkin> = {
   stock: "tech", etf: "tech",
   crypto: "crypto",
@@ -424,7 +438,6 @@ export default function GalaxyView({
     img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(new XMLSerializer().serializeToString(svg))));
   };
 
-  const isOverBudget = salary > 0 && totalExpenseFlows > salary;
   const budgetRatio = salary > 0 ? totalExpenseFlows / salary : 0; // 0..1+ (1+ = deficit)
   const isWarning = budgetRatio > 0.8 && budgetRatio <= 1; // approaching limit
   const tauxEpargne = salary > 0 ? Math.round((salary - totalExpenseFlows) / salary * 100) : 0;
@@ -703,36 +716,41 @@ export default function GalaxyView({
                   </>;
                 })()}
 
-                {n.kind === "salary" && <><clipPath id={`cp-${n.id}`}><circle r={n.r} /></clipPath><circle r={n.r + 3} fill="none" stroke="rgba(100,255,150,0.08)" /><circle r={n.r} fill="url(#sph-salary)" /><g clipPath={`url(#cp-${n.id})`}><circle r={n.r} fill="url(#sph-salary)" filter="url(#terrain)" /><circle r={n.r} fill="url(#salary-land)" /><circle r={n.r} fill="url(#sph-salary)" filter="url(#clouds)" opacity={0.4} /></g><circle r={n.r} fill="url(#sph-hl)" /><g clipPath="url(#clip-sal)">{Array.from({ length: 18 }, (_, i) => <line key={i} x1={-n.r + 3 + i * 3.5} y1={n.r - 1} x2={-n.r + 3 + i * 3.5 + (i % 2 ? 1 : -1)} y2={n.r - 1 - (3 + (i * 7 % 7))} stroke="#30e060" strokeWidth={1.3} strokeLinecap="round" opacity={0.4 + (i % 3) * 0.2} />)}</g><text y={-5} textAnchor="middle" fontSize={11} fontWeight={600} fill="#fff" style={ts}>Salaire</text><text y={9} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.75)">{formatMoney(salary)}/mois</text></>}
+                {n.kind === "salary" && <>
+                  <clipPath id={`cp-${n.id}`}><circle r={n.r} /></clipPath>
+                  <circle r={n.r + 3} fill="none" stroke="rgba(100,255,150,0.08)" />
+                  {SALARY_IMAGE ? (
+                    <g clipPath={`url(#cp-${n.id})`}><image href={SALARY_IMAGE} x={-n.r} y={-n.r} width={n.r * 2} height={n.r * 2} preserveAspectRatio="xMidYMid slice" /></g>
+                  ) : <>
+                    <circle r={n.r} fill="url(#sph-salary)" />
+                    <g clipPath={`url(#cp-${n.id})`}><circle r={n.r} fill="url(#sph-salary)" filter="url(#terrain)" /><circle r={n.r} fill="url(#salary-land)" /><circle r={n.r} fill="url(#sph-salary)" filter="url(#clouds)" opacity={0.4} /></g>
+                    <g clipPath="url(#clip-sal)">{Array.from({ length: 18 }, (_, i) => <line key={i} x1={-n.r + 3 + i * 3.5} y1={n.r - 1} x2={-n.r + 3 + i * 3.5 + (i % 2 ? 1 : -1)} y2={n.r - 1 - (3 + (i * 7 % 7))} stroke="#30e060" strokeWidth={1.3} strokeLinecap="round" opacity={0.4 + (i % 3) * 0.2} />)}</g>
+                  </>}
+                  <circle r={n.r} fill="url(#sph-hl)" />
+                  <text y={-5} textAnchor="middle" fontSize={11} fontWeight={600} fill="#fff" style={ts}>Salaire</text>
+                  <text y={9} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.75)">{formatMoney(salary)}/mois</text>
+                </>}
 
                 {n.kind === "expenses" && (() => {
                   const R = n.r;
+                  const tier: "calm" | "warning" | "eruption" | "critical" =
+                    budgetRatio > 1.3 ? "critical" : budgetRatio > 1 ? "eruption" : isWarning ? "warning" : "calm";
+                  const tierImage = tier !== "calm" ? EXPENSES_IMAGES[tier] : null;
+                  const isOverBudget = tier === "eruption" || tier === "critical";
                   return <>
                     {/* Heat glow */}
-                    {isOverBudget && <circle r={R + 20 + Math.sin(t * 3) * 4} fill="url(#glow-lava)" />}
-                    {isWarning && <circle r={R + 10} fill="url(#glow-lava)" opacity={0.4} />}
+                    {tier === "critical" && <circle r={R + 26 + Math.sin(t * 3) * 5} fill="url(#glow-lava)" />}
+                    {tier === "eruption" && <circle r={R + 18 + Math.sin(t * 3) * 4} fill="url(#glow-lava)" opacity={0.8} />}
+                    {tier === "warning" && <circle r={R + 10} fill="url(#glow-lava)" opacity={0.4} />}
                     {/* Planet body */}
-                    <circle r={R} fill={isOverBudget ? "url(#sph-lava)" : "url(#sph-expenses)"} />
-                    {/* Bubbling lava surface */}
-                    {isOverBudget && <>
-                      <clipPath id={`cp-lava-${n.id}`}><circle r={R} /></clipPath>
-                      <g clipPath={`url(#cp-lava-${n.id})`}>
-                        <circle r={R} fill="url(#sph-lava)" filter="url(#turb-lava)" opacity={0.6} />
-                        {/* Lava cracks pulsing */}
-                        {Array.from({ length: 5 }, (_, i) => {
-                          const a1 = (i * 72 + t * 8) * Math.PI / 180;
-                          const a2 = a1 + 0.6;
-                          return <path key={`crack-${i}`}
-                            d={`M ${Math.cos(a1) * R * 0.3} ${Math.sin(a1) * R * 0.3} Q ${Math.cos((a1 + a2) / 2) * R * 0.7} ${Math.sin((a1 + a2) / 2) * R * 0.7} ${Math.cos(a2) * R * 0.95} ${Math.sin(a2) * R * 0.95}`}
-                            stroke="#ff6600" strokeWidth={1 + Math.sin(t * 4 + i) * 0.5} fill="none" opacity={0.5 + Math.sin(t * 3 + i * 2) * 0.3} />;
-                        })}
-                      </g>
-                      <circle r={R} fill="url(#lava-cracks)" />
-                    </>}
+                    <clipPath id={`cp-${n.id}`}><circle r={R} /></clipPath>
+                    {tierImage ? (
+                      <g clipPath={`url(#cp-${n.id})`}><image href={tierImage} x={-R} y={-R} width={R * 2} height={R * 2} preserveAspectRatio="xMidYMid slice" /></g>
+                    ) : <circle r={R} fill="url(#sph-expenses)" />}
                     <circle r={R} fill="url(#sph-hl)" />
 
-                    {/* ── ERUPTION: fire particles ── */}
-                    {isOverBudget && Array.from({ length: 12 }, (_, i) => {
+                    {/* ── ERUPTION: fire particles (eruption/critical only) ── */}
+                    {isOverBudget && Array.from({ length: tier === "critical" ? 16 : 12 }, (_, i) => {
                       const phase = (t * 0.8 + i * 0.35) % 1;
                       const ang = -Math.PI / 2 + (Math.sin(i * 7.3) * 0.9);
                       const dist = R + phase * 45;
@@ -743,7 +761,7 @@ export default function GalaxyView({
                       return <circle key={`fire-${i}`} cx={px} cy={py} r={sz} fill={cols[i % 4]} opacity={(1 - phase) * 0.8} />;
                     })}
                     {/* Smoke plumes */}
-                    {isOverBudget && Array.from({ length: 6 }, (_, i) => {
+                    {isOverBudget && Array.from({ length: tier === "critical" ? 9 : 6 }, (_, i) => {
                       const phase = (t * 0.3 + i * 0.5) % 1;
                       const px = Math.sin(t * 0.8 + i * 2) * 10 * phase;
                       const py = -R - phase * 55;
@@ -760,9 +778,10 @@ export default function GalaxyView({
                     {/* Warning shake effect on text */}
                     <g transform={isOverBudget ? `translate(${Math.sin(t * 20) * 0.8},0)` : undefined}>
                       <text y={-5} textAnchor="middle" fontSize={10} fontWeight={600} fill="#fff" style={ts}>Dépenses</text>
-                      <text y={9} textAnchor="middle" fontSize={9} fill={isOverBudget ? "#ffaa70" : isWarning ? "#ffd280" : "rgba(255,255,255,0.7)"}>{totalExpenseFlows > 0 ? formatMoney(totalExpenseFlows) : "0 €"}/m</text>
-                      {isOverBudget && <text y={24} textAnchor="middle" fontSize={9} fill="#ff6b35" fontWeight={700} opacity={0.6 + Math.sin(t * 6) * 0.4}>DÉFICIT</text>}
-                      {isWarning && <text y={22} textAnchor="middle" fontSize={8} fill="#ffb84d" fontWeight={600}>{Math.round(budgetRatio * 100)}% du budget</text>}
+                      <text y={9} textAnchor="middle" fontSize={9} fill={isOverBudget ? "#ffaa70" : tier === "warning" ? "#ffd280" : "rgba(255,255,255,0.7)"}>{totalExpenseFlows > 0 ? formatMoney(totalExpenseFlows) : "0 €"}/m</text>
+                      {tier === "critical" && <text y={24} textAnchor="middle" fontSize={9} fill="#ff2200" fontWeight={700} opacity={0.7 + Math.sin(t * 8) * 0.3}>DÉFICIT CRITIQUE</text>}
+                      {tier === "eruption" && <text y={24} textAnchor="middle" fontSize={9} fill="#ff6b35" fontWeight={700} opacity={0.6 + Math.sin(t * 6) * 0.4}>DÉFICIT</text>}
+                      {tier === "warning" && <text y={22} textAnchor="middle" fontSize={8} fill="#ffb84d" fontWeight={600}>{Math.round(budgetRatio * 100)}% du budget</text>}
                     </g>
                     <g transform={`translate(${R * 0.68},${R * 0.68})`} style={{ cursor: "pointer" }}
                       onPointerDown={e => e.stopPropagation()}
@@ -852,7 +871,24 @@ export default function GalaxyView({
                   </>;
                 })()}
 
-                {n.kind === "goal" && <><clipPath id={`cp-${n.id}`}><circle r={n.r} /></clipPath><circle r={n.r + 5} fill={`url(#atmo-${n.id})`} /><circle r={n.r + 3} fill="none" stroke={n.color} strokeOpacity={0.1} strokeDasharray="3 4" /><circle r={n.r} fill={`url(#sph-${n.id})`} /><g clipPath={`url(#cp-${n.id})`}><circle r={n.r} fill={`url(#sph-${n.id})`} filter="url(#terrain)" opacity={0.6} /></g>{(n.color === "#fb923c" || n.color === "#fbbf24") && <><clipPath id={`clip-${n.id}`}><circle r={n.r} /></clipPath><g clipPath={`url(#clip-${n.id})`}><ellipse cx={0} cy={n.r * 0.55} rx={n.r * 0.9} ry={5} fill="#f5d280" opacity={0.35} /><ellipse cx={0} cy={n.r * 0.7} rx={n.r} ry={4} fill="#2898d4" opacity={0.2} filter="url(#turb-water)" /></g></>}<circle r={n.r} fill="url(#sph-hl)" />{(gp ?? 0) >= 1 && <circle r={n.r + 6} fill="none" stroke="#34d399" strokeOpacity={0.45} strokeWidth={1.5} />}<text y={-4} textAnchor="middle" fontSize={10} fontWeight={600} fill="#fff" style={ts}>{n.label.length > 12 ? n.label.slice(0, 11) + "…" : n.label}</text><text y={10} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.7)">{n.sub}</text></>}
+                {n.kind === "goal" && (() => {
+                  const isVacation = isVacationGoal(n.label);
+                  return <>
+                    <clipPath id={`cp-${n.id}`}><circle r={n.r} /></clipPath>
+                    <circle r={n.r + 5} fill={`url(#atmo-${n.id})`} />
+                    <circle r={n.r + 3} fill="none" stroke={n.color} strokeOpacity={0.1} strokeDasharray="3 4" />
+                    {isVacation ? (
+                      <g clipPath={`url(#cp-${n.id})`}><image href={VACANCES_IMAGE} x={-n.r} y={-n.r} width={n.r * 2} height={n.r * 2} preserveAspectRatio="xMidYMid slice" /></g>
+                    ) : <>
+                      <circle r={n.r} fill={`url(#sph-${n.id})`} />
+                      <g clipPath={`url(#cp-${n.id})`}><circle r={n.r} fill={`url(#sph-${n.id})`} filter="url(#terrain)" opacity={0.6} /></g>
+                    </>}
+                    <circle r={n.r} fill="url(#sph-hl)" />
+                    {(gp ?? 0) >= 1 && <circle r={n.r + 6} fill="none" stroke="#34d399" strokeOpacity={0.45} strokeWidth={1.5} />}
+                    <text y={-4} textAnchor="middle" fontSize={10} fontWeight={600} fill="#fff" style={ts}>{n.label.length > 12 ? n.label.slice(0, 11) + "…" : n.label}</text>
+                    <text y={10} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.7)">{n.sub}</text>
+                  </>;
+                })()}
 
                 {n.kind === "asset" && (() => {
                   const isPos = (n.gainVal ?? 0) >= 0;
