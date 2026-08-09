@@ -1169,7 +1169,10 @@ export default function GalaxyView({
               </g>;
             })}
 
-            {/* Ownership links, drawn last so no planet circle can ever cover them */}
+            {/* Ownership links, drawn last so no planet circle can ever cover them.
+                Soft glow (real feMerge-based blur, not the broken pure-blur "gl" filter)
+                behind a thin dotted core reads as a gentle starlight thread instead of a
+                flat bold line. */}
             {links.map(l => {
               const s = nodeById.get(l.source), tg = nodeById.get(l.target);
               if (!s || !tg || s.x == null || tg.x == null) return null;
@@ -1179,8 +1182,11 @@ export default function GalaxyView({
               const ownerColor = s.kind === "center" ? "#ffcc55" : s.color;
               const isHovered = hoveredId === s.id || hoveredId === tg.id;
               const d = `M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`;
-              const dash = tg.kind === "goal" ? "6 5" : undefined;
-              return <path key={`own-${s.id}-${tg.id}`} d={d} fill="none" stroke={ownerColor} strokeOpacity={isHovered ? 1 : 0.9} strokeWidth={isHovered ? 3.5 : 2.5} strokeDasharray={dash} pointerEvents="none" />;
+              const dash = tg.kind === "goal" ? "1 6" : "1.5 4.5";
+              return <g key={`own-${s.id}-${tg.id}`} pointerEvents="none">
+                <path d={d} fill="none" stroke={ownerColor} strokeOpacity={isHovered ? 0.4 : 0.22} strokeWidth={isHovered ? 7 : 5} filter="url(#glow-strong)" />
+                <path d={d} fill="none" stroke={ownerColor} strokeOpacity={isHovered ? 1 : 0.8} strokeWidth={isHovered ? 2 : 1.4} strokeDasharray={dash} strokeLinecap="round" />
+              </g>;
             })}
           </g>
           <rect x={0} y={0} width={W} height={H} fill="url(#vignette)" pointerEvents="none" />
