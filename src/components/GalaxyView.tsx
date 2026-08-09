@@ -39,6 +39,16 @@ function shade(hex: string, percent: number): string {
   return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
 }
 
+// FV of a lump sum + regular monthly contributions, compounded monthly — same
+// simplified constant-rate model as the Projection section on /timeline.
+function projectedValue(p0: number, monthlyContribution: number, annualRatePct: number, months: number): number {
+  const r = annualRatePct / 100 / 12;
+  if (months <= 0) return p0;
+  if (r === 0) return p0 + monthlyContribution * months;
+  const growth = Math.pow(1 + r, months);
+  return p0 * growth + monthlyContribution * ((growth - 1) / r);
+}
+
 function hashSeed(a: string, b: string) { let h = 0; for (const c of a + b) h = (h * 31 + c.charCodeAt(0)) | 0; return h; }
 function curveControl(s: { x: number; y: number }, tg: { x: number; y: number }, seed: number) {
   const dx = tg.x - s.x, dy = tg.y - s.y, dist = Math.sqrt(dx * dx + dy * dy) || 1;
@@ -163,6 +173,8 @@ export default function GalaxyView({
   const [ownerSourceNode, setOwnerSourceNode] = useState<{ id: string; kind: "center" | "member"; memberId?: number; label: string } | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [alertsOpen, setAlertsOpen] = useState(false);
+  const [scrubYears, setScrubYears] = useState(0);
+  const [scrubGrowth, setScrubGrowth] = useState(5);
   const [linkSourceNode, setLinkSourceNode] = useState<{ id: string; kind: string; portfolioKey?: number | "unassigned"; memberId?: number; label: string } | null>(null);
   const [pendingLink, setPendingLink] = useState<{ sourceType: string; sourceId: number | null; sourceLabel: string; targetType: string; targetId: number; targetLabel: string } | null>(null);
   const [linkAmount, setLinkAmount] = useState("");
@@ -195,6 +207,17 @@ export default function GalaxyView({
   const grossTotal = groups.reduce((s, g) => s + g.total, 0);
   const debt = totalDebt(loans);
   const grandTotal = grossTotal - debt;
+  const scrubMonthlyContribution = flows.reduce((s, f) => {
+    if (f.targetType !== "portfolio" && f.targetType !== "goal") return s;
+    const amt = Number(f.amount);
+    if (f.frequency === "monthly") return s + amt;
+    if (f.frequency === "weekly") return s + amt * 4.345;
+    if (f.frequency === "yearly") return s + amt / 12;
+    return s;
+  }, 0);
+  const scrubProjectedTotal = scrubYears === 0 ? grandTotal : projectedValue(grandTotal, scrubMonthlyContribution, scrubGrowth, scrubYears * 12);
+  const currentYearForScrub = new Date().getFullYear();
+  const scrubYear = currentYearForScrub + scrubYears;
   const maxPV = Math.max(1, ...groups.map(g => g.total));
   const maxGT = Math.max(1, ...goals.map(g => Number(g.targetAmount)));
 
@@ -965,8 +988,8 @@ export default function GalaxyView({
                       <circle cy={-14} r={0.9} fill="#ff5555" opacity={0.6 + Math.sin(t * 4) * 0.4} />
                     </g>
 
-                    <text y={-3} textAnchor="middle" fontSize={12} fontWeight={600} fill="#fff" style={ts}>Patrimoine</text>
-                    <text y={13} textAnchor="middle" fontSize={10} fill="rgba(255,230,160,0.9)">{formatMoney(grandTotal)}</text>
+                    <text y={-3} textAnchor="middle" fontSize={12} fontWeight={600} fill="#fff" style={ts}>{scrubYears > 0 ? `Patrimoine en ${scrubYear}` : "Patrimoine"}</text>
+                    <text y={13} textAnchor="middle" fontSize={10} fill={scrubYears > 0 ? "#9585ff" : "rgba(255,230,160,0.9)"} fontWeight={scrubYears > 0 ? 600 : 400}>{formatMoney(scrubProjectedTotal)}{scrubYears > 0 ? " (projection)" : ""}</text>
                   </>;
                 })()}
 
@@ -1237,6 +1260,19 @@ export default function GalaxyView({
           <rect x={0} y={0} width={W} height={H} fill="url(#vignette)" pointerEvents="none" />
         </svg>
         <p className="absolute bottom-3 left-1/2 -translate-x-1/2 text-[10px] text-white/20 pointer-events-none">Molette = zoom · glisser pour déplacer · glisser un actif vers un portefeuille pour le réassigner</p>
+
+        {/* Curseur chronologique : projette le Patrimoine à une date future, hypothèse à taux constant */}
+        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 w-[min(620px,92%)] bg-surface/80 border border-border rounded-lg px-4 py-2.5 backdrop-blur flex items-center gap-3">
+          <span className="text-[10px] text-text-muted tabular shrink-0">{currentYearForScrub}</span>
+          <input type="range" min={0} max={30} value={scrubYears} onChange={e => setScrubYears(Number(e.target.value))} className="flex-1" />
+          <span className="text-[10px] text-text-muted tabular shrink-0">{currentYearForScrub + 30}</span>
+          <span className={`text-xs font-semibold tabular shrink-0 w-24 text-right ${scrubYears > 0 ? "text-[#9585ff]" : "text-text-muted"}`}>
+            {scrubYears === 0 ? "Maintenant" : scrubYear}
+          </span>
+          <div className="w-px h-4 bg-border shrink-0" />
+          <input type="number" step="0.5" min={0} max={20} value={scrubGrowth} onChange={e => setScrubGrowth(Number(e.target.value))} title="Croissance annuelle moyenne supposée" className="w-12 bg-bg border border-border rounded px-1 py-0.5 text-[10px] tabular shrink-0" />
+          <span className="text-[10px] text-text-muted shrink-0">%/an</span>
+        </div>
 
         {pendingLink && (
           <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-surface border border-border rounded-xl p-4 w-64 shadow-xl space-y-2">
