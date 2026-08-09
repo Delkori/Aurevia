@@ -288,7 +288,15 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
           </div>}
           {loans.length > 0 && <div className="pt-2 border-t border-border">
             <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Crédits</p>
-            {loans.map(l => <div key={l.id} className="flex justify-between text-xs py-0.5"><span className="text-text-muted">{l.name}</span><span className="tabular text-negative">{formatMoney(Number(l.remainingBalance))}</span></div>)}
+            {loans.map(l => <div key={l.id} className="flex justify-between items-center gap-2 text-xs py-0.5 group">
+              <span className="text-text-muted truncate">{l.name}{l.assetId == null && <span className="opacity-60"> (non rattaché)</span>}</span>
+              <span className="flex items-center gap-1.5 shrink-0">
+                <span className="tabular text-negative">{formatMoney(Number(l.remainingBalance))}</span>
+                <button onClick={async () => { if (confirm(`Supprimer le crédit "${l.name}" ?`)) await actions.deleteLoan(l.id); }} className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-negative transition-opacity">
+                  <Trash2 size={11} />
+                </button>
+              </span>
+            </div>)}
           </div>}
           {portfolios.length > 0 && <div className="pt-2 border-t border-border">
             <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Planètes</p>

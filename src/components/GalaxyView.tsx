@@ -584,6 +584,12 @@ export default function GalaxyView({
               <span className="tabular text-negative">{formatMoney(debt)}</span>
             </div>}
           </div>}
+          {totalRevenue > 0 && (
+            <div className="flex items-center justify-between mt-1.5 text-[10px]">
+              <span className="text-text-muted">Reste à investir</span>
+              <span className={`tabular font-medium ${resteAInvestir > 0 ? "text-accent" : "text-text-muted"}`}>{formatMoney(resteAInvestir)}/m</span>
+            </div>
+          )}
           {structureScore !== null && (
             <div className="mt-2.5 pt-2 border-t border-border/60" title="Score organisationnel : diversification, dette, concentration, épargne — pas un conseil d'investissement.">
               <div className="flex items-center justify-between text-[10px]">
@@ -782,12 +788,7 @@ export default function GalaxyView({
               return <g key={`rk-${i}`}>
                 {trail.map((pt, ti) => <circle key={`tr-${i}-${ti}`} cx={pt.x} cy={pt.y} r={3.5 - ti * 0.7} fill="url(#rocket-trail)" opacity={0.55 - ti * 0.12} />)}
                 <g transform={`translate(${head.x},${head.y}) rotate(${head.angle})`}>
-                  {f.isSalarySource ? (
-                    <image href={SHIP_IMAGES[shipTier]} x={-shipDims.w / 2} y={-shipDims.h / 2} width={shipDims.w} height={shipDims.h} transform="rotate(-45)" opacity={0.95} />
-                  ) : <>
-                    <polygon points="-5,-3 6,0 -5,3" fill="#b8a5ff" opacity={0.9} />
-                    <polygon points="-6,0 -11,-3 -9,0 -11,3" fill="#fb923c" opacity={0.5 + Math.sin(t * 14) * 0.25} />
-                  </>}
+                  <image href={SHIP_IMAGES[shipTier]} x={-shipDims.w / 2} y={-shipDims.h / 2} width={shipDims.w} height={shipDims.h} opacity={0.95} />
                 </g>
               </g>;
             })}
