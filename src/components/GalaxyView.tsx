@@ -55,6 +55,16 @@ const EXPENSES_IMAGES = {
   eruption: "/planet-skins/expenses-eruption.png",
   critical: "/planet-skins/expenses-critical.png",
 };
+const SHIP_IMAGES = {
+  small: "/ship-skins/transport-small.png",
+  medium: "/ship-skins/transport-medium.png",
+  large: "/ship-skins/transport-large.png",
+};
+const SHIP_DIMS = {
+  small: { w: 16, h: 10 },
+  medium: { w: 22, h: 15.6 },
+  large: { w: 30, h: 21.5 },
+};
 function isVacationGoal(name: string) {
   const n = name.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
   return /vacance|voyage|plage|maldives|croisiere/.test(n);
@@ -176,7 +186,7 @@ export default function GalaxyView({
   const { targetNodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows, totalRevenue } = useMemo(() => {
     const nodes: GNode[] = [];
     const links: GLink[] = [];
-    const flowLinks: { source: string; target: string; label: string; days?: number; isSalarySource?: boolean }[] = [];
+    const flowLinks: { source: string; target: string; label: string; amount: number; days?: number; isSalarySource?: boolean }[] = [];
 
     const incomeFlows = flows.filter(f => f.targetType === "income");
     const totalIncomeItems = incomeFlows.reduce((s, f) => s + Number(f.amount), 0);
@@ -201,7 +211,7 @@ export default function GalaxyView({
     if (totalRevenue > 0) {
       nodes.push({ id: "expenses", kind: "expenses", label: "Dépenses", r: 22 + Math.min(18, totalExpenseFlows / 80), color: "#f87171" });
       links.push({ source: "salary", target: "expenses" });
-      if (totalExpenseFlows > 0) flowLinks.push({ source: "salary", target: "expenses", label: formatMoney(totalExpenseFlows) });
+      if (totalExpenseFlows > 0) flowLinks.push({ source: "salary", target: "expenses", label: formatMoney(totalExpenseFlows), amount: totalExpenseFlows });
       expFlows.forEach(ef => {
         const eid = `exp-${ef.id}`;
         nodes.push({ id: eid, kind: "expense-item", label: ef.name || "Dépense", r: 10 + Math.min(8, Number(ef.amount) / 100), color: "#f87171", sub: formatMoney(Number(ef.amount)) });
@@ -211,7 +221,7 @@ export default function GalaxyView({
     if (totalRevenue > 0 && resteAInvestir > 0) {
       nodes.push({ id: "reste", kind: "reste", label: "Reste", r: 18, color: "#9585ff" });
       links.push({ source: "salary", target: "reste" });
-      flowLinks.push({ source: "salary", target: "reste", label: formatMoney(resteAInvestir) });
+      flowLinks.push({ source: "salary", target: "reste", label: formatMoney(resteAInvestir), amount: resteAInvestir });
     }
 
     members.forEach(m => {
@@ -258,7 +268,7 @@ export default function GalaxyView({
       const sId = f.sourceType === "salary" ? "salary" : f.sourceType === "portfolio" ? `p-${f.sourceId}` : f.sourceType === "member_salary" ? `ms-${f.sourceId}` : null;
       const tId = f.targetType === "portfolio" ? `p-${f.targetId}` : f.targetType === "goal" ? `g-${f.targetId}` : null;
       if (sId && tId && nodes.find(n => n.id === sId) && nodes.find(n => n.id === tId))
-        flowLinks.push({ source: sId, target: tId, label: formatMoney(Number(f.amount)), days: daysUntilNextOccurrence(f.createdAt, f.frequency), isSalarySource: f.sourceType === "salary" || f.sourceType === "member_salary" });
+        flowLinks.push({ source: sId, target: tId, label: formatMoney(Number(f.amount)), amount: Number(f.amount), days: daysUntilNextOccurrence(f.createdAt, f.frequency), isSalarySource: f.sourceType === "salary" || f.sourceType === "member_salary" });
     });
 
     return { targetNodes: nodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows, totalRevenue };
@@ -766,17 +776,15 @@ export default function GalaxyView({
                 const pp = Math.max(0, p - off);
                 return bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, pp);
               });
+              const pct = totalRevenue > 0 ? f.amount / totalRevenue : f.amount / 500;
+              const shipTier: "small" | "medium" | "large" = pct < 0.08 ? "small" : pct < 0.25 ? "medium" : "large";
+              const shipDims = SHIP_DIMS[shipTier];
               return <g key={`rk-${i}`}>
                 {trail.map((pt, ti) => <circle key={`tr-${i}-${ti}`} cx={pt.x} cy={pt.y} r={3.5 - ti * 0.7} fill="url(#rocket-trail)" opacity={0.55 - ti * 0.12} />)}
                 <g transform={`translate(${head.x},${head.y}) rotate(${head.angle})`}>
-                  {f.isSalarySource ? <>
-                    <rect x={-8} y={-3.5} width={13} height={7} rx={1.5} fill="#9585ff" opacity={0.9} />
-                    <rect x={-5.5} y={-2.3} width={2.6} height={4.6} fill="#2a2140" opacity={0.7} />
-                    <rect x={-1.5} y={-2.3} width={2.6} height={4.6} fill="#2a2140" opacity={0.7} />
-                    <rect x={2.5} y={-2.3} width={2.6} height={4.6} fill="#2a2140" opacity={0.7} />
-                    <polygon points="5,-3.5 10,0 5,3.5" fill="#b8a5ff" opacity={0.9} />
-                    <polygon points="-8,0 -13,-2.5 -11.5,0 -13,2.5" fill="#fb923c" opacity={0.5 + Math.sin(t * 10) * 0.25} />
-                  </> : <>
+                  {f.isSalarySource ? (
+                    <image href={SHIP_IMAGES[shipTier]} x={-shipDims.w / 2} y={-shipDims.h / 2} width={shipDims.w} height={shipDims.h} transform="rotate(-45)" opacity={0.95} />
+                  ) : <>
                     <polygon points="-5,-3 6,0 -5,3" fill="#b8a5ff" opacity={0.9} />
                     <polygon points="-6,0 -11,-3 -9,0 -11,3" fill="#fb923c" opacity={0.5 + Math.sin(t * 14) * 0.25} />
                   </>}
