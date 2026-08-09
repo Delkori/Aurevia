@@ -748,11 +748,11 @@ export default function GalaxyView({
               const s = nodeById.get(l.source), tg = nodeById.get(l.target);
               if (!s || !tg || s.x == null || tg.x == null) return null;
               const seed = hashSeed(s.id, tg.id), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
-              const isOwnershipLink = (s.kind === "member" || s.kind === "center") && (tg.kind === "portfolio" || tg.kind === "goal");
+              const isOwnershipLink = (s.kind === "member" || s.kind === "center") && (tg.kind === "portfolio" || tg.kind === "goal" || tg.kind === "member" || tg.kind === "member-salary");
               if (isOwnershipLink) {
                 const ownerColor = s.kind === "center" ? "#ffcc55" : s.color;
                 const isHovered = hoveredId === s.id || hoveredId === tg.id;
-                return <path key={`ln-${s.id}-${tg.id}`} d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke={ownerColor} strokeOpacity={isHovered ? 0.95 : 0.45} strokeWidth={isHovered ? 3 : 1.8} strokeDasharray={tg.kind === "goal" ? "5 4" : undefined} filter={isHovered ? "url(#glow-strong)" : "url(#gl)"} />;
+                return <path key={`ln-${s.id}-${tg.id}`} d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke={ownerColor} strokeOpacity={isHovered ? 0.95 : 0.6} strokeWidth={isHovered ? 3 : 2.2} strokeDasharray={tg.kind === "goal" ? "5 4" : undefined} filter={isHovered ? "url(#glow-strong)" : "url(#gl)"} />;
               }
               const isItemNode = tg.kind === "expense-item" || tg.kind === "income-item";
               return <path key={`ln-${s.id}-${tg.id}`} d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke={tg.color} strokeOpacity={isItemNode ? 0.1 : 0.22} strokeWidth={isItemNode ? 0.5 : 1} strokeDasharray={tg.kind === "goal" ? "4 5" : undefined} />;
@@ -797,7 +797,7 @@ export default function GalaxyView({
               if (!s || !tg || s.x == null || tg.x == null) return null;
               // Ownership links (patrimoine/membre → planète) run their traveling dot in reverse:
               // visually, the planet's value flows back INTO the owner, not away from it.
-              const isOwnershipLink = (s.kind === "member" || s.kind === "center") && (tg.kind === "portfolio" || tg.kind === "goal");
+              const isOwnershipLink = (s.kind === "member" || s.kind === "center") && (tg.kind === "portfolio" || tg.kind === "goal" || tg.kind === "member" || tg.kind === "member-salary");
               const from = isOwnershipLink ? tg : s, to = isOwnershipLink ? s : tg;
               const seed = hashSeed(s.id, tg.id), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
               const sp = 5 + (s.id.charCodeAt(0) % 4), p = (t / sp) % 1;
@@ -1104,7 +1104,7 @@ export default function GalaxyView({
                   <circle r={n.r + 3} fill="none" stroke="rgba(100,255,150,0.08)" />
                   <circle r={n.r} fill="url(#sph-salary)" />
                   <circle r={n.r} fill="url(#sph-hl)" />
-                  <text y={-4} textAnchor="middle" fontSize={9} fontWeight={600} fill="#fff" style={ts}>{n.label.length > 14 ? n.label.slice(0, 13) + "…" : n.label}</text>
+                  <text y={-4} textAnchor="middle" fontSize={9} fontWeight={600} fill="#fff" style={ts}>Salaire</text>
                   <text y={9} textAnchor="middle" fontSize={8} fill="rgba(255,255,255,0.85)" style={ts}>{n.sub}/mois</text>
                 </>}
               </g>;
