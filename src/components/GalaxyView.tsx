@@ -5,7 +5,7 @@ import {
   forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY,
   type Simulation, type SimulationNodeDatum,
 } from "d3-force";
-import { FolderPlus, Plus, PlusCircle, Star, ArrowRight, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, Sparkles, AlertTriangle, UserCheck } from "lucide-react";
+import { FolderPlus, Plus, PlusCircle, Star, ArrowRight, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, Sparkles, AlertTriangle, UserCheck, Bell } from "lucide-react";
 import { formatMoney } from "@/lib/format";
 import { currentValue, gain, gainPercent, totalDebt } from "@/lib/networth";
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
@@ -162,6 +162,7 @@ export default function GalaxyView({
   const [ownerMode, setOwnerMode] = useState(false);
   const [ownerSourceNode, setOwnerSourceNode] = useState<{ id: string; kind: "center" | "member"; memberId?: number; label: string } | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [alertsOpen, setAlertsOpen] = useState(false);
   const [linkSourceNode, setLinkSourceNode] = useState<{ id: string; kind: string; portfolioKey?: number | "unassigned"; memberId?: number; label: string } | null>(null);
   const [pendingLink, setPendingLink] = useState<{ sourceType: string; sourceId: number | null; sourceLabel: string; targetType: string; targetId: number; targetLabel: string } | null>(null);
   const [linkAmount, setLinkAmount] = useState("");
@@ -171,6 +172,9 @@ export default function GalaxyView({
   const nodesMapRef = useRef<Map<string, GNode>>(new Map());
   const [, setTick] = useState(0);
   const [dragId, setDragId] = useState<string | null>(null);
+  const dragIdRef = useRef<string | null>(null);
+  dragIdRef.current = dragId;
+  const linksRef = useRef<GLink[]>([]);
   const [snapTarget, setSnapTarget] = useState<string | null>(null);
   const dragStartPos = useRef<{ x: number; y: number } | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -292,6 +296,7 @@ export default function GalaxyView({
 
     return { targetNodes: nodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows, totalRevenue, totalInvest };
   }, [groups, maxPV, expanded, goals, maxGT, members, portfolios, flows, quotes, salary, goalLinks, goalProgress]);
+  linksRef.current = links;
 
   // Simulation
   useEffect(() => {
@@ -309,14 +314,45 @@ export default function GalaxyView({
     const s = nm.get("salary"); if (s && !getNodePosition("salary")) { s.fx = CX; s.fy = 80; }
     const e = nm.get("expenses"); if (e && !getNodePosition("expenses")) { e.fx = CX + 350; e.fy = 180; }
 
+    // Locks satellites (assets, expense/income items) to an evenly-spaced ring around
+    // their parent planet every tick, instead of letting them drift semi-independently
+    // under generic link/charge forces — they now visually move as one piece with the
+    // planet they orbit, which reads much cleaner while the planet is dragged or settles.
+    const snapSatellites = () => {
+      const nm = nodesMapRef.current;
+      const childrenByParent = new Map<string, string[]>();
+      for (const l of linksRef.current) {
+        const tgt = nm.get(l.target);
+        if (!tgt || (tgt.kind !== "asset" && tgt.kind !== "expense-item" && tgt.kind !== "income-item")) continue;
+        if (!childrenByParent.has(l.source)) childrenByParent.set(l.source, []);
+        childrenByParent.get(l.source)!.push(l.target);
+      }
+      childrenByParent.forEach((childIds, parentId) => {
+        const parent = nm.get(parentId);
+        if (!parent || parent.x == null || parent.y == null) return;
+        const sorted = [...childIds].sort();
+        sorted.forEach((childId, i) => {
+          if (childId === dragIdRef.current) return;
+          const child = nm.get(childId);
+          if (!child) return;
+          const angle = (i / sorted.length) * Math.PI * 2;
+          const R = parent.r + child.r + 12;
+          child.x = parent.x! + Math.cos(angle) * R;
+          child.y = parent.y! + Math.sin(angle) * R;
+          child.fx = child.x; child.fy = child.y;
+        });
+      });
+    };
+
     if (!simRef.current) {
       simRef.current = forceSimulation<GNode>(nodes)
         .force("charge", forceManyBody().strength(d => { const k = (d as GNode).kind; return k === "expense-item" || k === "income-item" ? -30 : k === "asset" ? -60 : -180; }))
         .force("collide", forceCollide<GNode>().radius(d => d.r + 16))
         .force("x", forceX<GNode>(CX).strength(0.02))
         .force("y", forceY<GNode>(CY).strength(0.02))
-        .alphaDecay(0.018).on("tick", () => setTick(n => n + 1));
+        .alphaDecay(0.018).on("tick", () => { snapSatellites(); setTick(n => n + 1); });
     } else simRef.current.nodes(nodes);
+    snapSatellites();
 
     // d3's forceLink() mutates each link object in place, replacing .source/.target
     // (our plain string ids) with the actual resolved node objects once the simulation
@@ -654,16 +690,6 @@ export default function GalaxyView({
               <div className="h-1 rounded bg-bg mt-1 overflow-hidden">
                 <div className="h-full rounded" style={{ width: `${structureScore}%`, background: structureScore >= 70 ? "#34d399" : structureScore >= 45 ? "#7c6af5" : "#f87171" }} />
               </div>
-            </div>
-          )}
-          {alerts.length > 0 && (
-            <div className="pt-1.5 space-y-1">
-              {alerts.map(a => (
-                <div key={a.id} className="flex items-start gap-1.5 text-[10px] text-negative bg-negative/10 border border-negative/30 rounded-md px-1.5 py-1">
-                  <AlertTriangle size={11} className="shrink-0 mt-0.5" />
-                  <span>{a.text}</span>
-                </div>
-              ))}
             </div>
           )}
         </div>
@@ -1237,8 +1263,34 @@ export default function GalaxyView({
       </div>
 
       {/* ── PANEL ── */}
-      <NodePanel selected={selected} loans={loans} portfolios={portfolios} members={members} goals={goals} flows={flows} goalLinks={goalLinks} actions={actions} onClear={() => setSelected(null)} createMode={createMode} setCreateMode={setCreateMode} salary={salary} onUpdateSalary={onUpdateSalary} groups={groups.map(g => ({ key: g.key, total: g.total, valued: g.valued }))} grossTotal={grossTotal} debt={debt} ownerName={ownerName}
-        onPortfolioCreated={p => setSelected({ kind: "portfolio", id: p.id, name: p.name, color: p.color, skin: p.skin, total: 0, count: 0, memberId: p.memberId })} />
+      <div className="grid" style={{ gridTemplateRows: "44px 1fr" }}>
+        <div className="border-l border-b border-border bg-surface/40 flex items-center justify-end gap-3 px-4 relative">
+          <button title="Notifications" className="text-text-muted hover:text-text">
+            <Bell size={16} />
+          </button>
+          <div className="w-px h-5 bg-border" />
+          <button title="Alertes" onClick={() => setAlertsOpen(o => !o)} className={`relative ${alerts.length > 0 ? "text-negative" : "text-text-muted"} hover:text-text`}>
+            <AlertTriangle size={16} />
+            {alerts.length > 0 && <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-negative" />}
+          </button>
+          {alertsOpen && (
+            <div className="absolute right-4 top-11 z-10 w-72 bg-surface border border-border rounded-lg shadow-xl p-3 space-y-1.5">
+              {alerts.length === 0 ? (
+                <p className="text-xs text-text-muted">Aucune alerte.</p>
+              ) : alerts.map(a => (
+                <div key={a.id} className="flex items-start gap-1.5 text-[11px] text-negative bg-negative/10 border border-negative/30 rounded-md px-2 py-1.5">
+                  <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+                  <span>{a.text}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="min-h-0">
+          <NodePanel selected={selected} loans={loans} portfolios={portfolios} members={members} goals={goals} flows={flows} goalLinks={goalLinks} actions={actions} onClear={() => setSelected(null)} createMode={createMode} setCreateMode={setCreateMode} salary={salary} onUpdateSalary={onUpdateSalary} groups={groups.map(g => ({ key: g.key, total: g.total, valued: g.valued }))} grossTotal={grossTotal} debt={debt} ownerName={ownerName}
+            onPortfolioCreated={p => setSelected({ kind: "portfolio", id: p.id, name: p.name, color: p.color, skin: p.skin, total: 0, count: 0, memberId: p.memberId })} />
+        </div>
+      </div>
     </div>
   );
 }

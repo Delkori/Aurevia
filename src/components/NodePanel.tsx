@@ -279,7 +279,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
   const clear = () => { setCreateMode(null); onClear(); };
 
   return (
-    <div className="bg-surface/40 border-l border-border p-5 space-y-3 overflow-y-auto">
+    <div className="bg-surface/40 border-l border-border p-5 space-y-3 overflow-y-auto h-full">
 
       {createMode === "portfolio" && <PortfolioForm members={members} ownerName={ownerName} onSubmit={async d => { const p = await actions.createPortfolio(d); setCreateMode(null); if (onPortfolioCreated) onPortfolioCreated(p); else onClear(); }} onCancel={clear} />}
       {createMode === "asset" && <AssetForm portfolios={portfolios} defaultPortfolioId={selected?.kind === "portfolio" && selected.id !== "unassigned" ? selected.id as number : undefined} onSubmit={async d => { await actions.createAsset(d); clear(); }} onCancel={clear} />}
