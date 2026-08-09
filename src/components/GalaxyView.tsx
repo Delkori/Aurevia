@@ -5,7 +5,7 @@ import {
   forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY,
   type Simulation, type SimulationNodeDatum,
 } from "d3-force";
-import { FolderPlus, Plus, Star, ArrowRight, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, Sparkles } from "lucide-react";
+import { FolderPlus, Plus, PlusCircle, Star, ArrowRight, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, Sparkles } from "lucide-react";
 import { formatMoney } from "@/lib/format";
 import { currentValue, gain, gainPercent, totalDebt } from "@/lib/networth";
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
@@ -132,21 +132,21 @@ const STARS = Array.from({ length: 180 }, (_, i) => ({
 }));
 
 export default function GalaxyView({
-  assets, portfolios, goals, loans, members, flows, goalLinks, quotes, actions, salary, onUpdateSalary, onRefresh,
+  assets, portfolios, goals, loans, members, flows, goalLinks, quotes, actions, salary, onUpdateSalary, onRefresh, showCountdown,
 }: {
   assets: Asset[]; portfolios: Portfolio[]; goals: Goal[]; loans: Loan[];
   members: Member[]; flows: Flow[]; goalLinks: GoalLink[]; quotes: Record<string, Quote>;
-  actions: Actions; salary: number; onUpdateSalary: (v: number) => Promise<void>; onRefresh: () => void;
+  actions: Actions; salary: number; onUpdateSalary: (v: number) => Promise<void>; onRefresh: () => void; showCountdown: boolean;
 }) {
   const [expanded, setExpanded] = useState<Set<number | "unassigned">>(new Set());
   const [selected, setSelected] = useState<Selection>(null);
   const [createMode, setCreateMode] = useState<string | null>(null);
   const [linkMode, setLinkMode] = useState(false);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [linkSourceNode, setLinkSourceNode] = useState<{ id: string; kind: string; portfolioKey?: number | "unassigned"; memberId?: number; label: string } | null>(null);
   const [pendingLink, setPendingLink] = useState<{ sourceType: string; sourceId: number | null; sourceLabel: string; targetType: string; targetId: number; targetLabel: string } | null>(null);
   const [linkAmount, setLinkAmount] = useState("");
   const [linkFrequency, setLinkFrequency] = useState("monthly");
-  const [showCountdown, setShowCountdown] = useState(false);
   const t = useAnimClock();
   const simRef = useRef<Simulation<GNode, GLink> | null>(null);
   const nodesMapRef = useRef<Map<string, GNode>>(new Map());
@@ -570,30 +570,29 @@ export default function GalaxyView({
       {/* ── LEFT MENU ── */}
       <div className="bg-surface/40 border-r border-border flex flex-col overflow-y-auto">
         {/* Stats header */}
-        <div className="px-4 pt-4 pb-3 border-b border-border">
-          <p className="text-lg font-[family-name:var(--font-mono-num)] tabular font-semibold">{formatMoney(grandTotal)}</p>
-          <p className="text-[10px] text-text-muted mt-0.5">Patrimoine net</p>
-          {totalRevenue > 0 && <div className="flex gap-3 mt-2">
-            <div className="flex items-center gap-1 text-[10px]">
-              <TrendingUp size={10} className="text-positive" />
-              <span className="text-text-muted">Épargne</span>
-              <span className="tabular text-positive">{tauxEpargne}%</span>
+        <div className="px-4 pt-4 pb-3 border-b border-border space-y-1">
+          <div>
+            <p className="text-lg font-[family-name:var(--font-mono-num)] tabular font-semibold">{formatMoney(grandTotal)}</p>
+            <p className="text-[10px] text-text-muted mt-0.5">Patrimoine net{debt > 0 && <span className="tabular"> · {formatMoney(grossTotal)} brut</span>}</p>
+          </div>
+          {totalRevenue > 0 && <>
+            <div className="flex items-center justify-between text-[10px] pt-1.5">
+              <span className="text-text-muted flex items-center gap-1"><TrendingUp size={10} className="text-positive" />Épargne</span>
+              <span className="tabular text-positive font-medium">{tauxEpargne}%</span>
             </div>
-            {debt > 0 && <div className="flex items-center gap-1 text-[10px]">
-              <TrendingDown size={10} className="text-negative" />
-              <span className="tabular text-negative">{formatMoney(debt)}</span>
-            </div>}
-          </div>}
-          {totalRevenue > 0 && (
-            <div className="flex items-center justify-between mt-1.5 text-[10px]">
-              <span className="text-text-muted">Reste à investir</span>
-              <span className={`tabular font-medium ${resteAInvestir > 0 ? "text-accent" : "text-text-muted"}`}>{formatMoney(resteAInvestir)}/m</span>
+            <div className="flex items-center justify-between text-[10px]">
+              <span className="text-text-muted flex items-center gap-1"><TrendingDown size={10} className="text-negative" />Dépense</span>
+              <span className="tabular text-negative font-medium">{Math.round(budgetRatio * 100)}%</span>
             </div>
-          )}
+            <div className="flex items-center justify-between text-[10px]">
+              <span className="text-text-muted">Reste</span>
+              <span className={`tabular font-medium ${resteAInvestir > 0 ? "text-accent" : "text-text-muted"}`}>{Math.round(resteAInvestir / totalRevenue * 100)}%</span>
+            </div>
+          </>}
           {structureScore !== null && (
-            <div className="mt-2.5 pt-2 border-t border-border/60" title="Score organisationnel : diversification, dette, concentration, épargne — pas un conseil d'investissement.">
+            <div className="pt-1.5" title="Score organisationnel : diversification, dette, concentration, épargne — pas un conseil d'investissement.">
               <div className="flex items-center justify-between text-[10px]">
-                <span className="text-text-muted">Score structure</span>
+                <span className="text-text-muted">Score</span>
                 <span className={`tabular font-semibold ${structureScore >= 70 ? "text-positive" : structureScore >= 45 ? "text-accent" : "text-negative"}`}>{structureScore}/100</span>
               </div>
               <div className="h-1 rounded bg-bg mt-1 overflow-hidden">
@@ -637,7 +636,11 @@ export default function GalaxyView({
             Salaire principal
             {salary > 0 && <span className="ml-auto text-[10px] tabular text-text-muted">{formatMoney(salary)}</span>}
           </button>
-          <p className="text-[9px] text-text-muted px-2 mt-1">Ajoute d&apos;autres revenus (loyers, retraite, rente…) via le bouton + sur la planète Revenus.</p>
+          <button onClick={() => { setSelected(null); setCreateMode("income"); }}
+            className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs ${createMode === "income" ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text hover:bg-surface-hover"}`}>
+            <PlusCircle size={13} className="shrink-0" />
+            Source de revenus
+          </button>
         </div>
 
 
@@ -645,10 +648,6 @@ export default function GalaxyView({
 
         {/* Bottom actions */}
         <div className="px-3 py-3 border-t border-border space-y-0.5">
-          <label className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-muted hover:text-text cursor-pointer">
-            <input type="checkbox" checked={showCountdown} onChange={e => setShowCountdown(e.target.checked)} />
-            Jours avant versement
-          </label>
           <button onClick={() => setExpanded(prev => prev.size > 0 ? new Set() : new Set(groups.map(g => g.key)))} className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-muted hover:text-text hover:bg-surface-hover">
             {expanded.size > 0 ? <EyeOff size={13} /> : <Eye size={13} />}
             {expanded.size > 0 ? "Masquer les satellites" : "Afficher les satellites"}
@@ -752,7 +751,8 @@ export default function GalaxyView({
               const isOwnershipLink = (s.kind === "member" || s.kind === "center") && (tg.kind === "portfolio" || tg.kind === "goal");
               if (isOwnershipLink) {
                 const ownerColor = s.kind === "center" ? "#ffcc55" : s.color;
-                return <path key={`ln-${s.id}-${tg.id}`} d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke={ownerColor} strokeOpacity={0.45} strokeWidth={1.8} strokeDasharray={tg.kind === "goal" ? "5 4" : undefined} filter="url(#gl)" />;
+                const isHovered = hoveredId === s.id || hoveredId === tg.id;
+                return <path key={`ln-${s.id}-${tg.id}`} d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke={ownerColor} strokeOpacity={isHovered ? 0.95 : 0.45} strokeWidth={isHovered ? 3 : 1.8} strokeDasharray={tg.kind === "goal" ? "5 4" : undefined} filter={isHovered ? "url(#glow-strong)" : "url(#gl)"} />;
               }
               const isItemNode = tg.kind === "expense-item" || tg.kind === "income-item";
               return <path key={`ln-${s.id}-${tg.id}`} d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke={tg.color} strokeOpacity={isItemNode ? 0.1 : 0.22} strokeWidth={isItemNode ? 0.5 : 1} strokeDasharray={tg.kind === "goal" ? "4 5" : undefined} />;
@@ -831,9 +831,11 @@ export default function GalaxyView({
               const isExp = n.kind === "portfolio" && n.portfolioKey !== undefined && expanded.has(n.portfolioKey);
               const gp = n.kind === "goal" && n.goalId != null ? (() => { const goal = goals.find(g => g.id === n.goalId); return goal ? goalProgress(goal) : null; })() : null;
               const ts = { textShadow: "0 1px 3px rgba(0,0,0,0.95), 0 0 8px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,1)" } as const;
+              const isHoveredNode = hoveredId === n.id;
 
-              return <g key={n.id} className="nd" transform={`translate(${n.x},${n.y})`} style={{ cursor: "pointer" }}
-                onPointerDown={onNodeDown(n.id)} onClick={e => { e.stopPropagation(); handleClick(n, e as unknown as React.MouseEvent); }}>
+              return <g key={n.id} className="nd" transform={`translate(${n.x},${n.y}) scale(${isHoveredNode ? 1.08 : 1})`} style={{ cursor: "pointer", transition: "transform 0.15s ease-out" }}
+                onPointerDown={onNodeDown(n.id)} onClick={e => { e.stopPropagation(); handleClick(n, e as unknown as React.MouseEvent); }}
+                onPointerEnter={() => setHoveredId(n.id)} onPointerLeave={() => setHoveredId(id => id === n.id ? null : id)}>
 
                 {n.kind === "center" && (() => {
                   const R = n.r;

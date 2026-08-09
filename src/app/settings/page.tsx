@@ -88,6 +88,15 @@ export default function SettingsPage() {
           </div>
         </div>
 
+        <label className="flex items-center gap-2 text-sm cursor-pointer">
+          <input
+            type="checkbox"
+            checked={settings.show_payment_countdown !== "false"}
+            onChange={(e) => setSettings({ ...settings, show_payment_countdown: e.target.checked ? "true" : "false" })}
+          />
+          Afficher le compte à rebours avant chaque versement dans la galaxie
+        </label>
+
         <button
           onClick={saveSettings}
           className="flex items-center gap-2 text-sm px-4 py-2 rounded-md bg-accent text-white font-medium hover:opacity-90"

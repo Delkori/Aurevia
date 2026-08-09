@@ -113,6 +113,7 @@ export default function HomePage() {
           assets={assets} portfolios={portfolios} goals={goals} loans={loans}
           members={members} flows={flows} goalLinks={goalLinks} quotes={quotes} actions={actions}
           salary={Number(settings.monthly_salary) || 0}
+          showCountdown={settings.show_payment_countdown !== "false"}
           onUpdateSalary={updateSalary}
           onRefresh={load}
         />
