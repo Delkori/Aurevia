@@ -768,20 +768,9 @@ export default function GalaxyView({
               if (!s || !tg || s.x == null || tg.x == null) return null;
               const seed = hashSeed(s.id, tg.id), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
               const isOwnershipLink = (s.kind === "member" || s.kind === "center") && (tg.kind === "portfolio" || tg.kind === "goal" || tg.kind === "member" || tg.kind === "member-salary");
-              if (isOwnershipLink) {
-                const ownerColor = s.kind === "center" ? "#ffcc55" : s.color;
-                const isHovered = hoveredId === s.id || hoveredId === tg.id;
-                const d = `M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`;
-                const dash = tg.kind === "goal" ? "5 4" : undefined;
-                // filter="url(#gl)" is a pure feGaussianBlur with no feMerge back to SourceGraphic —
-                // it replaces the line with a diffuse smear instead of glowing a crisp line, which made
-                // every ownership link nearly invisible at rest. Layer a real (unfiltered) line on top
-                // of an optional soft glow instead of relying on that filter.
-                return <g key={`ln-${s.id}-${tg.id}`}>
-                  {isHovered && <path d={d} fill="none" stroke={ownerColor} strokeOpacity={0.5} strokeWidth={7} strokeDasharray={dash} filter="url(#gl)" />}
-                  <path d={d} fill="none" stroke={ownerColor} strokeOpacity={isHovered ? 1 : 0.75} strokeWidth={isHovered ? 3 : 2.2} strokeDasharray={dash} />
-                </g>;
-              }
+              // Ownership links are drawn later, in their own top-layer pass after all node
+              // circles, so a nearby planet can never visually cover them — skip them here.
+              if (isOwnershipLink) return null;
               const isItemNode = tg.kind === "expense-item" || tg.kind === "income-item";
               return <path key={`ln-${s.id}-${tg.id}`} d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke={tg.color} strokeOpacity={isItemNode ? 0.1 : 0.22} strokeWidth={isItemNode ? 0.5 : 1} strokeDasharray={tg.kind === "goal" ? "4 5" : undefined} />;
             })}
@@ -926,9 +915,11 @@ export default function GalaxyView({
 
                 {n.kind === "expenses" && (() => {
                   const R = n.r;
+                  // Paliers resserrés pour que le stade visuel bouge avant le déficit, pas seulement après :
+                  // warning jusqu'à 60% des revenus, eruption 60-100%, critical au-delà de 100%.
                   const tier: "calm" | "warning" | "eruption" | "critical" =
                     totalExpenseFlows <= 0 ? "calm" :
-                    budgetRatio > 1.3 ? "critical" : budgetRatio > 1 ? "eruption" : "warning";
+                    budgetRatio > 1 ? "critical" : budgetRatio > 0.6 ? "eruption" : "warning";
                   const tierImage = tier !== "calm" ? EXPENSES_IMAGES[tier] : null;
                   const isOverBudget = tier === "eruption" || tier === "critical";
                   return <>
@@ -1136,6 +1127,20 @@ export default function GalaxyView({
                   <text y={9} textAnchor="middle" fontSize={8} fill="rgba(255,255,255,0.85)" style={ts}>{n.sub}/mois</text>
                 </>}
               </g>;
+            })}
+
+            {/* Ownership links, drawn last so no planet circle can ever cover them */}
+            {links.map(l => {
+              const s = nodeById.get(l.source), tg = nodeById.get(l.target);
+              if (!s || !tg || s.x == null || tg.x == null) return null;
+              const isOwnershipLink = (s.kind === "member" || s.kind === "center") && (tg.kind === "portfolio" || tg.kind === "goal" || tg.kind === "member" || tg.kind === "member-salary");
+              if (!isOwnershipLink) return null;
+              const seed = hashSeed(s.id, tg.id), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
+              const ownerColor = s.kind === "center" ? "#ffcc55" : s.color;
+              const isHovered = hoveredId === s.id || hoveredId === tg.id;
+              const d = `M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`;
+              const dash = tg.kind === "goal" ? "6 5" : undefined;
+              return <path key={`own-${s.id}-${tg.id}`} d={d} fill="none" stroke={ownerColor} strokeOpacity={isHovered ? 1 : 0.9} strokeWidth={isHovered ? 3.5 : 2.5} strokeDasharray={dash} pointerEvents="none" />;
             })}
           </g>
           <rect x={0} y={0} width={W} height={H} fill="url(#vignette)" pointerEvents="none" />
