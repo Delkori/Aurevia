@@ -392,7 +392,7 @@ export default function GalaxyView({
   const toggle = (key: number | "unassigned") => setExpanded(prev => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n; });
 
   const onNodeDown = (id: string) => (e: React.PointerEvent) => {
-    const fixed = ["center", "salary", "expenses"];
+    const fixed = ["center", "expenses"];
     if (fixed.includes(id) && !getNodePosition(id)) return;
     e.stopPropagation();
     dragStartPos.current = { x: e.clientX, y: e.clientY };
