@@ -5,7 +5,7 @@ import {
   forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY,
   type Simulation, type SimulationNodeDatum,
 } from "d3-force";
-import { FolderPlus, Plus, PlusCircle, Star, ArrowRight, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, Sparkles, AlertTriangle } from "lucide-react";
+import { FolderPlus, Plus, PlusCircle, Star, ArrowRight, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, Sparkles, AlertTriangle, UserCheck } from "lucide-react";
 import { formatMoney } from "@/lib/format";
 import { currentValue, gain, gainPercent, totalDebt } from "@/lib/networth";
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
@@ -142,6 +142,8 @@ export default function GalaxyView({
   const [selected, setSelected] = useState<Selection>(null);
   const [createMode, setCreateMode] = useState<string | null>(null);
   const [linkMode, setLinkMode] = useState(false);
+  const [ownerMode, setOwnerMode] = useState(false);
+  const [ownerSourceNode, setOwnerSourceNode] = useState<{ id: string; kind: "center" | "member"; memberId?: number; label: string } | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [linkSourceNode, setLinkSourceNode] = useState<{ id: string; kind: string; portfolioKey?: number | "unassigned"; memberId?: number; label: string } | null>(null);
   const [pendingLink, setPendingLink] = useState<{ sourceType: string; sourceId: number | null; sourceLabel: string; targetType: string; targetId: number; targetLabel: string } | null>(null);
@@ -399,6 +401,29 @@ export default function GalaxyView({
     }
     dragStartPos.current = null;
 
+    if (ownerMode) {
+      const isCenter = n.kind === "center";
+      const isMember = n.kind === "member" && n.memberId != null;
+      const isPortfolio = n.kind === "portfolio" && n.portfolioKey !== undefined && n.portfolioKey !== "unassigned";
+      const isGoal = n.kind === "goal" && n.goalId != null;
+      if (!ownerSourceNode) {
+        if (isCenter) setOwnerSourceNode({ id: n.id, kind: "center", label: "Moi" });
+        else if (isMember) setOwnerSourceNode({ id: n.id, kind: "member", memberId: n.memberId, label: n.label });
+        return;
+      }
+      const newMemberId = ownerSourceNode.kind === "center" ? null : (ownerSourceNode.memberId as number);
+      if (isPortfolio) {
+        const g = groups.find(gr => gr.key === n.portfolioKey);
+        if (g && g.key !== "unassigned") actions.updatePortfolio(g.key as number, { name: g.portfolio.name, color: g.portfolio.color, memberId: newMemberId });
+      } else if (isGoal) {
+        const goal = goals.find(gg => gg.id === n.goalId);
+        if (goal) actions.updateGoal(goal.id, { name: goal.name, targetAmount: goal.targetAmount, targetDate: goal.targetDate, color: goal.color, memberId: newMemberId });
+      }
+      setOwnerSourceNode(null);
+      setOwnerMode(false);
+      return;
+    }
+
     if (linkMode) {
       const isSalary = n.kind === "salary";
       const isMemberSalary = n.kind === "member-salary" && n.memberId != null;
@@ -630,12 +655,14 @@ export default function GalaxyView({
             { icon: ArrowRight, label: "Flux", mode: "flow" },
             { icon: Users, label: "Membres", mode: "member" },
             { icon: Link2, label: "Liens", mode: "link" },
+            { icon: UserCheck, label: "Propriétaire", mode: "owner" },
             { icon: Sparkles, label: "Modèles", mode: "templates" },
           ].map(({ icon: Icon, label, mode }) => {
-            const active = mode === "link" ? linkMode : createMode === mode;
+            const active = mode === "link" ? linkMode : mode === "owner" ? ownerMode : createMode === mode;
             return <button key={mode} onClick={() => {
-              if (mode === "link") { setSelected(null); setCreateMode(null); setLinkSourceNode(null); setLinkMode(m => !m); }
-              else { setSelected(null); setLinkMode(false); setLinkSourceNode(null); setCreateMode(mode); }
+              if (mode === "link") { setSelected(null); setCreateMode(null); setOwnerMode(false); setOwnerSourceNode(null); setLinkSourceNode(null); setLinkMode(m => !m); }
+              else if (mode === "owner") { setSelected(null); setCreateMode(null); setLinkMode(false); setLinkSourceNode(null); setOwnerSourceNode(null); setOwnerMode(m => !m); }
+              else { setSelected(null); setLinkMode(false); setLinkSourceNode(null); setOwnerMode(false); setOwnerSourceNode(null); setCreateMode(mode); }
             }}
               className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs transition-colors ${active ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text hover:bg-surface-hover"}`}>
               <Icon size={13} className="shrink-0" />{label}
@@ -643,6 +670,9 @@ export default function GalaxyView({
           })}
           {linkMode && <p className="text-[10px] text-accent px-2 pt-1">
             {linkSourceNode ? `Clique la destination (depuis "${linkSourceNode.label}")…` : "Clique la planète source…"}
+          </p>}
+          {ownerMode && <p className="text-[10px] text-accent px-2 pt-1">
+            {ownerSourceNode ? `Clique la planète ou l'objectif à rattacher à "${ownerSourceNode.label}"…` : "Clique Patrimoine (= Moi) ou un membre…"}
           </p>}
         </div>
 
@@ -687,7 +717,7 @@ export default function GalaxyView({
       <div className="relative overflow-hidden" style={{ background: "radial-gradient(ellipse at 30% 20%, rgba(124,106,245,0.16), transparent 45%), radial-gradient(ellipse at 75% 65%, rgba(45,180,190,0.10), transparent 42%), radial-gradient(ellipse at 15% 80%, rgba(200,90,60,0.06), transparent 35%), #06060a" }}>
         <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full h-full select-none touch-none block absolute inset-0"
           onPointerDown={onBgDown} onPointerMove={onBgMove} onPointerUp={onBgUp} onPointerLeave={onBgUp}
-          onClick={() => { if (linkSourceNode) { setLinkSourceNode(null); return; } setSelected(null); setCreateMode(null); }}>
+          onClick={() => { if (linkSourceNode) { setLinkSourceNode(null); return; } if (ownerSourceNode) { setOwnerSourceNode(null); return; } setSelected(null); setCreateMode(null); }}>
           <defs>
             <filter id="gl" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3" /></filter>
             <filter id="glow-strong" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="6" result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
@@ -838,6 +868,9 @@ export default function GalaxyView({
 
             {/* Link mode source highlight */}
             {linkSourceNode && (() => { const tg = nodeById.get(linkSourceNode.id); if (!tg || tg.x == null) return null; return <circle cx={tg.x} cy={tg.y} r={tg.r + 10} fill="none" stroke="#34d399" strokeWidth={2} strokeDasharray="3 4"><animate attributeName="r" values={`${tg.r + 6};${tg.r + 14};${tg.r + 6}`} dur="1s" repeatCount="indefinite" /></circle>; })()}
+
+            {/* Owner mode source highlight */}
+            {ownerSourceNode && (() => { const tg = nodeById.get(ownerSourceNode.id); if (!tg || tg.x == null) return null; return <circle cx={tg.x} cy={tg.y} r={tg.r + 10} fill="none" stroke="#ffcc55" strokeWidth={2} strokeDasharray="3 4"><animate attributeName="r" values={`${tg.r + 6};${tg.r + 14};${tg.r + 6}`} dur="1s" repeatCount="indefinite" /></circle>; })()}
 
             {/* Magnetic snap halo */}
             {snapTarget && (() => { const tg = nodeById.get(snapTarget); if (!tg || tg.x == null) return null; return <g><circle cx={tg.x} cy={tg.y} r={tg.r + 20} fill="none" stroke="#9585ff" strokeOpacity={0.6} strokeWidth={2.5} strokeDasharray="4 3"><animate attributeName="r" values={`${tg.r + 14};${tg.r + 24};${tg.r + 14}`} dur="0.7s" repeatCount="indefinite" /></circle><circle cx={tg.x} cy={tg.y} r={tg.r + 12} fill="rgba(149,133,255,0.06)" /></g>; })()}
