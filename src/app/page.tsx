@@ -7,7 +7,7 @@ import { apiFetch, ApiError } from "@/lib/api";
 import { fetchAllQuotes } from "@/lib/allQuotes";
 
 type Asset = { id: number; name: string; type: string; ticker: string | null; quantity: string | null; avgBuyPrice: string | null; manualValue: string | null; yieldRate: string | null; currency: string; portfolioId: number | null };
-type Portfolio = { id: number; name: string; color: string; memberId: number | null };
+type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null };
 type Goal = { id: number; name: string; targetAmount: string; targetDate: string | null; color: string; memberId: number | null };
 type Loan = { id: number; name: string; remainingBalance: string; principal: string; interestRate: string | null; monthlyPayment: string | null; assetId: number | null; currency: string };
 type Member = { id: number; name: string; role: string; color: string; salary: string | null };
@@ -114,6 +114,8 @@ export default function HomePage() {
           members={members} flows={flows} goalLinks={goalLinks} quotes={quotes} actions={actions}
           salary={Number(settings.monthly_salary) || 0}
           showCountdown={settings.show_payment_countdown !== "false"}
+          ownerName={settings.owner_name || "Moi"}
+          centerColor={settings.center_color || "#ffcc55"}
           onUpdateSalary={updateSalary}
           onRefresh={load}
         />

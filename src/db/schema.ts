@@ -23,6 +23,7 @@ export const portfolios = pgTable("portfolios", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   color: text("color").notNull().default("#8a5cf5"),
+  skin: text("skin"),
   memberId: integer("member_id").references(() => members.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

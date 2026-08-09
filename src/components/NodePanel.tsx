@@ -6,7 +6,7 @@ import { formatMoney } from "@/lib/format";
 import { ASSET_TYPE_LABELS } from "@/lib/networth";
 
 type Asset = { id: number; name: string; type: string; ticker: string | null; quantity: string | null; avgBuyPrice: string | null; manualValue: string | null; yieldRate: string | null; currency: string; portfolioId: number | null };
-type Portfolio = { id: number; name: string; color: string; memberId: number | null };
+type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null };
 type Goal = { id: number; name: string; targetAmount: string; targetDate: string | null; color: string; memberId: number | null };
 type Loan = { id: number; name: string; remainingBalance: string; currency: string; assetId: number | null };
 type Member = { id: number; name: string; role: string; color: string; salary: string | null };
@@ -15,7 +15,7 @@ type GoalLink = { id: number; goalId: number; portfolioId: number };
 
 export type Selection =
   | { kind: "total"; total: number; grossTotal: number; debt: number }
-  | { kind: "portfolio"; id: number | "unassigned"; name: string; color: string; total: number; count: number; memberId: number | null }
+  | { kind: "portfolio"; id: number | "unassigned"; name: string; color: string; skin: string | null; total: number; count: number; memberId: number | null }
   | { kind: "asset"; asset: Asset; value: number; gain: number; gainPct: number; portfolioName: string }
   | { kind: "goal"; goal: Goal; progress: number; linkedPortfolioIds: number[] }
   | { kind: "member"; member: Member; total: number }
@@ -79,17 +79,31 @@ function ColorPick({ value, onChange }: { value: string; onChange: (c: string) =
 }
 
 // ── Portfolio Form ───────────────────────────────────────────────────────────
-function PortfolioForm({ initial, members, onSubmit, onDelete, onCancel }:
-  { initial?: { name: string; color: string; memberId: number | null }; members: Member[]; onSubmit: (d: Record<string, unknown>) => void; onDelete?: () => void; onCancel: () => void }) {
+const SKIN_OPTIONS: { value: string; label: string; preview?: string }[] = [
+  { value: "", label: "Automatique (déduit du nom / des actifs)" },
+  { value: "tech", label: "Tech", preview: "/planet-skins/tech.png" },
+  { value: "ocean", label: "Océan", preview: "/planet-skins/ocean.png" },
+  { value: "terrain", label: "Terrain", preview: "/planet-skins/terrain.png" },
+  { value: "crypto", label: "Crypto", preview: "/planet-skins/crypto.png" },
+  { value: "generic", label: "Autre (couleur unie)" },
+];
+
+function PortfolioForm({ initial, members, ownerName, onSubmit, onDelete, onCancel }:
+  { initial?: { name: string; color: string; skin: string | null; memberId: number | null }; members: Member[]; ownerName: string; onSubmit: (d: Record<string, unknown>) => void; onDelete?: () => void; onCancel: () => void }) {
   const [name, setName] = useState(initial?.name ?? "");
   const [color, setColor] = useState(initial?.color ?? COLORS[0]);
+  const [skin, setSkin] = useState(initial?.skin ?? "");
   const [memberId, setMemberId] = useState(String(initial?.memberId ?? ""));
   return (
-    <form onSubmit={e => { e.preventDefault(); onSubmit({ name, color, memberId: memberId ? Number(memberId) : null }); }} className="space-y-1">
+    <form onSubmit={e => { e.preventDefault(); onSubmit({ name, color, skin: skin || null, memberId: memberId ? Number(memberId) : null }); }} className="space-y-1">
       <p className="text-[10px] text-text-muted uppercase tracking-wide">{initial ? "Planète" : "Nouvelle planète"}</p>
       <Label>Nom</Label><Inp required value={name} onChange={e => setName(e.target.value)} placeholder="PEA, CTO, Salaire…" />
-      {members.length > 0 && <><Label>Membre</Label><Sel value={memberId} onChange={e => setMemberId(e.target.value)}><option value="">Moi</option>{members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</Sel></>}
-      <Label>Couleur</Label><ColorPick value={color} onChange={setColor} />
+      {members.length > 0 && <><Label>Membre</Label><Sel value={memberId} onChange={e => setMemberId(e.target.value)}><option value="">{ownerName}</option>{members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</Sel></>}
+      <Label>Skin</Label>
+      <Sel value={skin} onChange={e => setSkin(e.target.value)}>
+        {SKIN_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </Sel>
+      {(skin === "" || skin === "generic") && <><Label>Couleur</Label><ColorPick value={color} onChange={setColor} /></>}
       <div className="flex gap-2 pt-3">{onDelete && <Btn type="button" variant="danger" onClick={onDelete}><Trash2 size={12} /></Btn>}<Btn type="submit" variant="accent" className="flex-1">{initial ? "Enregistrer" : "Créer"}</Btn><Btn type="button" onClick={onCancel}>Fermer</Btn></div>
     </form>
   );
@@ -123,8 +137,8 @@ function AssetForm({ initial, portfolios, defaultPortfolioId, onSubmit, onDelete
 }
 
 // ── Goal Form ────────────────────────────────────────────────────────────────
-function GoalForm({ initial, progress, members, onSubmit, onDelete, onCancel }:
-  { initial?: Goal; progress?: number; members: Member[]; onSubmit: (d: Record<string, unknown>) => void; onDelete?: () => void; onCancel: () => void }) {
+function GoalForm({ initial, progress, members, ownerName, onSubmit, onDelete, onCancel }:
+  { initial?: Goal; progress?: number; members: Member[]; ownerName: string; onSubmit: (d: Record<string, unknown>) => void; onDelete?: () => void; onCancel: () => void }) {
   const [name, setName] = useState(initial?.name ?? "");
   const [targetAmount, setTA] = useState(initial?.targetAmount ?? "");
   const [color, setColor] = useState(initial?.color ?? COLORS[0]);
@@ -134,7 +148,7 @@ function GoalForm({ initial, progress, members, onSubmit, onDelete, onCancel }:
       <p className="text-[10px] text-text-muted uppercase tracking-wide">{initial ? "Objectif" : "Nouvel objectif"}</p>
       <Label>Nom</Label><Inp required value={name} onChange={e => setName(e.target.value)} placeholder="Vacances…" />
       <Label>Montant cible</Label><Inp required type="number" step="any" value={targetAmount} onChange={e => setTA(e.target.value)} className="tabular" />
-      {members.length > 0 && <><Label>Membre</Label><Sel value={memberId} onChange={e => setMemberId(e.target.value)}><option value="">Moi</option>{members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</Sel></>}
+      {members.length > 0 && <><Label>Membre</Label><Sel value={memberId} onChange={e => setMemberId(e.target.value)}><option value="">{ownerName}</option>{members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</Sel></>}
       <Label>Couleur</Label><ColorPick value={color} onChange={setColor} />
       {progress !== undefined && <div className="mt-2"><div className="h-1.5 rounded-full bg-border overflow-hidden"><div className="h-full rounded-full" style={{ width: `${Math.min(100, progress * 100)}%`, background: color }} /></div><p className="text-[10px] text-text-muted mt-1 tabular">{(progress * 100).toFixed(0)}%</p></div>}
       <div className="flex gap-2 pt-3">{onDelete && <Btn type="button" variant="danger" onClick={onDelete}><Trash2 size={12} /></Btn>}<Btn type="submit" variant="accent" className="flex-1">{initial ? "Enregistrer" : "Créer"}</Btn><Btn type="button" onClick={onCancel}>Fermer</Btn></div>
@@ -257,8 +271,8 @@ function TemplatesPanel({ portfolios, onCreatePortfolio, onCancel }:
 }
 
 // ── Main Panel ───────────────────────────────────────────────────────────────
-export default function NodePanel({ selected, loans, portfolios, members, goals, flows, goalLinks, actions, onClear, createMode, setCreateMode, salary, onUpdateSalary, groups, grossTotal, debt, onPortfolioCreated }:
-  { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; goalLinks: GoalLink[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number; onPortfolioCreated?: (p: Portfolio) => void }) {
+export default function NodePanel({ selected, loans, portfolios, members, goals, flows, goalLinks, actions, onClear, createMode, setCreateMode, salary, onUpdateSalary, groups, grossTotal, debt, onPortfolioCreated, ownerName }:
+  { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; goalLinks: GoalLink[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number; onPortfolioCreated?: (p: Portfolio) => void; ownerName: string }) {
 
   useEffect(() => { setCreateMode(null); }, [selected]); // eslint-disable-line
 
@@ -267,9 +281,9 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
   return (
     <div className="bg-surface/40 border-l border-border p-5 space-y-3 overflow-y-auto">
 
-      {createMode === "portfolio" && <PortfolioForm members={members} onSubmit={async d => { const p = await actions.createPortfolio(d); setCreateMode(null); if (onPortfolioCreated) onPortfolioCreated(p); else onClear(); }} onCancel={clear} />}
+      {createMode === "portfolio" && <PortfolioForm members={members} ownerName={ownerName} onSubmit={async d => { const p = await actions.createPortfolio(d); setCreateMode(null); if (onPortfolioCreated) onPortfolioCreated(p); else onClear(); }} onCancel={clear} />}
       {createMode === "asset" && <AssetForm portfolios={portfolios} defaultPortfolioId={selected?.kind === "portfolio" && selected.id !== "unassigned" ? selected.id as number : undefined} onSubmit={async d => { await actions.createAsset(d); clear(); }} onCancel={clear} />}
-      {createMode === "goal" && <GoalForm members={members} onSubmit={async d => { await actions.createGoal(d); clear(); }} onCancel={clear} />}
+      {createMode === "goal" && <GoalForm members={members} ownerName={ownerName} onSubmit={async d => { await actions.createGoal(d); clear(); }} onCancel={clear} />}
       {createMode === "flow" && <FlowForm portfolios={portfolios} goals={goals} members={members} onSubmit={async d => { await actions.createFlow(d); clear(); }} onCancel={clear} />}
       {createMode === "expense" && <FlowForm portfolios={portfolios} goals={goals} members={members} defaultTargetType="expense" onSubmit={async d => { await actions.createFlow(d); clear(); }} onCancel={clear} />}
       {createMode === "income" && <FlowForm portfolios={portfolios} goals={goals} members={members} defaultTargetType="income" onSubmit={async d => { await actions.createFlow(d); clear(); }} onCancel={clear} />}
@@ -385,7 +399,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
           </div>
 
           {/* Edit form (hidden by default) */}
-          {createMode === "edit-portfolio" && <PortfolioForm initial={{ name: selected.name, color: selected.color, memberId: selected.memberId }} members={members}
+          {createMode === "edit-portfolio" && <PortfolioForm initial={{ name: selected.name, color: selected.color, skin: selected.skin, memberId: selected.memberId }} members={members} ownerName={ownerName}
             onSubmit={async d => { await actions.updatePortfolio(selected.id as number, d); clear(); }}
             onDelete={async () => {
               if (!confirm(`Supprimer "${selected.name}" ?`)) return;
@@ -459,7 +473,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
 
       {!createMode && selected?.kind === "goal" && (
         <div className="space-y-3">
-          <GoalForm initial={selected.goal} progress={selected.progress} members={members}
+          <GoalForm initial={selected.goal} progress={selected.progress} members={members} ownerName={ownerName}
             onSubmit={async d => { await actions.updateGoal(selected.goal.id, d); clear(); }}
             onDelete={async () => { if (!confirm(`Supprimer "${selected.goal.name}" ?`)) return; await actions.deleteGoal(selected.goal.id); clear(); }}
             onCancel={clear} />

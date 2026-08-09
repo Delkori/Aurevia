@@ -86,6 +86,33 @@ export default function SettingsPage() {
               className="w-full mt-1 bg-bg border border-border rounded-md px-3 py-2 text-sm tabular"
             />
           </div>
+          <div>
+            <label className="text-xs text-text-muted">Ton prénom (remplace &quot;Moi&quot; dans la galaxie)</label>
+            <input
+              type="text"
+              value={settings.owner_name || ""}
+              onChange={(e) => setSettings({ ...settings, owner_name: e.target.value })}
+              placeholder="Moi"
+              className="w-full mt-1 bg-bg border border-border rounded-md px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-text-muted">Couleur de la planète Patrimoine</label>
+            <div className="flex items-center gap-2 mt-1">
+              <input
+                type="color"
+                value={settings.center_color || "#ffcc55"}
+                onChange={(e) => setSettings({ ...settings, center_color: e.target.value })}
+                className="w-10 h-9 bg-bg border border-border rounded-md cursor-pointer"
+              />
+              <input
+                type="text"
+                value={settings.center_color || "#ffcc55"}
+                onChange={(e) => setSettings({ ...settings, center_color: e.target.value })}
+                className="flex-1 bg-bg border border-border rounded-md px-3 py-2 text-sm tabular"
+              />
+            </div>
+          </div>
         </div>
 
         <label className="flex items-center gap-2 text-sm cursor-pointer">

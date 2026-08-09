@@ -14,7 +14,7 @@ import { daysUntilNextOccurrence } from "@/lib/dates";
 import NodePanel, { type Selection, type Actions } from "@/components/NodePanel";
 
 type Asset = { id: number; name: string; type: string; ticker: string | null; quantity: string | null; avgBuyPrice: string | null; manualValue: string | null; yieldRate: string | null; currency: string; portfolioId: number | null };
-type Portfolio = { id: number; name: string; color: string; memberId: number | null };
+type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null };
 type Goal = { id: number; name: string; targetAmount: string; targetDate: string | null; color: string; memberId: number | null };
 type Loan = { id: number; name: string; remainingBalance: string; currency: string; assetId: number | null };
 type Member = { id: number; name: string; role: string; color: string; salary: string | null };
@@ -24,6 +24,20 @@ type Quote = { price: number; currency: string } | null;
 
 const W = 1200, H = 800, CX = W / 2, CY = H / 2, CENTER_R = 32;
 function sr(v: number, mx: number, mn: number, mxx: number) { return mx <= 0 ? mn : mn + (mxx - mn) * Math.sqrt(Math.max(0, Math.min(1, v / mx))); }
+
+// Lightens (positive percent) or darkens (negative) a hex color, for building a
+// gradient from a single user-picked base color instead of fixed stops.
+function shade(hex: string, percent: number): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex);
+  if (!m) return hex;
+  const num = parseInt(m[1], 16);
+  const clamp = (v: number) => Math.max(0, Math.min(255, v));
+  const t = percent < 0 ? 0 : 255, p = Math.abs(percent);
+  const r = clamp(Math.round(((num >> 16) & 0xff) * (1 - p) + t * p));
+  const g = clamp(Math.round(((num >> 8) & 0xff) * (1 - p) + t * p));
+  const b = clamp(Math.round((num & 0xff) * (1 - p) + t * p));
+  return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+}
 
 function hashSeed(a: string, b: string) { let h = 0; for (const c of a + b) h = (h * 31 + c.charCodeAt(0)) | 0; return h; }
 function curveControl(s: { x: number; y: number }, tg: { x: number; y: number }, seed: number) {
@@ -101,7 +115,9 @@ function skinFromName(name: string): PlanetSkin | null {
   for (const [re, skin] of NAME_SKIN_KEYWORDS) if (re.test(n)) return skin;
   return null;
 }
-function planetSkin(name: string, valued: { asset: { type: string }; value: number }[]): PlanetSkin {
+const EXPLICIT_SKINS = new Set<PlanetSkin>(["tech", "ocean", "terrain", "crypto", "generic"]);
+function planetSkin(name: string, valued: { asset: { type: string }; value: number }[], explicitSkin?: string | null): PlanetSkin {
+  if (explicitSkin && EXPLICIT_SKINS.has(explicitSkin as PlanetSkin)) return explicitSkin as PlanetSkin;
   return skinFromName(name) ?? dominantAssetSkin(valued);
 }
 
@@ -132,11 +148,12 @@ const STARS = Array.from({ length: 180 }, (_, i) => ({
 }));
 
 export default function GalaxyView({
-  assets, portfolios, goals, loans, members, flows, goalLinks, quotes, actions, salary, onUpdateSalary, onRefresh, showCountdown,
+  assets, portfolios, goals, loans, members, flows, goalLinks, quotes, actions, salary, onUpdateSalary, onRefresh, showCountdown, ownerName, centerColor,
 }: {
   assets: Asset[]; portfolios: Portfolio[]; goals: Goal[]; loans: Loan[];
   members: Member[]; flows: Flow[]; goalLinks: GoalLink[]; quotes: Record<string, Quote>;
   actions: Actions; salary: number; onUpdateSalary: (v: number) => Promise<void>; onRefresh: () => void; showCountdown: boolean;
+  ownerName: string; centerColor: string;
 }) {
   const [expanded, setExpanded] = useState<Set<number | "unassigned">>(new Set());
   const [selected, setSelected] = useState<Selection>(null);
@@ -165,7 +182,7 @@ export default function GalaxyView({
     for (const a of assets) { const k = a.portfolioId ?? "unassigned"; if (!byP.has(k)) byP.set(k, []); byP.get(k)!.push(a); }
     for (const p of portfolios) { if (!byP.has(p.id)) byP.set(p.id, []); } // keep empty planets visible
     return [...byP.entries()].map(([key, list]) => {
-      const p = key === "unassigned" ? { id: "unassigned" as const, name: "Sans portefeuille", color: "#6b6b72", memberId: null } : portfolios.find(p => p.id === key) ?? { id: key, name: "?", color: "#6b6b72", memberId: null };
+      const p = key === "unassigned" ? { id: "unassigned" as const, name: "Sans portefeuille", color: "#6b6b72", skin: null, memberId: null } : portfolios.find(p => p.id === key) ?? { id: key, name: "?", color: "#6b6b72", skin: null, memberId: null };
       const valued = list.map(a => ({ asset: a, value: currentValue(a, a.ticker ? quotes[a.ticker] : null) }));
       return { key, portfolio: p, valued, total: valued.reduce((s, v) => s + v.value, 0) };
     }).sort((a, b) => b.total - a.total);
@@ -239,7 +256,7 @@ export default function GalaxyView({
       const pid = `p-${g.key}`;
       const memberNode = g.portfolio.memberId ? `m-${g.portfolio.memberId}` : null;
       const totalGain = g.valued.reduce((s, v) => { const a = v.asset; return s + ((a.avgBuyPrice && Number(a.avgBuyPrice) > 0) ? gain(a, a.ticker ? quotes[a.ticker] : null) : 0); }, 0);
-      const skin = planetSkin(g.portfolio.name, g.valued);
+      const skin = planetSkin(g.portfolio.name, g.valued, g.portfolio.skin);
       nodes.push({ id: pid, kind: "portfolio", label: g.portfolio.name, r: sr(g.total, maxPV, 20, 78), color: g.portfolio.color, portfolioKey: g.key, gainVal: totalGain, sub: formatMoney(g.total), skin });
       links.push({ source: memberNode ?? "center", target: pid });
       if (expanded.has(g.key)) {
@@ -412,14 +429,14 @@ export default function GalaxyView({
       const isPortfolio = n.kind === "portfolio" && n.portfolioKey !== undefined && n.portfolioKey !== "unassigned";
       const isGoal = n.kind === "goal" && n.goalId != null;
       if (!ownerSourceNode) {
-        if (isCenter) setOwnerSourceNode({ id: n.id, kind: "center", label: "Moi" });
+        if (isCenter) setOwnerSourceNode({ id: n.id, kind: "center", label: ownerName });
         else if (isMember) setOwnerSourceNode({ id: n.id, kind: "member", memberId: n.memberId, label: n.label });
         return;
       }
       const newMemberId = ownerSourceNode.kind === "center" ? null : (ownerSourceNode.memberId as number);
       if (isPortfolio) {
         const g = groups.find(gr => gr.key === n.portfolioKey);
-        if (g && g.key !== "unassigned") actions.updatePortfolio(g.key as number, { name: g.portfolio.name, color: g.portfolio.color, memberId: newMemberId });
+        if (g && g.key !== "unassigned") actions.updatePortfolio(g.key as number, { name: g.portfolio.name, color: g.portfolio.color, skin: g.portfolio.skin, memberId: newMemberId });
       } else if (isGoal) {
         const goal = goals.find(gg => gg.id === n.goalId);
         if (goal) actions.updateGoal(goal.id, { name: goal.name, targetAmount: goal.targetAmount, targetDate: goal.targetDate, color: goal.color, memberId: newMemberId });
@@ -460,7 +477,7 @@ export default function GalaxyView({
     else if (n.kind === "portfolio" && n.portfolioKey !== undefined) {
       const g = groups.find(gr => gr.key === n.portfolioKey)!;
       toggle(n.portfolioKey);
-      setSelected({ kind: "portfolio", id: n.portfolioKey, name: g.portfolio.name, color: g.portfolio.color, total: g.total, count: g.valued.length, memberId: g.portfolio.memberId });
+      setSelected({ kind: "portfolio", id: n.portfolioKey, name: g.portfolio.name, color: g.portfolio.color, skin: g.portfolio.skin, total: g.total, count: g.valued.length, memberId: g.portfolio.memberId });
     }
     else if (n.kind === "asset" && n.assetId != null) {
       const g = groups.find(gr => gr.key === n.portfolioKey)!;
@@ -586,7 +603,7 @@ export default function GalaxyView({
   const structureScore = (() => {
     if (grossTotal <= 0) return null;
     const savingsPart = totalRevenue > 0 ? Math.min(25, Math.max(0, tauxEpargne / 40 * 25)) : 12.5;
-    const skins = new Set(groups.filter(g => g.total > 0).map(g => planetSkin(g.portfolio.name, g.valued)));
+    const skins = new Set(groups.filter(g => g.total > 0).map(g => planetSkin(g.portfolio.name, g.valued, g.portfolio.skin)));
     const diversificationPart = Math.min(25, skins.size * 6);
     const debtRatio = grossTotal > 0 ? debt / grossTotal : 0;
     const debtPart = Math.max(0, 25 - debtRatio * 100 / 4);
@@ -732,8 +749,8 @@ export default function GalaxyView({
             <filter id="clouds" x="0%" y="0%" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency="0.025 0.04" numOctaves="3" seed="42" result="t"><animate attributeName="seed" values="42;44;42" dur="8s" repeatCount="indefinite" /></feTurbulence><feComponentTransfer in="t" result="tc"><feFuncA type="discrete" tableValues="0 0 0 0 0.1 0.25 0.35" /></feComponentTransfer><feColorMatrix in="tc" type="matrix" values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.5 0" result="c" /><feComposite in="c" in2="SourceGraphic" operator="atop" /></filter>
             <filter id="circuits" x="-10%" y="-10%" width="120%" height="120%"><feTurbulence type="turbulence" baseFrequency="0.08" numOctaves="2" seed="99" /><feColorMatrix type="luminanceToAlpha" /><feComponentTransfer><feFuncA type="discrete" tableValues="0 0 0.15 0.55 0.9" /></feComponentTransfer><feFlood floodColor="#5cfff0" floodOpacity="1" result="c" /><feComposite in="c" operator="in" /><feComposite in2="SourceGraphic" /></filter>
 
-            <radialGradient id="sph-center" cx="35%" cy="28%" r="65%"><stop offset="0%" stopColor="#fff4cc" /><stop offset="15%" stopColor="#ffe88a" /><stop offset="35%" stopColor="#e0a830" /><stop offset="60%" stopColor="#c07018" /><stop offset="100%" stopColor="#3a1800" /></radialGradient>
-            <radialGradient id="glow-center" cx="50%" cy="50%" r="50%"><stop offset="0%" stopColor="#ffe8a0" stopOpacity="0.3" /><stop offset="60%" stopColor="#ff8c00" stopOpacity="0.08" /><stop offset="100%" stopColor="#ff8c00" stopOpacity="0" /></radialGradient>
+            <radialGradient id="sph-center" cx="35%" cy="28%" r="65%"><stop offset="0%" stopColor={shade(centerColor, 0.85)} /><stop offset="15%" stopColor={shade(centerColor, 0.45)} /><stop offset="35%" stopColor={centerColor} /><stop offset="60%" stopColor={shade(centerColor, -0.35)} /><stop offset="100%" stopColor={shade(centerColor, -0.8)} /></radialGradient>
+            <radialGradient id="glow-center" cx="50%" cy="50%" r="50%"><stop offset="0%" stopColor={shade(centerColor, 0.4)} stopOpacity="0.3" /><stop offset="60%" stopColor={centerColor} stopOpacity="0.08" /><stop offset="100%" stopColor={centerColor} stopOpacity="0" /></radialGradient>
             <radialGradient id="sph-salary" cx="38%" cy="28%" r="60%"><stop offset="0%" stopColor="#a8f0b0" /><stop offset="20%" stopColor="#5ec06a" /><stop offset="40%" stopColor="#2a8040" /><stop offset="60%" stopColor="#1c6535" /><stop offset="80%" stopColor="#0e4020" /><stop offset="100%" stopColor="#082810" /></radialGradient>
             <radialGradient id="salary-land" cx="55%" cy="45%" r="35%"><stop offset="0%" stopColor="#8b6a3a" stopOpacity="0.4" /><stop offset="100%" stopColor="#8b6a3a" stopOpacity="0" /></radialGradient>
             <radialGradient id="sph-expenses" cx="38%" cy="28%" r="60%"><stop offset="0%" stopColor="#ff9090" /><stop offset="25%" stopColor="#d04040" /><stop offset="50%" stopColor="#8a1515" /><stop offset="75%" stopColor="#4a0808" /><stop offset="100%" stopColor="#200303" /></radialGradient>
@@ -854,7 +871,7 @@ export default function GalaxyView({
               const seed = hashSeed(s.id, tg.id), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
               const sp = 5 + (s.id.charCodeAt(0) % 4), p = (t / sp) % 1;
               const pt = bezierPoint({ x: from.x!, y: from.y! }, c, { x: to.x!, y: to.y! }, p);
-              const dotColor = isOwnershipLink ? (s.kind === "center" ? "#ffcc55" : s.color) : tg.color;
+              const dotColor = isOwnershipLink ? (s.kind === "center" ? centerColor : s.color) : tg.color;
               return <circle key={`dot-${s.id}-${tg.id}`} cx={pt.x} cy={pt.y} r={isOwnershipLink ? 2.6 : 2} fill={dotColor} opacity={isOwnershipLink ? 0.75 : 0.5} filter="url(#gl)" />;
             })}
 
@@ -875,7 +892,7 @@ export default function GalaxyView({
             {linkSourceNode && (() => { const tg = nodeById.get(linkSourceNode.id); if (!tg || tg.x == null) return null; return <circle cx={tg.x} cy={tg.y} r={tg.r + 10} fill="none" stroke="#34d399" strokeWidth={2} strokeDasharray="3 4"><animate attributeName="r" values={`${tg.r + 6};${tg.r + 14};${tg.r + 6}`} dur="1s" repeatCount="indefinite" /></circle>; })()}
 
             {/* Owner mode source highlight */}
-            {ownerSourceNode && (() => { const tg = nodeById.get(ownerSourceNode.id); if (!tg || tg.x == null) return null; return <circle cx={tg.x} cy={tg.y} r={tg.r + 10} fill="none" stroke="#ffcc55" strokeWidth={2} strokeDasharray="3 4"><animate attributeName="r" values={`${tg.r + 6};${tg.r + 14};${tg.r + 6}`} dur="1s" repeatCount="indefinite" /></circle>; })()}
+            {ownerSourceNode && (() => { const tg = nodeById.get(ownerSourceNode.id); if (!tg || tg.x == null) return null; return <circle cx={tg.x} cy={tg.y} r={tg.r + 10} fill="none" stroke={centerColor} strokeWidth={2} strokeDasharray="3 4"><animate attributeName="r" values={`${tg.r + 6};${tg.r + 14};${tg.r + 6}`} dur="1s" repeatCount="indefinite" /></circle>; })()}
 
             {/* Magnetic snap halo */}
             {snapTarget && (() => { const tg = nodeById.get(snapTarget); if (!tg || tg.x == null) return null; return <g><circle cx={tg.x} cy={tg.y} r={tg.r + 20} fill="none" stroke="#9585ff" strokeOpacity={0.6} strokeWidth={2.5} strokeDasharray="4 3"><animate attributeName="r" values={`${tg.r + 14};${tg.r + 24};${tg.r + 14}`} dur="0.7s" repeatCount="indefinite" /></circle><circle cx={tg.x} cy={tg.y} r={tg.r + 12} fill="rgba(149,133,255,0.06)" /></g>; })()}
@@ -1181,7 +1198,7 @@ export default function GalaxyView({
               const isOwnershipLink = (s.kind === "member" || s.kind === "center") && (tg.kind === "portfolio" || tg.kind === "goal" || tg.kind === "member" || tg.kind === "member-salary");
               if (!isOwnershipLink) return null;
               const seed = hashSeed(s.id, tg.id), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
-              const ownerColor = s.kind === "center" ? "#ffcc55" : s.color;
+              const ownerColor = s.kind === "center" ? centerColor : s.color;
               const isHovered = hoveredId === s.id || hoveredId === tg.id;
               const d = `M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`;
               const dash = tg.kind === "goal" ? "1 6" : "1.5 4.5";
@@ -1220,8 +1237,8 @@ export default function GalaxyView({
       </div>
 
       {/* ── PANEL ── */}
-      <NodePanel selected={selected} loans={loans} portfolios={portfolios} members={members} goals={goals} flows={flows} goalLinks={goalLinks} actions={actions} onClear={() => setSelected(null)} createMode={createMode} setCreateMode={setCreateMode} salary={salary} onUpdateSalary={onUpdateSalary} groups={groups.map(g => ({ key: g.key, total: g.total, valued: g.valued }))} grossTotal={grossTotal} debt={debt}
-        onPortfolioCreated={p => setSelected({ kind: "portfolio", id: p.id, name: p.name, color: p.color, total: 0, count: 0, memberId: p.memberId })} />
+      <NodePanel selected={selected} loans={loans} portfolios={portfolios} members={members} goals={goals} flows={flows} goalLinks={goalLinks} actions={actions} onClear={() => setSelected(null)} createMode={createMode} setCreateMode={setCreateMode} salary={salary} onUpdateSalary={onUpdateSalary} groups={groups.map(g => ({ key: g.key, total: g.total, valued: g.valued }))} grossTotal={grossTotal} debt={debt} ownerName={ownerName}
+        onPortfolioCreated={p => setSelected({ kind: "portfolio", id: p.id, name: p.name, color: p.color, skin: p.skin, total: 0, count: 0, memberId: p.memberId })} />
     </div>
   );
 }

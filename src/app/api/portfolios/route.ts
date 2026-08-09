@@ -29,6 +29,7 @@ export async function POST(req: NextRequest) {
       .values({
         name: body.name,
         color: body.color || "#8a5cf5",
+        skin: body.skin || null,
         memberId: body.memberId || null,
       })
       .returning();
