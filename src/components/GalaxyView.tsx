@@ -301,11 +301,18 @@ export default function GalaxyView({
         .alphaDecay(0.018).on("tick", () => setTick(n => n + 1));
     } else simRef.current.nodes(nodes);
 
-    simRef.current.force("link", forceLink<GNode, GLink>(links).id(d => d.id).distance(l => {
+    // d3's forceLink() mutates each link object in place, replacing .source/.target
+    // (our plain string ids) with the actual resolved node objects once the simulation
+    // initializes — permanently, on the same object. Since `links`/`goalLinkEdges` are the
+    // very same arrays used for rendering (which assume .source/.target stay strings for
+    // nodeById.get() lookups), every link would render fine for one frame and then silently
+    // disappear the instant the simulation ticked and mutated them. Pass shallow clones so
+    // d3 mutates its own copies and our render-time arrays keep their string ids forever.
+    simRef.current.force("link", forceLink<GNode, GLink>(links.map(l => ({ ...l }))).id(d => d.id).distance(l => {
       const tgt = typeof l.target === "object" ? l.target : nm.get(l.target as unknown as string);
       return tgt?.kind === "expense-item" || tgt?.kind === "income-item" ? 45 : tgt?.kind === "asset" ? 65 : tgt?.kind === "member" ? 130 : 180;
     }).strength(0.3));
-    simRef.current.force("goalLink", forceLink<GNode, GLink>(goalLinkEdges).id(d => d.id).distance(160).strength(0.08));
+    simRef.current.force("goalLink", forceLink<GNode, GLink>(goalLinkEdges.map(l => ({ ...l }))).id(d => d.id).distance(160).strength(0.08));
     simRef.current.alpha(0.7).restart();
   }, [targetNodes, links, goalLinkEdges]);
 
