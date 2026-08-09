@@ -288,7 +288,7 @@ export default function GalaxyView({
     });
     nodesMapRef.current = new Map(nodes.map(n => [n.id, n]));
     const nm = nodesMapRef.current;
-    const c = nm.get("center"); if (c) { c.fx = CX; c.fy = CY; }
+    const c = nm.get("center"); if (c && !getNodePosition("center")) { c.fx = CX; c.fy = CY; }
     const s = nm.get("salary"); if (s && !getNodePosition("salary")) { s.fx = CX; s.fy = 80; }
     const e = nm.get("expenses"); if (e && !getNodePosition("expenses")) { e.fx = CX + 350; e.fy = 180; }
 
@@ -392,8 +392,6 @@ export default function GalaxyView({
   const toggle = (key: number | "unassigned") => setExpanded(prev => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n; });
 
   const onNodeDown = (id: string) => (e: React.PointerEvent) => {
-    const fixed = ["center", "expenses"];
-    if (fixed.includes(id) && !getNodePosition(id)) return;
     e.stopPropagation();
     dragStartPos.current = { x: e.clientX, y: e.clientY };
     setDragId(id);
@@ -1160,9 +1158,13 @@ export default function GalaxyView({
                 })()}
 
                 {n.kind === "member-salary" && <>
+                  <clipPath id={`cp-${n.id}`}><circle r={n.r} /></clipPath>
                   <circle r={n.r + 3} fill="none" stroke="rgba(100,255,150,0.08)" />
-                  <circle r={n.r} fill="url(#sph-salary)" />
+                  {SALARY_IMAGE ? (
+                    <g clipPath={`url(#cp-${n.id})`}><image href={SALARY_IMAGE} x={-n.r} y={-n.r} width={n.r * 2} height={n.r * 2} preserveAspectRatio="xMidYMid slice" /></g>
+                  ) : <circle r={n.r} fill="url(#sph-salary)" />}
                   <circle r={n.r} fill="url(#sph-hl)" />
+                  {SALARY_IMAGE && <rect x={-n.r * 0.95} y={-15} width={n.r * 1.9} height={27} rx={5} fill="rgba(6,6,10,0.55)" />}
                   <text y={-4} textAnchor="middle" fontSize={9} fontWeight={600} fill="#fff" style={ts}>Salaire</text>
                   <text y={9} textAnchor="middle" fontSize={8} fill="rgba(255,255,255,0.85)" style={ts}>{n.sub}/mois</text>
                 </>}
