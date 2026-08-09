@@ -1264,27 +1264,29 @@ export default function GalaxyView({
 
       {/* ── PANEL ── */}
       <div className="grid" style={{ gridTemplateRows: "44px 1fr" }}>
-        <div className="border-l border-b border-border bg-surface/40 flex items-center justify-end gap-3 px-4 relative">
-          <button title="Notifications" className="text-text-muted hover:text-text">
+        <div className="border-l border-b border-border bg-surface/40 flex items-center justify-end gap-2 pl-4 pr-5 min-w-0">
+          <button title="Notifications" className="shrink-0 text-text-muted hover:text-text">
             <Bell size={16} />
           </button>
-          <div className="w-px h-5 bg-border" />
-          <button title="Alertes" onClick={() => setAlertsOpen(o => !o)} className={`relative ${alerts.length > 0 ? "text-negative" : "text-text-muted"} hover:text-text`}>
-            <AlertTriangle size={16} />
-            {alerts.length > 0 && <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-negative" />}
-          </button>
-          {alertsOpen && (
-            <div className="absolute right-4 top-11 z-10 w-72 bg-surface border border-border rounded-lg shadow-xl p-3 space-y-1.5">
-              {alerts.length === 0 ? (
-                <p className="text-xs text-text-muted">Aucune alerte.</p>
-              ) : alerts.map(a => (
-                <div key={a.id} className="flex items-start gap-1.5 text-[11px] text-negative bg-negative/10 border border-negative/30 rounded-md px-2 py-1.5">
-                  <AlertTriangle size={12} className="shrink-0 mt-0.5" />
-                  <span>{a.text}</span>
-                </div>
-              ))}
-            </div>
-          )}
+          <div className="w-px h-5 bg-border shrink-0" />
+          <div className="relative shrink-0">
+            <button title="Alertes" onClick={() => setAlertsOpen(o => !o)} className={`relative block ${alerts.length > 0 ? "text-negative" : "text-text-muted"} hover:text-text`}>
+              <AlertTriangle size={16} />
+              {alerts.length > 0 && <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-negative" />}
+            </button>
+            {alertsOpen && (
+              <div className="absolute right-0 top-8 z-10 w-72 max-w-[90vw] bg-surface border border-border rounded-lg shadow-xl p-3 space-y-1.5">
+                {alerts.length === 0 ? (
+                  <p className="text-xs text-text-muted">Aucune alerte.</p>
+                ) : alerts.map(a => (
+                  <div key={a.id} className="flex items-start gap-1.5 text-[11px] text-negative bg-negative/10 border border-negative/30 rounded-md px-2 py-1.5">
+                    <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+                    <span>{a.text}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
         <div className="min-h-0">
           <NodePanel selected={selected} loans={loans} portfolios={portfolios} members={members} goals={goals} flows={flows} goalLinks={goalLinks} actions={actions} onClear={() => setSelected(null)} createMode={createMode} setCreateMode={setCreateMode} salary={salary} onUpdateSalary={onUpdateSalary} groups={groups.map(g => ({ key: g.key, total: g.total, valued: g.valued }))} grossTotal={grossTotal} debt={debt} ownerName={ownerName}
