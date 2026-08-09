@@ -5,7 +5,7 @@ import {
   forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY,
   type Simulation, type SimulationNodeDatum,
 } from "d3-force";
-import { FolderPlus, Plus, PlusCircle, Star, ArrowRight, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, Sparkles } from "lucide-react";
+import { FolderPlus, Plus, PlusCircle, Star, ArrowRight, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, Sparkles, AlertTriangle } from "lucide-react";
 import { formatMoney } from "@/lib/format";
 import { currentValue, gain, gainPercent, totalDebt } from "@/lib/networth";
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
@@ -183,7 +183,7 @@ export default function GalaxyView({
   }, [goalLinks, groups]);
 
   // Build graph
-  const { targetNodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows, totalRevenue } = useMemo(() => {
+  const { targetNodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows, totalRevenue, totalInvest } = useMemo(() => {
     const nodes: GNode[] = [];
     const links: GLink[] = [];
     const flowLinks: { source: string; target: string; label: string; amount: number; days?: number; isSalarySource?: boolean }[] = [];
@@ -271,7 +271,7 @@ export default function GalaxyView({
         flowLinks.push({ source: sId, target: tId, label: formatMoney(Number(f.amount)), amount: Number(f.amount), days: daysUntilNextOccurrence(f.createdAt, f.frequency), isSalarySource: f.sourceType === "salary" || f.sourceType === "member_salary" });
     });
 
-    return { targetNodes: nodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows, totalRevenue };
+    return { targetNodes: nodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows, totalRevenue, totalInvest };
   }, [groups, maxPV, expanded, goals, maxGT, members, portfolios, flows, quotes, salary, goalLinks, goalProgress]);
 
   // Simulation
@@ -565,6 +565,15 @@ export default function GalaxyView({
     return Math.round(savingsPart + diversificationPart + debtPart + concentrationPart);
   })();
 
+  // Alertes de trajectoire : purement factuelles (écart en €), aucun conseil d'investissement.
+  const alerts: { id: string; text: string }[] = [];
+  if (totalRevenue > 0 && totalExpenseFlows > totalRevenue) {
+    alerts.push({ id: "exp", text: `Dépenses (${formatMoney(totalExpenseFlows)}) supérieures aux revenus (${formatMoney(totalRevenue)}) : ${formatMoney(totalExpenseFlows - totalRevenue)}/mois de déficit.` });
+  }
+  if (totalRevenue > 0 && totalInvest > totalRevenue) {
+    alerts.push({ id: "inv", text: `Investissements programmés (${formatMoney(totalInvest)}) supérieurs aux revenus (${formatMoney(totalRevenue)}) : ${formatMoney(totalInvest - totalRevenue)}/mois au-delà de ce qui rentre.` });
+  }
+
   return (
     <div className="grid h-full" style={{ gridTemplateColumns: "160px 1fr 280px" }}>
       {/* ── LEFT MENU ── */}
@@ -598,6 +607,16 @@ export default function GalaxyView({
               <div className="h-1 rounded bg-bg mt-1 overflow-hidden">
                 <div className="h-full rounded" style={{ width: `${structureScore}%`, background: structureScore >= 70 ? "#34d399" : structureScore >= 45 ? "#7c6af5" : "#f87171" }} />
               </div>
+            </div>
+          )}
+          {alerts.length > 0 && (
+            <div className="pt-1.5 space-y-1">
+              {alerts.map(a => (
+                <div key={a.id} className="flex items-start gap-1.5 text-[10px] text-negative bg-negative/10 border border-negative/30 rounded-md px-1.5 py-1">
+                  <AlertTriangle size={11} className="shrink-0 mt-0.5" />
+                  <span>{a.text}</span>
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -752,7 +771,16 @@ export default function GalaxyView({
               if (isOwnershipLink) {
                 const ownerColor = s.kind === "center" ? "#ffcc55" : s.color;
                 const isHovered = hoveredId === s.id || hoveredId === tg.id;
-                return <path key={`ln-${s.id}-${tg.id}`} d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke={ownerColor} strokeOpacity={isHovered ? 0.95 : 0.6} strokeWidth={isHovered ? 3 : 2.2} strokeDasharray={tg.kind === "goal" ? "5 4" : undefined} filter={isHovered ? "url(#glow-strong)" : "url(#gl)"} />;
+                const d = `M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`;
+                const dash = tg.kind === "goal" ? "5 4" : undefined;
+                // filter="url(#gl)" is a pure feGaussianBlur with no feMerge back to SourceGraphic —
+                // it replaces the line with a diffuse smear instead of glowing a crisp line, which made
+                // every ownership link nearly invisible at rest. Layer a real (unfiltered) line on top
+                // of an optional soft glow instead of relying on that filter.
+                return <g key={`ln-${s.id}-${tg.id}`}>
+                  {isHovered && <path d={d} fill="none" stroke={ownerColor} strokeOpacity={0.5} strokeWidth={7} strokeDasharray={dash} filter="url(#gl)" />}
+                  <path d={d} fill="none" stroke={ownerColor} strokeOpacity={isHovered ? 1 : 0.75} strokeWidth={isHovered ? 3 : 2.2} strokeDasharray={dash} />
+                </g>;
               }
               const isItemNode = tg.kind === "expense-item" || tg.kind === "income-item";
               return <path key={`ln-${s.id}-${tg.id}`} d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke={tg.color} strokeOpacity={isItemNode ? 0.1 : 0.22} strokeWidth={isItemNode ? 0.5 : 1} strokeDasharray={tg.kind === "goal" ? "4 5" : undefined} />;
