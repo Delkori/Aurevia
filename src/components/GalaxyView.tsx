@@ -65,13 +65,14 @@ function bezierPoint(s: { x: number; y: number }, c: { x: number; y: number }, t
   return { x, y, angle: Math.atan2(dy, dx) * 180 / Math.PI };
 }
 
-type PlanetSkin = "tech" | "crypto" | "terrain" | "ocean" | "chalet" | "generic" | "empty";
+type PlanetSkin = "tech" | "crypto" | "terrain" | "ocean" | "chalet" | "vacances" | "generic" | "empty";
 const SKIN_IMAGE_TIERS: Partial<Record<PlanetSkin, string[]>> = {
   tech: ["/planet-skins/tech-1.png", "/planet-skins/tech-2.png", "/planet-skins/tech-3.png"],
   terrain: ["/planet-skins/terrain-1.png", "/planet-skins/terrain-2.png", "/planet-skins/terrain-3.png"],
   ocean: ["/planet-skins/ocean.png"],
   crypto: ["/planet-skins/crypto.png"],
   chalet: ["/planet-skins/chalet.png"],
+  vacances: ["/planet-skins/vacances.png"],
 };
 function tierIndex(value: number, max: number, tiers: number) {
   if (max <= 0) return 0;
@@ -141,7 +142,7 @@ function skinFromName(name: string): PlanetSkin | null {
   for (const [re, skin] of NAME_SKIN_KEYWORDS) if (re.test(n)) return skin;
   return null;
 }
-const EXPLICIT_SKINS = new Set<PlanetSkin>(["tech", "ocean", "terrain", "crypto", "chalet", "generic"]);
+const EXPLICIT_SKINS = new Set<PlanetSkin>(["tech", "ocean", "terrain", "crypto", "chalet", "vacances", "generic"]);
 function planetSkin(name: string, valued: { asset: { type: string }; value: number }[], explicitSkin?: string | null): PlanetSkin {
   if (explicitSkin && EXPLICIT_SKINS.has(explicitSkin as PlanetSkin)) return explicitSkin as PlanetSkin;
   return skinFromName(name) ?? dominantAssetSkin(valued);

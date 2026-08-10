@@ -87,7 +87,8 @@ const SKIN_OPTIONS: { value: string; label: string; preview?: string }[] = [
   { value: "ocean", label: "Banque", preview: "/planet-skins/ocean.png" },
   { value: "terrain", label: "Immobilier", preview: "/planet-skins/terrain-3.png" },
   { value: "crypto", label: "Crypto", preview: "/planet-skins/crypto.png" },
-  { value: "chalet", label: "Chalet", preview: "/planet-skins/chalet.png" },
+  { value: "chalet", label: "Vacances (chalet)", preview: "/planet-skins/chalet.png" },
+  { value: "vacances", label: "Vacances (plage)", preview: "/planet-skins/vacances.png" },
   { value: "generic", label: "Autre (couleur unie)" },
 ];
 
