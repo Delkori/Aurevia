@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { portfolioOwnerships } from "@/db/schema";
+import { loans } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { handleApiError } from "@/lib/apiError";
 
@@ -12,15 +12,21 @@ export async function PUT(
     const { id } = await params;
     const body = await req.json();
 
-    const share = Number(body.sharePercent);
-    if (!Number.isFinite(share) || share < 0 || share > 100) {
-      return NextResponse.json({ error: "La part doit être comprise entre 0 et 100." }, { status: 400 });
-    }
-
     const [updated] = await db
-      .update(portfolioOwnerships)
-      .set({ sharePercent: String(share) })
-      .where(eq(portfolioOwnerships.id, Number(id)))
+      .update(loans)
+      .set({
+        name: body.name,
+        assetId: body.assetId ?? null,
+        principal: body.principal,
+        remainingBalance: body.remainingBalance,
+        interestRate: body.interestRate || null,
+        monthlyPayment: body.monthlyPayment || null,
+        startDate: body.startDate || null,
+        endDate: body.endDate || null,
+        currency: body.currency || "EUR",
+        updatedAt: new Date(),
+      })
+      .where(eq(loans.id, Number(id)))
       .returning();
 
     if (!updated) {
@@ -39,7 +45,7 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    await db.delete(portfolioOwnerships).where(eq(portfolioOwnerships.id, Number(id)));
+    await db.delete(loans).where(eq(loans.id, Number(id)));
     return NextResponse.json({ ok: true });
   } catch (err) {
     return handleApiError(err);

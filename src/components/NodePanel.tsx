@@ -12,7 +12,6 @@ type Loan = { id: number; name: string; remainingBalance: string; currency: stri
 type Member = { id: number; name: string; role: string; color: string; salary: string | null };
 type Flow = { id: number; name: string | null; sourceType: string; sourceId: number | null; targetType: string; targetId: number | null; amount: string; frequency: string; memberId: number | null; createdAt: string };
 type GoalLink = { id: number; goalId: number; portfolioId: number };
-type PortfolioOwnership = { id: number; portfolioId: number; memberId: number | null; sharePercent: string };
 
 export type Selection =
   | { kind: "total"; total: number; grossTotal: number; debt: number }
@@ -38,8 +37,6 @@ export type Actions = {
   deleteFlow: (id: number) => Promise<void>;
   createGoalLink: (data: Record<string, unknown>) => Promise<void>;
   deleteGoalLink: (id: number) => Promise<void>;
-  setPortfolioOwnership: (data: Record<string, unknown>) => Promise<PortfolioOwnership>;
-  deletePortfolioOwnership: (id: number) => Promise<void>;
   createMember: (data: Record<string, unknown>) => Promise<void>;
   updateMember: (id: number, data: Record<string, unknown>) => Promise<void>;
   deleteMember: (id: number) => Promise<void>;
@@ -127,68 +124,6 @@ function PortfolioForm({ initial, members, ownerName, onSubmit, onDelete, onCanc
       {(skin === "" || skin === "generic") && <><Label>Couleur</Label><ColorPick value={color} onChange={setColor} /></>}
       <div className="flex gap-2 pt-3">{onDelete && <Btn type="button" variant="danger" onClick={onDelete}><Trash2 size={12} /></Btn>}<Btn type="submit" variant="accent" className="flex-1">{initial ? "Enregistrer" : "Créer"}</Btn><Btn type="button" onClick={onCancel}>Fermer</Btn></div>
     </form>
-  );
-}
-
-// ── Quotes-parts (répartition d'un portefeuille entre membres) ──────────────
-function OwnershipEditor({ portfolioId, portfolioOwnerMemberId, members, ownerName, ownerships, actions }:
-  { portfolioId: number; portfolioOwnerMemberId: number | null; members: Member[]; ownerName: string; ownerships: PortfolioOwnership[]; actions: Actions }) {
-  const rows = ownerships.filter(o => o.portfolioId === portfolioId);
-  // Sans quote-part explicite, on affiche une ligne virtuelle 100% pour le
-  // propriétaire actuel (comportement identique à l'ancien modèle).
-  const effective = rows.length > 0 ? rows : [{ id: -1, portfolioId, memberId: portfolioOwnerMemberId, sharePercent: "100" }];
-  const total = effective.reduce((s, r) => s + Number(r.sharePercent), 0);
-  const nameFor = (memberId: number | null) => memberId == null ? ownerName : (members.find(m => m.id === memberId)?.name ?? "?");
-  const usedMemberIds = new Set(effective.map(r => r.memberId));
-  const availableToAdd = [{ id: null as number | null, name: ownerName }, ...members.map(m => ({ id: m.id as number | null, name: m.name }))]
-    .filter(m => !usedMemberIds.has(m.id));
-
-  return (
-    <div className="pt-2 border-t border-border space-y-1.5">
-      <p className="text-[10px] text-text-muted uppercase tracking-wide">Quotes-parts</p>
-      <p className="text-[10px] text-text-muted">Répartis la valeur de cette planète entre plusieurs propriétaires (ex : bien commun d&apos;un couple).</p>
-      {effective.map(row => (
-        <div key={row.memberId ?? "owner"} className="flex items-center gap-2 text-xs">
-          <span className="flex-1 truncate">{nameFor(row.memberId)}</span>
-          <input type="number" min={0} max={100} step={1} defaultValue={row.sharePercent}
-            className="w-16 bg-bg border border-border rounded-md px-2 py-1 text-xs text-right tabular"
-            onBlur={async e => {
-              const v = Number(e.target.value);
-              if (!Number.isFinite(v) || v < 0 || v > 100) return;
-              await actions.setPortfolioOwnership({ portfolioId, memberId: row.memberId, sharePercent: v });
-            }} />
-          <span className="text-text-muted">%</span>
-          {effective.length > 1 && (
-            <button type="button"
-              onClick={async () => { if (row.id !== -1) await actions.deletePortfolioOwnership(row.id); }}
-              className="text-text-muted hover:text-negative">
-              <Trash2 size={11} />
-            </button>
-          )}
-        </div>
-      ))}
-      {availableToAdd.length > 0 && (
-        <select className="w-full bg-bg border border-border rounded-md px-2 py-1.5 text-xs mt-1" value=""
-          onChange={async e => {
-            const v = e.target.value;
-            if (!v) return;
-            const newMemberId = v === "owner" ? null : Number(v);
-            // Si aucune quote-part n'existait encore, on matérialise d'abord le
-            // propriétaire actuel à 100% avant d'ajouter le nouveau à 0%.
-            if (rows.length === 0) {
-              await actions.setPortfolioOwnership({ portfolioId, memberId: portfolioOwnerMemberId, sharePercent: 100 });
-            }
-            await actions.setPortfolioOwnership({ portfolioId, memberId: newMemberId, sharePercent: 0 });
-            e.target.value = "";
-          }}>
-          <option value="">+ Ajouter un copropriétaire…</option>
-          {availableToAdd.map(m => <option key={m.id ?? "owner"} value={m.id ?? "owner"}>{m.name}</option>)}
-        </select>
-      )}
-      <p className={`text-[10px] ${total === 100 ? "text-text-muted" : "text-negative"}`}>
-        Total : {total}%{total !== 100 ? " — doit faire 100% pour que le patrimoine par membre soit exact" : ""}
-      </p>
-    </div>
   );
 }
 
@@ -433,8 +368,8 @@ function TemplatesPanel({ portfolios, onCreatePortfolio, onCancel }:
 }
 
 // ── Main Panel ───────────────────────────────────────────────────────────────
-export default function NodePanel({ selected, loans, portfolios, members, goals, flows, goalLinks, portfolioOwnerships, actions, onClear, createMode, setCreateMode, salary, onUpdateSalary, groups, grossTotal, debt, onPortfolioCreated, ownerName, expenseMemberId }:
-  { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number; onPortfolioCreated?: (p: Portfolio) => void; ownerName: string; expenseMemberId?: number | null }) {
+export default function NodePanel({ selected, loans, portfolios, members, goals, flows, goalLinks, actions, onClear, createMode, setCreateMode, salary, onUpdateSalary, groups, grossTotal, debt, onPortfolioCreated, ownerName, expenseMemberId }:
+  { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; goalLinks: GoalLink[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number; onPortfolioCreated?: (p: Portfolio) => void; ownerName: string; expenseMemberId?: number | null }) {
 
   useEffect(() => { setCreateMode(null); }, [selected]); // eslint-disable-line
 
@@ -604,12 +539,6 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
               })}
             </div>;
           })()}
-
-          {/* Quotes-parts entre membres */}
-          {members.length > 0 && (
-            <OwnershipEditor portfolioId={selected.id as number} portfolioOwnerMemberId={selected.memberId}
-              members={members} ownerName={ownerName} ownerships={portfolioOwnerships} actions={actions} />
-          )}
 
           {/* Flows */}
           {(() => {
