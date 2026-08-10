@@ -65,14 +65,30 @@ function bezierPoint(s: { x: number; y: number }, c: { x: number; y: number }, t
   return { x, y, angle: Math.atan2(dy, dx) * 180 / Math.PI };
 }
 
-type PlanetSkin = "tech" | "crypto" | "terrain" | "ocean" | "generic" | "empty";
-const SKIN_IMAGE: Partial<Record<PlanetSkin, string>> = {
-  tech: "/planet-skins/tech.png",
-  ocean: "/planet-skins/ocean.png",
-  terrain: "/planet-skins/terrain.png",
-  crypto: "/planet-skins/crypto.png",
+type PlanetSkin = "tech" | "crypto" | "terrain" | "ocean" | "chalet" | "generic" | "empty";
+const SKIN_IMAGE_TIERS: Partial<Record<PlanetSkin, string[]>> = {
+  tech: ["/planet-skins/tech-1.png", "/planet-skins/tech-2.png", "/planet-skins/tech-3.png"],
+  terrain: ["/planet-skins/terrain-1.png", "/planet-skins/terrain-2.png", "/planet-skins/terrain-3.png"],
+  ocean: ["/planet-skins/ocean.png"],
+  crypto: ["/planet-skins/crypto.png"],
+  chalet: ["/planet-skins/chalet.png"],
 };
-const SALARY_IMAGE = "/planet-skins/salary.png";
+function tierIndex(value: number, max: number, tiers: number) {
+  if (max <= 0) return 0;
+  const p = Math.max(0, Math.min(1, value / max));
+  return Math.min(tiers - 1, Math.floor(p * tiers));
+}
+function skinImageForValue(skin: PlanetSkin, value: number, max: number): string | undefined {
+  const tiers = SKIN_IMAGE_TIERS[skin];
+  if (!tiers || tiers.length === 0) return undefined;
+  return tiers[tierIndex(value, max, tiers.length)];
+}
+const SALARY_IMAGES = ["/planet-skins/salary-1.png", "/planet-skins/salary-2.png", "/planet-skins/salary-3.png"];
+const SALARY_TIER_THRESHOLDS = [2500, 6000];
+function salaryImage(amount: number) {
+  const idx = amount < SALARY_TIER_THRESHOLDS[0] ? 0 : amount < SALARY_TIER_THRESHOLDS[1] ? 1 : 2;
+  return SALARY_IMAGES[idx];
+}
 const VACANCES_IMAGE = "/planet-skins/vacances.png";
 const EXPENSES_IMAGES = {
   warning: "/planet-skins/expenses-warning.png",
@@ -125,7 +141,7 @@ function skinFromName(name: string): PlanetSkin | null {
   for (const [re, skin] of NAME_SKIN_KEYWORDS) if (re.test(n)) return skin;
   return null;
 }
-const EXPLICIT_SKINS = new Set<PlanetSkin>(["tech", "ocean", "terrain", "crypto", "generic"]);
+const EXPLICIT_SKINS = new Set<PlanetSkin>(["tech", "ocean", "terrain", "crypto", "chalet", "generic"]);
 function planetSkin(name: string, valued: { asset: { type: string }; value: number }[], explicitSkin?: string | null): PlanetSkin {
   if (explicitSkin && EXPLICIT_SKINS.has(explicitSkin as PlanetSkin)) return explicitSkin as PlanetSkin;
   return skinFromName(name) ?? dominantAssetSkin(valued);
@@ -135,7 +151,7 @@ interface GNode extends SimulationNodeDatum {
   id: string; kind: string; label: string; r: number; color: string;
   portfolioKey?: number | "unassigned"; assetId?: number; goalId?: number; memberId?: number;
   gainVal?: number; gainPct?: number; sub?: string; logoUrl?: string | null; skin?: PlanetSkin;
-  ownerExpenseTotal?: number; ownerRevenue?: number; flowId?: number;
+  ownerExpenseTotal?: number; ownerRevenue?: number; flowId?: number; amount?: number;
 }
 interface GLink { source: string; target: string }
 
@@ -244,7 +260,7 @@ export default function GalaxyView({
     const totalIncomeItems = incomeFlows.reduce((s, f) => s + Number(f.amount), 0);
     const totalRevenue = salary + totalIncomeItems;
 
-    if (totalRevenue > 0) nodes.push({ id: "salary", kind: "salary", label: "Revenus", r: 32, color: "#34d399", sub: formatMoney(totalRevenue) });
+    if (totalRevenue > 0) nodes.push({ id: "salary", kind: "salary", label: "Revenus", r: 32, color: "#34d399", sub: formatMoney(totalRevenue), amount: totalRevenue });
     nodes.push({ id: "center", kind: "center", label: "Patrimoine", r: CENTER_R, color: "#7c6af5" });
     if (totalRevenue > 0) links.push({ source: "salary", target: "center" });
 
@@ -286,7 +302,7 @@ export default function GalaxyView({
       nodes.push({ id: `m-${m.id}`, kind: "member", label: m.name, r: 24, color: m.color, memberId: m.id });
       links.push({ source: "center", target: `m-${m.id}` });
       if (m.salary && Number(m.salary) > 0) {
-        nodes.push({ id: `ms-${m.id}`, kind: "member-salary", label: `Salaire de ${m.name}`, r: 22, color: m.color, memberId: m.id, sub: formatMoney(Number(m.salary)) });
+        nodes.push({ id: `ms-${m.id}`, kind: "member-salary", label: `Salaire de ${m.name}`, r: 22, color: m.color, memberId: m.id, sub: formatMoney(Number(m.salary)), amount: Number(m.salary) });
         links.push({ source: `m-${m.id}`, target: `ms-${m.id}` });
       }
       const memberExpFlows = expFlows.filter(f => f.memberId === m.id);
@@ -1012,18 +1028,18 @@ export default function GalaxyView({
                   </>;
                 })()}
 
-                {n.kind === "salary" && <>
+                {n.kind === "salary" && (() => { const salImg = salaryImage(n.amount ?? 0); return <>
                   <clipPath id={`cp-${n.id}`}><circle r={n.r} /></clipPath>
                   <circle r={n.r + 3} fill="none" stroke="rgba(100,255,150,0.08)" />
-                  {SALARY_IMAGE ? (
-                    <g clipPath={`url(#cp-${n.id})`}><image href={SALARY_IMAGE} x={-n.r} y={-n.r} width={n.r * 2} height={n.r * 2} preserveAspectRatio="xMidYMid slice" /></g>
+                  {salImg ? (
+                    <g clipPath={`url(#cp-${n.id})`}><image href={salImg} x={-n.r} y={-n.r} width={n.r * 2} height={n.r * 2} preserveAspectRatio="xMidYMid slice" /></g>
                   ) : <>
                     <circle r={n.r} fill="url(#sph-salary)" />
                     <g clipPath={`url(#cp-${n.id})`}><circle r={n.r} fill="url(#sph-salary)" filter="url(#terrain)" /><circle r={n.r} fill="url(#salary-land)" /><circle r={n.r} fill="url(#sph-salary)" filter="url(#clouds)" opacity={0.4} /></g>
                     <g clipPath="url(#clip-sal)">{Array.from({ length: 18 }, (_, i) => <line key={i} x1={-n.r + 3 + i * 3.5} y1={n.r - 1} x2={-n.r + 3 + i * 3.5 + (i % 2 ? 1 : -1)} y2={n.r - 1 - (3 + (i * 7 % 7))} stroke="#30e060" strokeWidth={1.3} strokeLinecap="round" opacity={0.4 + (i % 3) * 0.2} />)}</g>
                   </>}
                   <circle r={n.r} fill="url(#sph-hl)" />
-                  {SALARY_IMAGE && <rect x={-n.r * 0.95} y={-15} width={n.r * 1.9} height={27} rx={13.5} fill="rgba(6,6,10,0.55)" />}
+                  {salImg && <rect x={-n.r * 0.95} y={-15} width={n.r * 1.9} height={27} rx={13.5} fill="rgba(6,6,10,0.55)" />}
                   <text y={-5} textAnchor="middle" fontSize={11} fontWeight={600} fill="#fff" style={ts}>Revenus</text>
                   <text y={9} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.9)" style={ts}>{n.sub && mask(n.sub)}/mois</text>
                   <g transform={`translate(${(n.r + 13) * 0.7071},${(n.r + 13) * 0.7071})`} style={{ cursor: "pointer" }}
@@ -1032,7 +1048,7 @@ export default function GalaxyView({
                     <circle r={11} fill="#12121a" stroke="#34d399" strokeWidth={1.2} />
                     <Plus x={-6} y={-6} size={12} color="#6ee7b7" />
                   </g>
-                </>}
+                </>; })()}
 
                 {n.kind === "income-item" && <><circle r={n.r} fill="rgba(52,211,153,0.1)" stroke="rgba(52,211,153,0.25)" strokeWidth={0.5} /><text y={-1} textAnchor="middle" fontSize={8} fill="rgba(255,255,255,0.7)">{n.label.length > 10 ? n.label.slice(0, 9) + "…" : n.label}</text><text y={8} textAnchor="middle" fontSize={7} fill="rgba(52,211,153,0.85)">{n.sub && mask(n.sub)}</text></>}
 
@@ -1110,7 +1126,7 @@ export default function GalaxyView({
 
                 {n.kind === "portfolio" && (() => {
                   const skin = n.skin ?? "generic";
-                  const imageHref = SKIN_IMAGE[skin];
+                  const imageHref = skinImageForValue(skin, n.r - 20, 58);
                   const skinFill = skin === "generic" ? `url(#sph-${n.id})` : `url(#sph-skin-${skin})`;
                   const skinFilter = skin === "tech" ? "url(#circuits)" : skin === "ocean" ? "url(#turb-water)" : "url(#terrain)";
                   return <>
@@ -1247,17 +1263,17 @@ export default function GalaxyView({
                   </>;
                 })()}
 
-                {n.kind === "member-salary" && <>
+                {n.kind === "member-salary" && (() => { const salImg = salaryImage(n.amount ?? 0); return <>
                   <clipPath id={`cp-${n.id}`}><circle r={n.r} /></clipPath>
                   <circle r={n.r + 3} fill="none" stroke="rgba(100,255,150,0.08)" />
-                  {SALARY_IMAGE ? (
-                    <g clipPath={`url(#cp-${n.id})`}><image href={SALARY_IMAGE} x={-n.r} y={-n.r} width={n.r * 2} height={n.r * 2} preserveAspectRatio="xMidYMid slice" /></g>
+                  {salImg ? (
+                    <g clipPath={`url(#cp-${n.id})`}><image href={salImg} x={-n.r} y={-n.r} width={n.r * 2} height={n.r * 2} preserveAspectRatio="xMidYMid slice" /></g>
                   ) : <circle r={n.r} fill="url(#sph-salary)" />}
                   <circle r={n.r} fill="url(#sph-hl)" />
-                  {SALARY_IMAGE && <rect x={-n.r * 0.95} y={-15} width={n.r * 1.9} height={27} rx={13.5} fill="rgba(6,6,10,0.55)" />}
+                  {salImg && <rect x={-n.r * 0.95} y={-15} width={n.r * 1.9} height={27} rx={13.5} fill="rgba(6,6,10,0.55)" />}
                   <text y={-4} textAnchor="middle" fontSize={9} fontWeight={600} fill="#fff" style={ts}>Salaire</text>
                   <text y={9} textAnchor="middle" fontSize={8} fill="rgba(255,255,255,0.85)" style={ts}>{n.sub && mask(n.sub)}/mois</text>
-                </>}
+                </>; })()}
               </g>;
             })}
 

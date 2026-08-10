@@ -83,10 +83,11 @@ function ColorPick({ value, onChange }: { value: string; onChange: (c: string) =
 // ── Portfolio Form ───────────────────────────────────────────────────────────
 const SKIN_OPTIONS: { value: string; label: string; preview?: string }[] = [
   { value: "", label: "Automatique (déduit du nom / des actifs)" },
-  { value: "tech", label: "Tech", preview: "/planet-skins/tech.png" },
-  { value: "ocean", label: "Océan", preview: "/planet-skins/ocean.png" },
-  { value: "terrain", label: "Terrain", preview: "/planet-skins/terrain.png" },
+  { value: "tech", label: "Tech", preview: "/planet-skins/tech-3.png" },
+  { value: "ocean", label: "Banque", preview: "/planet-skins/ocean.png" },
+  { value: "terrain", label: "Immobilier", preview: "/planet-skins/terrain-3.png" },
   { value: "crypto", label: "Crypto", preview: "/planet-skins/crypto.png" },
+  { value: "chalet", label: "Chalet", preview: "/planet-skins/chalet.png" },
   { value: "generic", label: "Autre (couleur unie)" },
 ];
 
