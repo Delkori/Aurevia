@@ -225,7 +225,6 @@ export default function GalaxyView({
   const currentYearForScrub = new Date().getFullYear();
   const scrubYear = currentYearForScrub + scrubYears;
   const maxPV = Math.max(1, ...groups.map(g => g.total));
-  const maxGT = Math.max(1, ...goals.map(g => Number(g.targetAmount)));
 
   const goalProgress = useCallback((goal: Goal) => {
     const linkedIds = goalLinks.filter(gl => gl.goalId === goal.id).map(gl => gl.portfolioId);
@@ -327,7 +326,7 @@ export default function GalaxyView({
       const memberNode = goal.memberId ? `m-${goal.memberId}` : null;
       const linkedPortfolioIds = goalLinks.filter(gl => gl.goalId === goal.id).map(gl => gl.portfolioId);
       const prog = goalProgress(goal);
-      nodes.push({ id: `g-${goal.id}`, kind: "goal", label: goal.name, r: sr(Number(goal.targetAmount), maxGT, 16, 60), color: goal.color, goalId: goal.id, sub: `${Math.round(prog * 100)}%` });
+      nodes.push({ id: `g-${goal.id}`, kind: "goal", label: goal.name, r: 16 + Math.min(1, prog) * 44, color: goal.color, goalId: goal.id, sub: `${Math.round(prog * 100)}%` });
       links.push({ source: memberNode ?? "center", target: `g-${goal.id}` });
       linkedPortfolioIds.forEach(pid => { if (nodes.find(n => n.id === `p-${pid}`)) goalLinkEdges.push({ source: `g-${goal.id}`, target: `p-${pid}` }); });
     }
@@ -341,7 +340,7 @@ export default function GalaxyView({
     });
 
     return { targetNodes: nodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows, totalRevenue, totalInvest };
-  }, [groups, maxPV, expanded, goals, maxGT, members, portfolios, flows, quotes, salary, goalLinks, goalProgress]);
+  }, [groups, maxPV, expanded, goals, members, portfolios, flows, quotes, salary, goalLinks, goalProgress]);
   linksRef.current = links;
 
   // Simulation
@@ -1028,7 +1027,7 @@ export default function GalaxyView({
                     <g clipPath="url(#clip-sal)">{Array.from({ length: 18 }, (_, i) => <line key={i} x1={-n.r + 3 + i * 3.5} y1={n.r - 1} x2={-n.r + 3 + i * 3.5 + (i % 2 ? 1 : -1)} y2={n.r - 1 - (3 + (i * 7 % 7))} stroke="#30e060" strokeWidth={1.3} strokeLinecap="round" opacity={0.4 + (i % 3) * 0.2} />)}</g>
                   </>}
                   <circle r={n.r} fill="url(#sph-hl)" />
-                  {SALARY_IMAGE && <rect x={-n.r * 0.95} y={-15} width={n.r * 1.9} height={27} rx={5} fill="rgba(6,6,10,0.55)" />}
+                  {SALARY_IMAGE && <rect x={-n.r * 0.95} y={-15} width={n.r * 1.9} height={27} rx={13.5} fill="rgba(6,6,10,0.55)" />}
                   <text y={-5} textAnchor="middle" fontSize={11} fontWeight={600} fill="#fff" style={ts}>Revenus</text>
                   <text y={9} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.9)" style={ts}>{n.sub && mask(n.sub)}/mois</text>
                   <g transform={`translate(${(n.r + 13) * 0.7071},${(n.r + 13) * 0.7071})`} style={{ cursor: "pointer" }}
@@ -1092,7 +1091,7 @@ export default function GalaxyView({
                       return <circle key={`proj-${i}`} cx={px} cy={py} r={1.8 - phase} fill="#ff5500" opacity={1 - phase} />;
                     })}
                     {/* Warning shake effect on text */}
-                    {tierImage && <rect x={-R * 0.95} y={-15} width={R * 1.9} height={ownerRevenue > 0 ? 42 : 27} rx={5} fill="rgba(6,6,10,0.55)" />}
+                    {tierImage && <rect x={-R * 0.95} y={-15} width={R * 1.9} height={ownerRevenue > 0 ? 42 : 27} rx={ownerRevenue > 0 ? 21 : 13.5} fill="rgba(6,6,10,0.55)" />}
                     <g transform={isOverBudget ? `translate(${Math.sin(t * 20) * 0.8},0)` : undefined}>
                       <text y={-5} textAnchor="middle" fontSize={10} fontWeight={600} fill="#fff" style={ts}>{n.label}</text>
                       <text y={9} textAnchor="middle" fontSize={9} fill={isOverBudget ? "#ffaa70" : tier === "warning" ? "#ffd280" : "rgba(255,255,255,0.85)"} style={ts}>{mask(ownerExpenseTotal > 0 ? formatMoney(ownerExpenseTotal) : "0 €")}/m</text>
@@ -1174,7 +1173,7 @@ export default function GalaxyView({
                     </>}
 
                     <circle r={n.r} fill="url(#sph-hl)" stroke={n.color} strokeOpacity={isExp ? 0.35 : 0.1} strokeWidth={isExp ? 1.5 : 0.5} />
-                    {imageHref && <rect x={-n.r * 0.95} y={-15} width={n.r * 1.9} height={(n.gainVal ?? 0) !== 0 ? 40 : 27} rx={5} fill="rgba(6,6,10,0.55)" />}
+                    {imageHref && <rect x={-n.r * 0.95} y={-15} width={n.r * 1.9} height={(n.gainVal ?? 0) !== 0 ? 40 : 27} rx={(n.gainVal ?? 0) !== 0 ? 20 : 13.5} fill="rgba(6,6,10,0.55)" />}
                     <text y={-6} textAnchor="middle" fontSize={11} fontWeight={600} fill="#fff" style={ts}>{n.label}</text>
                     <text y={9} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.85)" style={ts}>{n.sub && mask(n.sub)}</text>
                     {(n.gainVal ?? 0) !== 0 && <text y={22} textAnchor="middle" fontSize={8} fill={(n.gainVal ?? 0) >= 0 ? "#34d399" : "#fb7185"} style={ts}>{mask(`${(n.gainVal ?? 0) >= 0 ? "+" : ""}${formatMoney(n.gainVal ?? 0)}`)}</text>}
@@ -1203,7 +1202,7 @@ export default function GalaxyView({
                     </>}
                     <circle r={n.r} fill="url(#sph-hl)" />
                     {(gp ?? 0) >= 1 && <circle r={n.r + 6} fill="none" stroke="#34d399" strokeOpacity={0.45} strokeWidth={1.5} />}
-                    {isVacation && <rect x={-n.r * 0.95} y={-13} width={n.r * 1.9} height={26} rx={5} fill="rgba(6,6,10,0.55)" />}
+                    {isVacation && <rect x={-n.r * 0.95} y={-13} width={n.r * 1.9} height={26} rx={13} fill="rgba(6,6,10,0.55)" />}
                     <text y={-4} textAnchor="middle" fontSize={10} fontWeight={600} fill="#fff" style={ts}>{n.label.length > 12 ? n.label.slice(0, 11) + "…" : n.label}</text>
                     <text y={10} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.85)" style={ts}>{n.sub}</text>
                   </>;
@@ -1259,7 +1258,7 @@ export default function GalaxyView({
                     <g clipPath={`url(#cp-${n.id})`}><image href={SALARY_IMAGE} x={-n.r} y={-n.r} width={n.r * 2} height={n.r * 2} preserveAspectRatio="xMidYMid slice" /></g>
                   ) : <circle r={n.r} fill="url(#sph-salary)" />}
                   <circle r={n.r} fill="url(#sph-hl)" />
-                  {SALARY_IMAGE && <rect x={-n.r * 0.95} y={-15} width={n.r * 1.9} height={27} rx={5} fill="rgba(6,6,10,0.55)" />}
+                  {SALARY_IMAGE && <rect x={-n.r * 0.95} y={-15} width={n.r * 1.9} height={27} rx={13.5} fill="rgba(6,6,10,0.55)" />}
                   <text y={-4} textAnchor="middle" fontSize={9} fontWeight={600} fill="#fff" style={ts}>Salaire</text>
                   <text y={9} textAnchor="middle" fontSize={8} fill="rgba(255,255,255,0.85)" style={ts}>{n.sub && mask(n.sub)}/mois</text>
                 </>}

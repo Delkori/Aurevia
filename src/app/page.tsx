@@ -84,6 +84,7 @@ export default function HomePage() {
     updateGoal: (id: number, d: Record<string, unknown>) => api(`/api/goals/${id}`, "PUT", d) as Promise<void>,
     deleteGoal: (id: number) => api(`/api/goals/${id}`, "DELETE") as Promise<void>,
     createFlow: (d: Record<string, unknown>) => api("/api/flows", "POST", d) as Promise<void>,
+    updateFlow: (id: number, d: Record<string, unknown>) => api(`/api/flows/${id}`, "PUT", d) as Promise<void>,
     deleteFlow: (id: number) => api(`/api/flows/${id}`, "DELETE") as Promise<void>,
     createGoalLink: (d: Record<string, unknown>) => api("/api/goal-links", "POST", d) as Promise<void>,
     deleteGoalLink: (id: number) => api(`/api/goal-links/${id}`, "DELETE") as Promise<void>,
