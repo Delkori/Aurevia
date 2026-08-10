@@ -140,6 +140,49 @@ export function PlanetModal({ members, ownerName, onSubmit, onClose }:
   );
 }
 
+// ── Ticker autocomplete ──────────────────────────────────────────────────────
+type TickerResult = { symbol: string; name: string; exchange: string; type: string };
+function TickerAutocomplete({ value, onChange, onPick, placeholder }:
+  { value: string; onChange: (v: string) => void; onPick: (r: TickerResult) => void; placeholder?: string }) {
+  const [results, setResults] = useState<TickerResult[]>([]);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (value.trim().length < 2) { setResults([]); return; }
+    let cancelled = false;
+    setLoading(true);
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/ticker-search?q=${encodeURIComponent(value)}`);
+        const data = await res.json();
+        if (!cancelled) setResults(Array.isArray(data) ? data : []);
+      } catch { if (!cancelled) setResults([]); }
+      finally { if (!cancelled) setLoading(false); }
+    }, 300);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [value]);
+  return (
+    <div className="relative">
+      <Inp value={value} onChange={e => { onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder={placeholder} />
+      {open && value.trim().length >= 2 && (results.length > 0 || loading) && (
+        <div className="absolute z-20 left-0 right-0 mt-1 bg-surface border border-border rounded-md shadow-lg max-h-52 overflow-y-auto">
+          {loading && results.length === 0 && <p className="text-[10px] text-text-muted px-2 py-1.5">Recherche…</p>}
+          {results.map(r => (
+            <button key={r.symbol} type="button"
+              onMouseDown={e => { e.preventDefault(); onPick(r); setOpen(false); }}
+              className="w-full text-left px-2 py-1.5 text-xs hover:bg-surface-hover flex items-center justify-between gap-2">
+              <span className="truncate">{r.name}</span>
+              <span className="text-[10px] text-text-muted shrink-0">{r.symbol} · {r.exchange}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Asset Form ───────────────────────────────────────────────────────────────
 function AssetForm({ initial, portfolios, defaultPortfolioId, onSubmit, onDelete, onCancel }:
   { initial?: Asset; portfolios: Portfolio[]; defaultPortfolioId?: number; onSubmit: (d: Record<string, unknown>) => void; onDelete?: () => void; onCancel: () => void }) {
@@ -156,7 +199,9 @@ function AssetForm({ initial, portfolios, defaultPortfolioId, onSubmit, onDelete
       <Label>Planète</Label><Sel value={f.portfolioId} onChange={e => setF({ ...f, portfolioId: e.target.value })}><option value="">—</option>{portfolios.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</Sel>
       {nt && <><Label>{f.type === "precious_metal" ? "Métal" : f.type === "crypto" ? "ID CoinGecko" : "Ticker"}</Label>
         {f.type === "precious_metal" ? <Sel value={f.ticker} onChange={e => setF({ ...f, ticker: e.target.value })}><option value="">—</option>{METAL_TICKERS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}</Sel>
-          : <Inp value={f.ticker} onChange={e => setF({ ...f, ticker: e.target.value })} placeholder={f.type === "crypto" ? "bitcoin" : "AAPL"} />}
+          : f.type === "crypto" ? <Inp value={f.ticker} onChange={e => setF({ ...f, ticker: e.target.value })} placeholder="bitcoin" />
+          : <TickerAutocomplete value={f.ticker} onChange={v => setF({ ...f, ticker: v })} placeholder="AAPL, BNP…"
+              onPick={r => setF({ ...f, ticker: r.symbol, name: f.name || r.name })} />}
         <div className="grid grid-cols-2 gap-2"><div><Label>Quantité</Label><Inp type="number" step="any" value={f.quantity} onChange={e => setF({ ...f, quantity: e.target.value })} className="tabular" /></div>
           <div><Label>Prix revient</Label><Inp type="number" step="any" value={f.avgBuyPrice} onChange={e => setF({ ...f, avgBuyPrice: e.target.value })} className="tabular" /></div></div></>}
       {!nt && <><Label>Valeur</Label><Inp type="number" step="any" value={f.manualValue} onChange={e => setF({ ...f, manualValue: e.target.value })} className="tabular" /></>}

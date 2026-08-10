@@ -36,3 +36,19 @@ export async function getQuotes(
   );
   return Object.fromEntries(results);
 }
+
+export type TickerSearchResult = { symbol: string; name: string; exchange: string; type: string };
+
+export async function searchTickers(query: string): Promise<TickerSearchResult[]> {
+  if (!query || query.trim().length < 2) return [];
+  const res = await yahooFinance.search(query, { quotesCount: 12, newsCount: 0 });
+  return (res.quotes ?? [])
+    .filter((q): q is typeof q & { symbol: string; isYahooFinance: true } => "symbol" in q && q.isYahooFinance)
+    .filter((q) => q.quoteType === "EQUITY" || q.quoteType === "ETF")
+    .map((q) => ({
+      symbol: q.symbol,
+      name: q.longname || q.shortname || q.symbol,
+      exchange: q.exchDisp || q.exchange || "",
+      type: q.quoteType,
+    }));
+}
