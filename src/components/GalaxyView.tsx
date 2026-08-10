@@ -5,13 +5,13 @@ import {
   forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY,
   type Simulation, type SimulationNodeDatum,
 } from "d3-force";
-import { FolderPlus, Plus, PlusCircle, Star, ArrowRight, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, Sparkles, AlertTriangle, UserCheck, Bell, Clock } from "lucide-react";
+import { FolderPlus, Plus, PlusCircle, Star, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, Sparkles, AlertTriangle, Bell, Clock } from "lucide-react";
 import { formatMoney } from "@/lib/format";
 import { currentValue, gain, gainPercent, totalDebt } from "@/lib/networth";
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
 import { getLogoUrl } from "@/lib/logos";
 import { daysUntilNextOccurrence } from "@/lib/dates";
-import NodePanel, { type Selection, type Actions } from "@/components/NodePanel";
+import NodePanel, { PlanetModal, type Selection, type Actions } from "@/components/NodePanel";
 
 type Asset = { id: number; name: string; type: string; ticker: string | null; quantity: string | null; avgBuyPrice: string | null; manualValue: string | null; yieldRate: string | null; currency: string; portfolioId: number | null };
 type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null };
@@ -170,6 +170,7 @@ export default function GalaxyView({
   const [selected, setSelected] = useState<Selection>(null);
   const [createMode, setCreateMode] = useState<string | null>(null);
   const [linkMode, setLinkMode] = useState(false);
+  const [showPlanetModal, setShowPlanetModal] = useState(false);
   const [ownerMode, setOwnerMode] = useState(false);
   const [ownerSourceNode, setOwnerSourceNode] = useState<{ id: string; kind: "center" | "member"; memberId?: number; label: string } | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -746,16 +747,14 @@ export default function GalaxyView({
           {[
             { icon: FolderPlus, label: "Planète", mode: "portfolio" },
             { icon: Star, label: "Objectifs", mode: "goal" },
-            { icon: ArrowRight, label: "Flux", mode: "flow" },
             { icon: Users, label: "Membres", mode: "member" },
             { icon: Link2, label: "Liens", mode: "link" },
-            { icon: UserCheck, label: "Propriétaire", mode: "owner" },
             { icon: Sparkles, label: "Modèles", mode: "templates" },
           ].map(({ icon: Icon, label, mode }) => {
-            const active = mode === "link" ? linkMode : mode === "owner" ? ownerMode : createMode === mode;
+            const active = mode === "link" ? linkMode : createMode === mode;
             return <button key={mode} onClick={() => {
               if (mode === "link") { setSelected(null); setCreateMode(null); setOwnerMode(false); setOwnerSourceNode(null); setLinkSourceNode(null); setLinkMode(m => !m); }
-              else if (mode === "owner") { setSelected(null); setCreateMode(null); setLinkMode(false); setLinkSourceNode(null); setOwnerSourceNode(null); setOwnerMode(m => !m); }
+              else if (mode === "portfolio") { setSelected(null); setLinkMode(false); setLinkSourceNode(null); setOwnerMode(false); setOwnerSourceNode(null); setExpenseMemberId(null); setShowPlanetModal(true); }
               else { setSelected(null); setLinkMode(false); setLinkSourceNode(null); setOwnerMode(false); setOwnerSourceNode(null); setExpenseMemberId(null); setCreateMode(mode); }
             }}
               className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs transition-colors ${active ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text hover:bg-surface-hover"}`}>
@@ -764,9 +763,6 @@ export default function GalaxyView({
           })}
           {linkMode && <p className="text-[10px] text-accent px-2 pt-1">
             {linkSourceNode ? `Clique la destination (depuis "${linkSourceNode.label}")…` : "Clique la planète source…"}
-          </p>}
-          {ownerMode && <p className="text-[10px] text-accent px-2 pt-1">
-            {ownerSourceNode ? `Clique la planète ou l'objectif à rattacher à "${ownerSourceNode.label}"…` : "Clique Patrimoine (= Moi) ou un membre…"}
           </p>}
         </div>
 
@@ -1370,6 +1366,11 @@ export default function GalaxyView({
             onPortfolioCreated={p => setSelected({ kind: "portfolio", id: p.id, name: p.name, color: p.color, skin: p.skin, total: 0, count: 0, memberId: p.memberId })} />
         </div>
       </div>
+      {showPlanetModal && (
+        <PlanetModal members={members} ownerName={ownerName}
+          onSubmit={async d => { const p = await actions.createPortfolio(d); setSelected({ kind: "portfolio", id: p.id, name: p.name, color: p.color, skin: p.skin, total: 0, count: 0, memberId: p.memberId }); }}
+          onClose={() => setShowPlanetModal(false)} />
+      )}
     </div>
   );
 }

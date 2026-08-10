@@ -90,6 +90,22 @@ const SKIN_OPTIONS: { value: string; label: string; preview?: string }[] = [
   { value: "generic", label: "Autre (couleur unie)" },
 ];
 
+function SkinPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="grid grid-cols-3 gap-2">
+      {SKIN_OPTIONS.map(o => (
+        <button key={o.value} type="button" onClick={() => onChange(o.value)}
+          className={`flex flex-col items-center gap-1 p-2 rounded-lg border text-[10px] transition-colors ${value === o.value ? "border-accent bg-accent/10 text-accent" : "border-border text-text-muted hover:border-accent/50 hover:text-text"}`}>
+          {o.preview
+            ? <img src={o.preview} alt={o.label} className="w-10 h-10 rounded-full object-cover" />
+            : <span className={`w-10 h-10 rounded-full ${o.value === "" ? "bg-gradient-to-br from-accent/60 to-accent/20 border border-dashed border-accent/50" : "bg-[conic-gradient(from_0deg,#7c6af5,#34d399,#60a5fa,#fb923c,#f0abfc,#7c6af5)]"}`} />}
+          <span className="text-center leading-tight">{o.label.split(" (")[0]}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function PortfolioForm({ initial, members, ownerName, onSubmit, onDelete, onCancel }:
   { initial?: { name: string; color: string; skin: string | null; memberId: number | null }; members: Member[]; ownerName: string; onSubmit: (d: Record<string, unknown>) => void; onDelete?: () => void; onCancel: () => void }) {
   const [name, setName] = useState(initial?.name ?? "");
@@ -97,17 +113,29 @@ function PortfolioForm({ initial, members, ownerName, onSubmit, onDelete, onCanc
   const [skin, setSkin] = useState(initial?.skin ?? "");
   const [memberId, setMemberId] = useState(String(initial?.memberId ?? ""));
   return (
-    <form onSubmit={e => { e.preventDefault(); onSubmit({ name, color, skin: skin || null, memberId: memberId ? Number(memberId) : null }); }} className="space-y-1">
+    <form onSubmit={e => { e.preventDefault(); onSubmit({ name, color, skin: skin || null, memberId: memberId ? Number(memberId) : null }); }} className="space-y-2">
       <p className="text-[10px] text-text-muted uppercase tracking-wide">{initial ? "Planète" : "Nouvelle planète"}</p>
       <Label>Nom</Label><Inp required value={name} onChange={e => setName(e.target.value)} placeholder="PEA, CTO, Salaire…" />
       {members.length > 0 && <><Label>Membre</Label><Sel value={memberId} onChange={e => setMemberId(e.target.value)}><option value="">{ownerName}</option>{members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</Sel></>}
       <Label>Skin</Label>
-      <Sel value={skin} onChange={e => setSkin(e.target.value)}>
-        {SKIN_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-      </Sel>
+      <SkinPicker value={skin} onChange={setSkin} />
       {(skin === "" || skin === "generic") && <><Label>Couleur</Label><ColorPick value={color} onChange={setColor} /></>}
       <div className="flex gap-2 pt-3">{onDelete && <Btn type="button" variant="danger" onClick={onDelete}><Trash2 size={12} /></Btn>}<Btn type="submit" variant="accent" className="flex-1">{initial ? "Enregistrer" : "Créer"}</Btn><Btn type="button" onClick={onCancel}>Fermer</Btn></div>
     </form>
+  );
+}
+
+// ── Planet creation modal ────────────────────────────────────────────────────
+export function PlanetModal({ members, ownerName, onSubmit, onClose }:
+  { members: Member[]; ownerName: string; onSubmit: (d: Record<string, unknown>) => Promise<void>; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="w-full max-w-sm bg-surface border border-border rounded-xl p-5 shadow-2xl" onClick={e => e.stopPropagation()}>
+        <PortfolioForm members={members} ownerName={ownerName}
+          onSubmit={async d => { await onSubmit(d); onClose(); }}
+          onCancel={onClose} />
+      </div>
+    </div>
   );
 }
 
