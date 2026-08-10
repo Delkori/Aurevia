@@ -25,6 +25,7 @@ export async function POST(req: NextRequest) {
       amount: body.amount,
       frequency: body.frequency || "monthly",
       memberId: body.memberId || null,
+      ...(body.createdAt ? { createdAt: new Date(body.createdAt) } : {}),
     }).returning();
     return NextResponse.json(created, { status: 201 });
   } catch (err) { return handleApiError(err); }

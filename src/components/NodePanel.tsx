@@ -19,6 +19,7 @@ export type Selection =
   | { kind: "asset"; asset: Asset; value: number; gain: number; gainPct: number; portfolioName: string }
   | { kind: "goal"; goal: Goal; progress: number; linkedPortfolioIds: number[] }
   | { kind: "member"; member: Member; total: number }
+  | { kind: "flow-item"; flowId: number; label: string; isExpense: boolean }
   | null;
 
 export type Actions = {
@@ -157,9 +158,9 @@ function GoalForm({ initial, progress, members, ownerName, onSubmit, onDelete, o
 }
 
 // ── Flow Form ────────────────────────────────────────────────────────────────
-function FlowForm({ portfolios, goals, members, ownerName, defaultTargetType, defaultMemberId, onSubmit, onCancel }:
-  { portfolios: Portfolio[]; goals: Goal[]; members: Member[]; ownerName: string; defaultTargetType?: string; defaultMemberId?: number | null; onSubmit: (d: Record<string, unknown>) => void; onCancel: () => void }) {
-  const [f, setF] = useState({ sourceType: "salary", sourceId: "", targetType: defaultTargetType ?? "portfolio", targetId: "", amount: "", frequency: "monthly", name: "", memberId: defaultMemberId ? String(defaultMemberId) : "" });
+function FlowForm({ portfolios, goals, members, ownerName, defaultTargetType, defaultMemberId, defaultTargetId, onSubmit, onCancel }:
+  { portfolios: Portfolio[]; goals: Goal[]; members: Member[]; ownerName: string; defaultTargetType?: string; defaultMemberId?: number | null; defaultTargetId?: number; onSubmit: (d: Record<string, unknown>) => void; onCancel: () => void }) {
+  const [f, setF] = useState({ sourceType: "salary", sourceId: "", targetType: defaultTargetType ?? "portfolio", targetId: defaultTargetId ? String(defaultTargetId) : "", amount: "", frequency: "monthly", name: "", memberId: defaultMemberId ? String(defaultMemberId) : "", date: new Date().toISOString().slice(0, 10) });
   const membersWithSalary = members.filter(m => m.salary && Number(m.salary) > 0);
   const targets = f.targetType === "portfolio" ? portfolios.map(p => ({ id: p.id, name: p.name }))
     : f.targetType === "goal" ? goals.map(g => ({ id: g.id, name: g.name }))
@@ -171,7 +172,7 @@ function FlowForm({ portfolios, goals, members, ownerName, defaultTargetType, de
   const isIncome = f.targetType === "income";
   const isExpenseOrIncome = f.targetType === "expense" || isIncome;
   return (
-    <form onSubmit={e => { e.preventDefault(); onSubmit({ ...f, sourceType: isIncome ? "external" : f.sourceType, sourceId: isIncome ? null : (f.sourceId ? Number(f.sourceId) : null), targetId: f.targetId ? Number(f.targetId) : null, memberId: f.memberId ? Number(f.memberId) : null }); }} className="space-y-1">
+    <form onSubmit={e => { e.preventDefault(); onSubmit({ ...f, sourceType: isIncome ? "external" : f.sourceType, sourceId: isIncome ? null : (f.sourceId ? Number(f.sourceId) : null), targetId: f.targetId ? Number(f.targetId) : null, memberId: f.memberId ? Number(f.memberId) : null, createdAt: f.date ? new Date(f.date).toISOString() : undefined }); }} className="space-y-1">
       <p className="text-[10px] text-text-muted uppercase tracking-wide">Nouveau flux</p>
       <Label>Nom (optionnel)</Label><Inp value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="Loyer, Épargne PEA…" />
       {!isIncome && <>
@@ -187,7 +188,8 @@ function FlowForm({ portfolios, goals, members, ownerName, defaultTargetType, de
         <Sel value={f.memberId} onChange={e => setF({ ...f, memberId: e.target.value })}><option value="">{ownerName}</option>{members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</Sel>
       </>}
       <Label>Montant</Label><Inp required type="number" step="any" value={f.amount} onChange={e => setF({ ...f, amount: e.target.value })} placeholder="800" className="tabular" />
-      <Label>Fréquence</Label><Sel value={f.frequency} onChange={e => setF({ ...f, frequency: e.target.value })}><option value="monthly">Mensuel</option><option value="weekly">Hebdo</option><option value="yearly">Annuel</option></Sel>
+      <Label>Fréquence</Label><Sel value={f.frequency} onChange={e => setF({ ...f, frequency: e.target.value })}><option value="daily">Journalier</option><option value="weekly">Hebdo</option><option value="monthly">Mensuel</option><option value="yearly">Annuel</option></Sel>
+      <Label>Date de départ</Label><Inp type="date" value={f.date} onChange={e => setF({ ...f, date: e.target.value })} />
       <div className="flex gap-2 pt-3"><Btn type="submit" variant="accent" className="flex-1">Créer</Btn><Btn type="button" onClick={onCancel}>Fermer</Btn></div>
     </form>
   );
@@ -401,7 +403,13 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
           <div className="flex gap-2">
             <Btn variant="accent" className="flex-1" onClick={() => setCreateMode("edit-portfolio")}>Modifier</Btn>
             <Btn onClick={() => { setCreateMode("asset"); }}>+ Satellite</Btn>
+            <Btn onClick={() => { setCreateMode("flow-to-portfolio"); }}>+ Flux</Btn>
           </div>
+
+          {createMode === "flow-to-portfolio" && (
+            <FlowForm portfolios={portfolios} goals={goals} members={members} ownerName={ownerName} defaultTargetId={selected.id}
+              onSubmit={async d => { await actions.createFlow(d); clear(); }} onCancel={clear} />
+          )}
 
           {/* Edit form (hidden by default) */}
           {createMode === "edit-portfolio" && <PortfolioForm initial={{ name: selected.name, color: selected.color, skin: selected.skin, memberId: selected.memberId }} members={members} ownerName={ownerName}
@@ -562,6 +570,25 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
             onCancel={() => setCreateMode(null)} />}
         </div>
       )}
+
+      {selected?.kind === "flow-item" && (() => {
+        const flow = flows.find(fl => fl.id === selected.flowId);
+        return <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <span className={`w-2 h-2 rounded-full shrink-0 ${selected.isExpense ? "bg-negative" : "bg-positive"}`} />
+            <h3 className="font-medium font-[family-name:var(--font-heading)] text-sm">{selected.label}</h3>
+          </div>
+          {flow ? (
+            <>
+              <p className={`text-2xl font-[family-name:var(--font-mono-num)] tabular ${selected.isExpense ? "text-negative" : "text-positive"}`}>{formatMoney(Number(flow.amount))}</p>
+              <p className="text-xs text-text-muted">{flow.frequency === "daily" ? "Journalier" : flow.frequency === "weekly" ? "Hebdo" : flow.frequency === "yearly" ? "Annuel" : "Mensuel"}</p>
+            </>
+          ) : <p className="text-xs text-text-muted">Flux introuvable.</p>}
+          <Btn variant="danger" className="w-full" onClick={async () => { if (!confirm(`Supprimer "${selected.label}" ?`)) return; await actions.deleteFlow(selected.flowId); clear(); }}>
+            <Trash2 size={12} /> Supprimer
+          </Btn>
+        </div>;
+      })()}
     </div>
   );
 }

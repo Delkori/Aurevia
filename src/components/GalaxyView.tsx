@@ -5,7 +5,7 @@ import {
   forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY,
   type Simulation, type SimulationNodeDatum,
 } from "d3-force";
-import { FolderPlus, Plus, PlusCircle, Star, ArrowRight, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, Sparkles, AlertTriangle, UserCheck, Bell } from "lucide-react";
+import { FolderPlus, Plus, PlusCircle, Star, ArrowRight, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, Sparkles, AlertTriangle, UserCheck, Bell, Clock } from "lucide-react";
 import { formatMoney } from "@/lib/format";
 import { currentValue, gain, gainPercent, totalDebt } from "@/lib/networth";
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
@@ -135,7 +135,7 @@ interface GNode extends SimulationNodeDatum {
   id: string; kind: string; label: string; r: number; color: string;
   portfolioKey?: number | "unassigned"; assetId?: number; goalId?: number; memberId?: number;
   gainVal?: number; gainPct?: number; sub?: string; logoUrl?: string | null; skin?: PlanetSkin;
-  ownerExpenseTotal?: number; ownerRevenue?: number;
+  ownerExpenseTotal?: number; ownerRevenue?: number; flowId?: number;
 }
 interface GLink { source: string; target: string }
 
@@ -176,6 +176,7 @@ export default function GalaxyView({
   const [alertsOpen, setAlertsOpen] = useState(false);
   const [expenseMemberId, setExpenseMemberId] = useState<number | null>(null);
   const [hideAmounts, setHideAmounts] = useState(false);
+  const [showScrubBar, setShowScrubBar] = useState(true);
   const mask = (s: string) => hideAmounts ? "•••" : s;
   const [scrubYears, setScrubYears] = useState(0);
   const [scrubGrowth, setScrubGrowth] = useState(5);
@@ -215,6 +216,7 @@ export default function GalaxyView({
     if (f.targetType !== "portfolio" && f.targetType !== "goal") return s;
     const amt = Number(f.amount);
     if (f.frequency === "monthly") return s + amt;
+    if (f.frequency === "daily") return s + amt * 30.44;
     if (f.frequency === "weekly") return s + amt * 4.345;
     if (f.frequency === "yearly") return s + amt / 12;
     return s;
@@ -248,7 +250,7 @@ export default function GalaxyView({
 
     incomeFlows.forEach(inf => {
       const iid = `inc-${inf.id}`;
-      nodes.push({ id: iid, kind: "income-item", label: inf.name || "Revenu", r: 10 + Math.min(8, Number(inf.amount) / 200), color: "#34d399", sub: formatMoney(Number(inf.amount)) });
+      nodes.push({ id: iid, kind: "income-item", label: inf.name || "Revenu", r: 10 + Math.min(8, Number(inf.amount) / 200), color: "#34d399", sub: formatMoney(Number(inf.amount)), flowId: inf.id });
       links.push({ source: "salary", target: iid });
     });
 
@@ -270,7 +272,7 @@ export default function GalaxyView({
       if (myExpenseTotal > 0) flowLinks.push({ source: "salary", target: "expenses", label: formatMoney(myExpenseTotal), amount: myExpenseTotal });
       myExpFlows.forEach(ef => {
         const eid = `exp-${ef.id}`;
-        nodes.push({ id: eid, kind: "expense-item", label: ef.name || "Dépense", r: 10 + Math.min(8, Number(ef.amount) / 100), color: "#f87171", sub: formatMoney(Number(ef.amount)) });
+        nodes.push({ id: eid, kind: "expense-item", label: ef.name || "Dépense", r: 10 + Math.min(8, Number(ef.amount) / 100), color: "#f87171", sub: formatMoney(Number(ef.amount)), flowId: ef.id });
         links.push({ source: "expenses", target: eid });
       });
     }
@@ -295,7 +297,7 @@ export default function GalaxyView({
       links.push({ source: `m-${m.id}`, target: meid });
       memberExpFlows.forEach(ef => {
         const eid = `exp-${ef.id}`;
-        nodes.push({ id: eid, kind: "expense-item", label: ef.name || "Dépense", r: 10 + Math.min(8, Number(ef.amount) / 100), color: "#f87171", sub: formatMoney(Number(ef.amount)) });
+        nodes.push({ id: eid, kind: "expense-item", label: ef.name || "Dépense", r: 10 + Math.min(8, Number(ef.amount) / 100), color: "#f87171", sub: formatMoney(Number(ef.amount)), flowId: ef.id });
         links.push({ source: meid, target: eid });
       });
     });
@@ -553,7 +555,8 @@ export default function GalaxyView({
     setCreateMode(null);
     if (n.kind === "center") setSelected({ kind: "total", total: grandTotal, grossTotal, debt });
     else if (n.kind === "salary") { setCreateMode("salary"); setSelected({ kind: "total", total: grandTotal, grossTotal, debt }); }
-    else if (n.kind === "expenses" || n.kind === "expense-item" || n.kind === "income-item" || n.kind === "reste") setSelected({ kind: "total", total: grandTotal, grossTotal, debt });
+    else if ((n.kind === "expense-item" || n.kind === "income-item") && n.flowId != null) setSelected({ kind: "flow-item", flowId: n.flowId, label: n.label, isExpense: n.kind === "expense-item" });
+    else if (n.kind === "expenses" || n.kind === "reste") setSelected({ kind: "total", total: grandTotal, grossTotal, debt });
     else if (n.kind === "portfolio" && n.portfolioKey !== undefined) {
       const g = groups.find(gr => gr.key === n.portfolioKey)!;
       toggle(n.portfolioKey);
@@ -1028,7 +1031,7 @@ export default function GalaxyView({
                   {SALARY_IMAGE && <rect x={-n.r * 0.95} y={-15} width={n.r * 1.9} height={27} rx={5} fill="rgba(6,6,10,0.55)" />}
                   <text y={-5} textAnchor="middle" fontSize={11} fontWeight={600} fill="#fff" style={ts}>Revenus</text>
                   <text y={9} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.9)" style={ts}>{n.sub && mask(n.sub)}/mois</text>
-                  <g transform={`translate(${n.r * 0.68},${n.r * 0.68})`} style={{ cursor: "pointer" }}
+                  <g transform={`translate(${(n.r + 13) * 0.7071},${(n.r + 13) * 0.7071})`} style={{ cursor: "pointer" }}
                     onPointerDown={e => e.stopPropagation()}
                     onClick={e => { e.stopPropagation(); setSelected(null); setCreateMode("income"); }}>
                     <circle r={11} fill="#12121a" stroke="#34d399" strokeWidth={1.2} />
@@ -1097,7 +1100,7 @@ export default function GalaxyView({
                       {tier === "critical" && <text y={34} textAnchor="middle" fontSize={9} fill="#ff2200" fontWeight={700} opacity={0.7 + Math.sin(t * 8) * 0.3} style={ts}>DÉFICIT CRITIQUE</text>}
                       {tier === "eruption" && <text y={34} textAnchor="middle" fontSize={9} fill="#ff6b35" fontWeight={700} opacity={0.6 + Math.sin(t * 6) * 0.4} style={ts}>DÉFICIT</text>}
                     </g>
-                    <g transform={`translate(${R * 0.68},${R * 0.68})`} style={{ cursor: "pointer" }}
+                    <g transform={`translate(${(R + 13) * 0.7071},${(R + 13) * 0.7071})`} style={{ cursor: "pointer" }}
                       onPointerDown={e => e.stopPropagation()}
                       onClick={e => { e.stopPropagation(); setExpenseMemberId(n.memberId ?? null); setCreateMode("expense"); }}>
                       <circle r={11} fill="#12121a" stroke="#f87171" strokeWidth={1.2} />
@@ -1176,7 +1179,7 @@ export default function GalaxyView({
                     <text y={9} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.85)" style={ts}>{n.sub && mask(n.sub)}</text>
                     {(n.gainVal ?? 0) !== 0 && <text y={22} textAnchor="middle" fontSize={8} fill={(n.gainVal ?? 0) >= 0 ? "#34d399" : "#fb7185"} style={ts}>{mask(`${(n.gainVal ?? 0) >= 0 ? "+" : ""}${formatMoney(n.gainVal ?? 0)}`)}</text>}
                     {selected?.kind === "portfolio" && selected.id === n.portfolioKey && (
-                      <g transform={`translate(${n.r * 0.68},${n.r * 0.68})`} style={{ cursor: "pointer" }}
+                      <g transform={`translate(${(n.r + 13) * 0.7071},${(n.r + 13) * 0.7071})`} style={{ cursor: "pointer" }}
                         onPointerDown={e => e.stopPropagation()}
                         onClick={e => { e.stopPropagation(); setCreateMode("asset"); }}>
                         <circle r={11} fill="#12121a" stroke="#9585ff" strokeWidth={1.2} />
@@ -1288,17 +1291,22 @@ export default function GalaxyView({
         <p className="absolute bottom-3 left-1/2 -translate-x-1/2 text-[10px] text-white/20 pointer-events-none">Molette = zoom · glisser pour déplacer · glisser un actif vers un portefeuille pour le réassigner</p>
 
         {/* Curseur chronologique : projette le Patrimoine à une date future, hypothèse à taux constant */}
-        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 w-[min(620px,92%)] bg-surface/80 border border-border rounded-lg px-4 py-2.5 backdrop-blur flex items-center gap-3">
-          <span className="text-[10px] text-text-muted tabular shrink-0">{currentYearForScrub}</span>
-          <input type="range" min={0} max={30} value={scrubYears} onChange={e => setScrubYears(Number(e.target.value))} className="flex-1" />
-          <span className="text-[10px] text-text-muted tabular shrink-0">{currentYearForScrub + 30}</span>
-          <span className={`text-xs font-semibold tabular shrink-0 w-24 text-right ${scrubYears > 0 ? "text-[#9585ff]" : "text-text-muted"}`}>
-            {scrubYears === 0 ? "Maintenant" : scrubYear}
-          </span>
-          <div className="w-px h-4 bg-border shrink-0" />
-          <input type="number" step="0.5" min={0} max={20} value={scrubGrowth} onChange={e => setScrubGrowth(Number(e.target.value))} title="Croissance annuelle moyenne supposée" className="w-12 bg-bg border border-border rounded px-1 py-0.5 text-[10px] tabular shrink-0" />
-          <span className="text-[10px] text-text-muted shrink-0">%/an</span>
-        </div>
+        {showScrubBar && (
+          <div className="absolute bottom-10 left-1/2 -translate-x-1/2 w-[min(620px,92%)] bg-surface/80 border border-border rounded-lg px-4 py-2.5 backdrop-blur flex items-center gap-3">
+            <span className="text-[10px] text-text-muted tabular shrink-0">{currentYearForScrub}</span>
+            <input type="range" min={0} max={30} value={scrubYears} onChange={e => setScrubYears(Number(e.target.value))} className="flex-1" />
+            <span className="text-[10px] text-text-muted tabular shrink-0">{currentYearForScrub + 30}</span>
+            <span className={`text-xs font-semibold tabular shrink-0 w-24 text-right ${scrubYears > 0 ? "text-[#9585ff]" : "text-text-muted"}`}>
+              {scrubYears === 0 ? "Maintenant" : scrubYear}
+            </span>
+            <div className="w-px h-4 bg-border shrink-0" />
+            <input type="number" step="0.5" min={0} max={20} value={scrubGrowth} onChange={e => setScrubGrowth(Number(e.target.value))} title="Croissance annuelle moyenne supposée" className="w-12 bg-bg border border-border rounded px-1 py-0.5 text-[10px] tabular shrink-0" />
+            <span className="text-[10px] text-text-muted shrink-0">%/an</span>
+            <button title="Masquer la simulation" onClick={() => setShowScrubBar(false)} className="shrink-0 text-text-muted hover:text-negative">
+              <X size={13} />
+            </button>
+          </div>
+        )}
 
         {pendingLink && (
           <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-surface border border-border rounded-xl p-4 w-64 shadow-xl space-y-2">
@@ -1329,6 +1337,10 @@ export default function GalaxyView({
         <div className="border-l border-b border-border bg-surface/40 flex items-center justify-end gap-2 pl-4 pr-5 min-w-0">
           <button title={hideAmounts ? "Afficher les montants" : "Masquer les montants"} onClick={() => setHideAmounts(h => !h)} className={`shrink-0 ${hideAmounts ? "text-accent" : "text-text-muted"} hover:text-text`}>
             {hideAmounts ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+          <div className="w-px h-5 bg-border shrink-0" />
+          <button title={showScrubBar ? "Masquer la simulation future" : "Afficher la simulation future"} onClick={() => setShowScrubBar(s => !s)} className={`shrink-0 ${showScrubBar ? "text-accent" : "text-text-muted"} hover:text-text`}>
+            <Clock size={16} />
           </button>
           <div className="w-px h-5 bg-border shrink-0" />
           <button title="Notifications" className="shrink-0 text-text-muted hover:text-text">

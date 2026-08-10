@@ -12,6 +12,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       name: body.name, sourceType: body.sourceType, sourceId: body.sourceId,
       targetType: body.targetType, targetId: body.targetId,
       amount: body.amount, frequency: body.frequency, memberId: body.memberId,
+      ...(body.createdAt ? { createdAt: new Date(body.createdAt) } : {}),
     }).where(eq(flows.id, Number(id))).returning();
     if (!updated) return NextResponse.json({ error: "Introuvable." }, { status: 404 });
     return NextResponse.json(updated);

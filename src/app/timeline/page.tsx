@@ -21,7 +21,7 @@ function projectedValue(p0: number, monthlyContribution: number, annualRatePct: 
   return p0 * growth + monthlyContribution * ((growth - 1) / r);
 }
 
-const FREQ_LABEL: Record<string, string> = { monthly: "mensuel", weekly: "hebdo", yearly: "annuel" };
+const FREQ_LABEL: Record<string, string> = { daily: "quotidien", monthly: "mensuel", weekly: "hebdo", yearly: "annuel" };
 
 export default function TimelinePage() {
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
@@ -76,6 +76,7 @@ export default function TimelinePage() {
     if (f.targetType !== "portfolio" && f.targetType !== "goal") return s;
     const amt = Number(f.amount);
     if (f.frequency === "monthly") return s + amt;
+    if (f.frequency === "daily") return s + amt * 30.44;
     if (f.frequency === "weekly") return s + amt * 4.345;
     if (f.frequency === "yearly") return s + amt / 12;
     return s;
