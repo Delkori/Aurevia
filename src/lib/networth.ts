@@ -46,6 +46,45 @@ export function gainPercent(asset: AssetLike, quote: Quote): number {
   return (gain(asset, quote) / cost) * 100;
 }
 
+export type PortfolioOwnershipLike = {
+  portfolioId: number;
+  memberId: number | null;
+  sharePercent: string;
+};
+
+/**
+ * Part (0 à 1) d'un portefeuille possédée par un membre donné (memberId === null
+ * représente le propriétaire principal du foyer, cf. "ownerName").
+ *
+ * Si aucune quote-part n'est définie pour ce portefeuille, on retombe sur
+ * l'ancien modèle "un seul propriétaire" : 100% pour portfolio.memberId, 0%
+ * pour les autres — ce qui garde les portefeuilles existants inchangés tant
+ * que personne n'a explicitement configuré de partage.
+ */
+export function memberShareOfPortfolio(
+  portfolioId: number,
+  memberId: number | null,
+  ownerships: PortfolioOwnershipLike[],
+  portfolioOwnerMemberId: number | null
+): number {
+  const rows = ownerships.filter((o) => o.portfolioId === portfolioId);
+  if (rows.length === 0) {
+    return portfolioOwnerMemberId === memberId ? 1 : 0;
+  }
+  const row = rows.find((o) => o.memberId === memberId);
+  return row ? Number(row.sharePercent) / 100 : 0;
+}
+
+/** Somme des quotes-parts définies pour un portefeuille (idéalement 100). */
+export function totalSharePercent(
+  portfolioId: number,
+  ownerships: PortfolioOwnershipLike[]
+): number {
+  return ownerships
+    .filter((o) => o.portfolioId === portfolioId)
+    .reduce((s, o) => s + Number(o.sharePercent), 0);
+}
+
 export type LoanLike = {
   remainingBalance: string;
 };

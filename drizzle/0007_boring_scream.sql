@@ -1,1 +1,0 @@
-ALTER TABLE "portfolios" ADD COLUMN "skin" text;

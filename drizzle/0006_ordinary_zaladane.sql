@@ -1,1 +1,0 @@
-ALTER TABLE "members" ADD COLUMN "salary" numeric;

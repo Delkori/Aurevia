@@ -1,1 +1,0 @@
-ALTER TABLE "assets" ADD COLUMN "yield_rate" numeric;

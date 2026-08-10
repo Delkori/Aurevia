@@ -57,6 +57,13 @@
       "when": 1786303072398,
       "tag": "0007_boring_scream",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786354598046,
+      "tag": "0008_portfolio_ownerships",
+      "breakpoints": true
     }
   ]
 }
