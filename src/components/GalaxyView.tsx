@@ -135,6 +135,7 @@ interface GNode extends SimulationNodeDatum {
   id: string; kind: string; label: string; r: number; color: string;
   portfolioKey?: number | "unassigned"; assetId?: number; goalId?: number; memberId?: number;
   gainVal?: number; gainPct?: number; sub?: string; logoUrl?: string | null; skin?: PlanetSkin;
+  ownerExpenseTotal?: number; ownerRevenue?: number;
 }
 interface GLink { source: string; target: string }
 
@@ -173,6 +174,9 @@ export default function GalaxyView({
   const [ownerSourceNode, setOwnerSourceNode] = useState<{ id: string; kind: "center" | "member"; memberId?: number; label: string } | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [alertsOpen, setAlertsOpen] = useState(false);
+  const [expenseMemberId, setExpenseMemberId] = useState<number | null>(null);
+  const [hideAmounts, setHideAmounts] = useState(false);
+  const mask = (s: string) => hideAmounts ? "•••" : s;
   const [scrubYears, setScrubYears] = useState(0);
   const [scrubGrowth, setScrubGrowth] = useState(5);
   const [linkSourceNode, setLinkSourceNode] = useState<{ id: string; kind: string; portfolioKey?: number | "unassigned"; memberId?: number; label: string } | null>(null);
@@ -248,17 +252,23 @@ export default function GalaxyView({
       links.push({ source: "salary", target: iid });
     });
 
+    // Chaque personne (Moi + chaque membre) a sa propre planète Dépenses — avant, tous les
+    // flux de dépense atterrissaient sur un seul nœud "expenses" partagé par le foyer entier,
+    // impossible à dupliquer pour un conjoint. On regroupe donc les flux de dépense par
+    // memberId (null = Moi) et on crée un nœud par propriétaire.
     const expFlows = flows.filter(f => f.targetType === "expense");
     const totalExpenseFlows = expFlows.reduce((s, f) => s + Number(f.amount), 0);
+    const myExpFlows = expFlows.filter(f => f.memberId == null);
+    const myExpenseTotal = myExpFlows.reduce((s, f) => s + Number(f.amount), 0);
     const salInvest = flows.filter(f => f.sourceType === "salary" && (f.targetType === "portfolio" || f.targetType === "goal"));
     const totalInvest = salInvest.reduce((s, f) => s + Number(f.amount), 0);
     const resteAInvestir = totalRevenue > 0 ? Math.max(0, totalRevenue - totalInvest - totalExpenseFlows) : 0;
 
     if (totalRevenue > 0) {
-      nodes.push({ id: "expenses", kind: "expenses", label: "Dépenses", r: 22 + Math.min(18, totalExpenseFlows / 80), color: "#f87171" });
+      nodes.push({ id: "expenses", kind: "expenses", label: "Dépenses", r: 22 + Math.min(18, myExpenseTotal / 80), color: "#f87171", ownerExpenseTotal: myExpenseTotal, ownerRevenue: totalRevenue });
       links.push({ source: "salary", target: "expenses" });
-      if (totalExpenseFlows > 0) flowLinks.push({ source: "salary", target: "expenses", label: formatMoney(totalExpenseFlows), amount: totalExpenseFlows });
-      expFlows.forEach(ef => {
+      if (myExpenseTotal > 0) flowLinks.push({ source: "salary", target: "expenses", label: formatMoney(myExpenseTotal), amount: myExpenseTotal });
+      myExpFlows.forEach(ef => {
         const eid = `exp-${ef.id}`;
         nodes.push({ id: eid, kind: "expense-item", label: ef.name || "Dépense", r: 10 + Math.min(8, Number(ef.amount) / 100), color: "#f87171", sub: formatMoney(Number(ef.amount)) });
         links.push({ source: "expenses", target: eid });
@@ -277,6 +287,17 @@ export default function GalaxyView({
         nodes.push({ id: `ms-${m.id}`, kind: "member-salary", label: `Salaire de ${m.name}`, r: 22, color: m.color, memberId: m.id, sub: formatMoney(Number(m.salary)) });
         links.push({ source: `m-${m.id}`, target: `ms-${m.id}` });
       }
+      const memberExpFlows = expFlows.filter(f => f.memberId === m.id);
+      const memberExpenseTotal = memberExpFlows.reduce((s, f) => s + Number(f.amount), 0);
+      const memberRevenue = m.salary ? Number(m.salary) : 0;
+      const meid = `exp-m-${m.id}`;
+      nodes.push({ id: meid, kind: "expenses", label: `Dépenses de ${m.name}`, r: 22 + Math.min(18, memberExpenseTotal / 80), color: "#f87171", memberId: m.id, ownerExpenseTotal: memberExpenseTotal, ownerRevenue: memberRevenue });
+      links.push({ source: `m-${m.id}`, target: meid });
+      memberExpFlows.forEach(ef => {
+        const eid = `exp-${ef.id}`;
+        nodes.push({ id: eid, kind: "expense-item", label: ef.name || "Dépense", r: 10 + Math.min(8, Number(ef.amount) / 100), color: "#f87171", sub: formatMoney(Number(ef.amount)) });
+        links.push({ source: meid, target: eid });
+      });
     });
 
     for (const g of groups) {
@@ -733,7 +754,7 @@ export default function GalaxyView({
             return <button key={mode} onClick={() => {
               if (mode === "link") { setSelected(null); setCreateMode(null); setOwnerMode(false); setOwnerSourceNode(null); setLinkSourceNode(null); setLinkMode(m => !m); }
               else if (mode === "owner") { setSelected(null); setCreateMode(null); setLinkMode(false); setLinkSourceNode(null); setOwnerSourceNode(null); setOwnerMode(m => !m); }
-              else { setSelected(null); setLinkMode(false); setLinkSourceNode(null); setOwnerMode(false); setOwnerSourceNode(null); setCreateMode(mode); }
+              else { setSelected(null); setLinkMode(false); setLinkSourceNode(null); setOwnerMode(false); setOwnerSourceNode(null); setExpenseMemberId(null); setCreateMode(mode); }
             }}
               className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs transition-colors ${active ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text hover:bg-surface-hover"}`}>
               <Icon size={13} className="shrink-0" />{label}
@@ -882,7 +903,7 @@ export default function GalaxyView({
               const mid = bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, 0.5);
               return <g key={`fl-${i}`}>
                 <path d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke="#9585ff" strokeOpacity={0.3} strokeWidth={1.5} strokeDasharray="6 4" />
-                <text x={mid.x} y={mid.y - 12} textAnchor="middle" fontSize={10} fill="#b8a5ff" opacity={0.75} fontWeight={500}>{f.label}</text>
+                <text x={mid.x} y={mid.y - 12} textAnchor="middle" fontSize={10} fill="#b8a5ff" opacity={0.75} fontWeight={500}>{mask(f.label)}</text>
                 {showCountdown && f.days !== undefined && !Number.isNaN(f.days) && (
                   <text x={mid.x} y={mid.y + 2} textAnchor="middle" fontSize={8} fill="#fbbf24" opacity={0.85} fontWeight={600}>
                     {f.days === 0 ? "aujourd'hui" : `dans ${f.days}j`}
@@ -989,7 +1010,7 @@ export default function GalaxyView({
                     </g>
 
                     <text y={-3} textAnchor="middle" fontSize={12} fontWeight={600} fill="#fff" style={ts}>{scrubYears > 0 ? `Patrimoine en ${scrubYear}` : "Patrimoine"}</text>
-                    <text y={13} textAnchor="middle" fontSize={10} fill={scrubYears > 0 ? "#9585ff" : "rgba(255,230,160,0.9)"} fontWeight={scrubYears > 0 ? 600 : 400}>{formatMoney(scrubProjectedTotal)}{scrubYears > 0 ? " (projection)" : ""}</text>
+                    <text y={13} textAnchor="middle" fontSize={10} fill={scrubYears > 0 ? "#9585ff" : "rgba(255,230,160,0.9)"} fontWeight={scrubYears > 0 ? 600 : 400}>{mask(formatMoney(scrubProjectedTotal))}{scrubYears > 0 ? " (projection)" : ""}</text>
                   </>;
                 })()}
 
@@ -1006,7 +1027,7 @@ export default function GalaxyView({
                   <circle r={n.r} fill="url(#sph-hl)" />
                   {SALARY_IMAGE && <rect x={-n.r * 0.95} y={-15} width={n.r * 1.9} height={27} rx={5} fill="rgba(6,6,10,0.55)" />}
                   <text y={-5} textAnchor="middle" fontSize={11} fontWeight={600} fill="#fff" style={ts}>Revenus</text>
-                  <text y={9} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.9)" style={ts}>{n.sub}/mois</text>
+                  <text y={9} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.9)" style={ts}>{n.sub && mask(n.sub)}/mois</text>
                   <g transform={`translate(${n.r * 0.68},${n.r * 0.68})`} style={{ cursor: "pointer" }}
                     onPointerDown={e => e.stopPropagation()}
                     onClick={e => { e.stopPropagation(); setSelected(null); setCreateMode("income"); }}>
@@ -1015,15 +1036,18 @@ export default function GalaxyView({
                   </g>
                 </>}
 
-                {n.kind === "income-item" && <><circle r={n.r} fill="rgba(52,211,153,0.1)" stroke="rgba(52,211,153,0.25)" strokeWidth={0.5} /><text y={-1} textAnchor="middle" fontSize={8} fill="rgba(255,255,255,0.7)">{n.label.length > 10 ? n.label.slice(0, 9) + "…" : n.label}</text><text y={8} textAnchor="middle" fontSize={7} fill="rgba(52,211,153,0.85)">{n.sub}</text></>}
+                {n.kind === "income-item" && <><circle r={n.r} fill="rgba(52,211,153,0.1)" stroke="rgba(52,211,153,0.25)" strokeWidth={0.5} /><text y={-1} textAnchor="middle" fontSize={8} fill="rgba(255,255,255,0.7)">{n.label.length > 10 ? n.label.slice(0, 9) + "…" : n.label}</text><text y={8} textAnchor="middle" fontSize={7} fill="rgba(52,211,153,0.85)">{n.sub && mask(n.sub)}</text></>}
 
                 {n.kind === "expenses" && (() => {
                   const R = n.r;
+                  const ownerExpenseTotal = n.ownerExpenseTotal ?? 0;
+                  const ownerRevenue = n.ownerRevenue ?? 0;
+                  const ownerBudgetRatio = ownerRevenue > 0 ? ownerExpenseTotal / ownerRevenue : 0;
                   // Paliers resserrés pour que le stade visuel bouge avant le déficit, pas seulement après :
                   // warning jusqu'à 60% des revenus, eruption 60-100%, critical au-delà de 100%.
                   const tier: "calm" | "warning" | "eruption" | "critical" =
-                    totalExpenseFlows <= 0 ? "calm" :
-                    budgetRatio > 1 ? "critical" : budgetRatio > 0.6 ? "eruption" : "warning";
+                    ownerExpenseTotal <= 0 ? "calm" :
+                    ownerBudgetRatio > 1 ? "critical" : ownerBudgetRatio > 0.6 ? "eruption" : "warning";
                   const tierImage = tier !== "calm" ? EXPENSES_IMAGES[tier] : null;
                   const isOverBudget = tier === "eruption" || tier === "critical";
                   return <>
@@ -1065,26 +1089,26 @@ export default function GalaxyView({
                       return <circle key={`proj-${i}`} cx={px} cy={py} r={1.8 - phase} fill="#ff5500" opacity={1 - phase} />;
                     })}
                     {/* Warning shake effect on text */}
-                    {tierImage && <rect x={-R * 0.95} y={-15} width={R * 1.9} height={totalRevenue > 0 ? 42 : 27} rx={5} fill="rgba(6,6,10,0.55)" />}
+                    {tierImage && <rect x={-R * 0.95} y={-15} width={R * 1.9} height={ownerRevenue > 0 ? 42 : 27} rx={5} fill="rgba(6,6,10,0.55)" />}
                     <g transform={isOverBudget ? `translate(${Math.sin(t * 20) * 0.8},0)` : undefined}>
-                      <text y={-5} textAnchor="middle" fontSize={10} fontWeight={600} fill="#fff" style={ts}>Dépenses</text>
-                      <text y={9} textAnchor="middle" fontSize={9} fill={isOverBudget ? "#ffaa70" : tier === "warning" ? "#ffd280" : "rgba(255,255,255,0.85)"} style={ts}>{totalExpenseFlows > 0 ? formatMoney(totalExpenseFlows) : "0 €"}/m</text>
-                      {totalRevenue > 0 && <text y={22} textAnchor="middle" fontSize={8} fill={tier === "critical" ? "#ff2200" : tier === "eruption" ? "#ff6b35" : "#ffb84d"} fontWeight={600} style={ts}>{Math.round(budgetRatio * 100)}% des revenus</text>}
+                      <text y={-5} textAnchor="middle" fontSize={10} fontWeight={600} fill="#fff" style={ts}>{n.label}</text>
+                      <text y={9} textAnchor="middle" fontSize={9} fill={isOverBudget ? "#ffaa70" : tier === "warning" ? "#ffd280" : "rgba(255,255,255,0.85)"} style={ts}>{mask(ownerExpenseTotal > 0 ? formatMoney(ownerExpenseTotal) : "0 €")}/m</text>
+                      {ownerRevenue > 0 && <text y={22} textAnchor="middle" fontSize={8} fill={tier === "critical" ? "#ff2200" : tier === "eruption" ? "#ff6b35" : "#ffb84d"} fontWeight={600} style={ts}>{Math.round(ownerBudgetRatio * 100)}% des revenus</text>}
                       {tier === "critical" && <text y={34} textAnchor="middle" fontSize={9} fill="#ff2200" fontWeight={700} opacity={0.7 + Math.sin(t * 8) * 0.3} style={ts}>DÉFICIT CRITIQUE</text>}
                       {tier === "eruption" && <text y={34} textAnchor="middle" fontSize={9} fill="#ff6b35" fontWeight={700} opacity={0.6 + Math.sin(t * 6) * 0.4} style={ts}>DÉFICIT</text>}
                     </g>
                     <g transform={`translate(${R * 0.68},${R * 0.68})`} style={{ cursor: "pointer" }}
                       onPointerDown={e => e.stopPropagation()}
-                      onClick={e => { e.stopPropagation(); setCreateMode("expense"); }}>
+                      onClick={e => { e.stopPropagation(); setExpenseMemberId(n.memberId ?? null); setCreateMode("expense"); }}>
                       <circle r={11} fill="#12121a" stroke="#f87171" strokeWidth={1.2} />
                       <Plus x={-6} y={-6} size={12} color="#fca5a5" />
                     </g>
                   </>;
                 })()}
 
-                {n.kind === "expense-item" && <><circle r={n.r} fill="rgba(248,113,113,0.1)" stroke="rgba(248,113,113,0.2)" strokeWidth={0.5} /><text y={-1} textAnchor="middle" fontSize={8} fill="rgba(255,255,255,0.65)">{n.label.length > 10 ? n.label.slice(0, 9) + "…" : n.label}</text><text y={8} textAnchor="middle" fontSize={7} fill="rgba(248,113,113,0.75)">{n.sub}</text></>}
+                {n.kind === "expense-item" && <><circle r={n.r} fill="rgba(248,113,113,0.1)" stroke="rgba(248,113,113,0.2)" strokeWidth={0.5} /><text y={-1} textAnchor="middle" fontSize={8} fill="rgba(255,255,255,0.65)">{n.label.length > 10 ? n.label.slice(0, 9) + "…" : n.label}</text><text y={8} textAnchor="middle" fontSize={7} fill="rgba(248,113,113,0.75)">{n.sub && mask(n.sub)}</text></>}
 
-                {n.kind === "reste" && <><circle r={n.r} fill="url(#sph-reste)" /><circle r={n.r} fill="url(#sph-hl)" /><text y={-4} textAnchor="middle" fontSize={10} fontWeight={500} fill="#e0d8ff">Reste</text><text y={9} textAnchor="middle" fontSize={9} fill="rgba(200,185,255,0.8)">{formatMoney(resteAInvestir)}/m</text></>}
+                {n.kind === "reste" && <><circle r={n.r} fill="url(#sph-reste)" /><circle r={n.r} fill="url(#sph-hl)" /><text y={-4} textAnchor="middle" fontSize={10} fontWeight={500} fill="#e0d8ff">Reste</text><text y={9} textAnchor="middle" fontSize={9} fill="rgba(200,185,255,0.8)">{mask(formatMoney(resteAInvestir))}/m</text></>}
 
                 {n.kind === "portfolio" && (() => {
                   const skin = n.skin ?? "generic";
@@ -1149,8 +1173,8 @@ export default function GalaxyView({
                     <circle r={n.r} fill="url(#sph-hl)" stroke={n.color} strokeOpacity={isExp ? 0.35 : 0.1} strokeWidth={isExp ? 1.5 : 0.5} />
                     {imageHref && <rect x={-n.r * 0.95} y={-15} width={n.r * 1.9} height={(n.gainVal ?? 0) !== 0 ? 40 : 27} rx={5} fill="rgba(6,6,10,0.55)" />}
                     <text y={-6} textAnchor="middle" fontSize={11} fontWeight={600} fill="#fff" style={ts}>{n.label}</text>
-                    <text y={9} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.85)" style={ts}>{n.sub}</text>
-                    {(n.gainVal ?? 0) !== 0 && <text y={22} textAnchor="middle" fontSize={8} fill={(n.gainVal ?? 0) >= 0 ? "#34d399" : "#fb7185"} style={ts}>{(n.gainVal ?? 0) >= 0 ? "+" : ""}{formatMoney(n.gainVal ?? 0)}</text>}
+                    <text y={9} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.85)" style={ts}>{n.sub && mask(n.sub)}</text>
+                    {(n.gainVal ?? 0) !== 0 && <text y={22} textAnchor="middle" fontSize={8} fill={(n.gainVal ?? 0) >= 0 ? "#34d399" : "#fb7185"} style={ts}>{mask(`${(n.gainVal ?? 0) >= 0 ? "+" : ""}${formatMoney(n.gainVal ?? 0)}`)}</text>}
                     {selected?.kind === "portfolio" && selected.id === n.portfolioKey && (
                       <g transform={`translate(${n.r * 0.68},${n.r * 0.68})`} style={{ cursor: "pointer" }}
                         onPointerDown={e => e.stopPropagation()}
@@ -1182,6 +1206,8 @@ export default function GalaxyView({
                   </>;
                 })()}
 
+                {/* Le pourcentage de progression d'un objectif n'est pas un montant à masquer. */}
+
                 {n.kind === "asset" && (() => {
                   const isPos = (n.gainVal ?? 0) >= 0;
                   const isCracked = (n.gainPct ?? 0) <= -20;
@@ -1199,8 +1225,8 @@ export default function GalaxyView({
                       <image href={n.logoUrl!} x={-logoR * 0.55} y={-logoR * 0.75} width={logoR * 1.1} height={logoR * 1.1} clipPath={`url(#logo-${n.id})`} style={{ opacity: 0.9 }} />
                     </>}
                     <text y={hasLogo ? n.r * 0.55 : -3} textAnchor="middle" fontSize={hasLogo ? 7.5 : 9} fontWeight={500} fill={isCracked ? "#c8c4d2" : "#d8d8dc"}>{n.label.length > 11 ? n.label.slice(0, 10) + "…" : n.label}</text>
-                    {n.gainVal !== undefined && <text y={hasLogo ? n.r * 0.55 + 10 : 8} textAnchor="middle" fontSize={hasLogo ? 7 : 8} fill={isCracked ? "#fb7185" : n.gainVal >= 0 ? "#34d399" : "#fb7185"} fontWeight={isCracked ? 700 : 400}>{n.gainVal >= 0 ? "+" : ""}{formatMoney(n.gainVal)}</text>}
-                    {n.gainVal === undefined && <text y={hasLogo ? n.r * 0.55 + 10 : 8} textAnchor="middle" fontSize={hasLogo ? 7 : 8} fill="rgba(255,255,255,0.5)">{n.sub}</text>}
+                    {n.gainVal !== undefined && <text y={hasLogo ? n.r * 0.55 + 10 : 8} textAnchor="middle" fontSize={hasLogo ? 7 : 8} fill={isCracked ? "#fb7185" : n.gainVal >= 0 ? "#34d399" : "#fb7185"} fontWeight={isCracked ? 700 : 400}>{mask(`${n.gainVal >= 0 ? "+" : ""}${formatMoney(n.gainVal)}`)}</text>}
+                    {n.gainVal === undefined && <text y={hasLogo ? n.r * 0.55 + 10 : 8} textAnchor="middle" fontSize={hasLogo ? 7 : 8} fill="rgba(255,255,255,0.5)">{n.sub && mask(n.sub)}</text>}
                   </>;
                 })()}
 
@@ -1232,7 +1258,7 @@ export default function GalaxyView({
                   <circle r={n.r} fill="url(#sph-hl)" />
                   {SALARY_IMAGE && <rect x={-n.r * 0.95} y={-15} width={n.r * 1.9} height={27} rx={5} fill="rgba(6,6,10,0.55)" />}
                   <text y={-4} textAnchor="middle" fontSize={9} fontWeight={600} fill="#fff" style={ts}>Salaire</text>
-                  <text y={9} textAnchor="middle" fontSize={8} fill="rgba(255,255,255,0.85)" style={ts}>{n.sub}/mois</text>
+                  <text y={9} textAnchor="middle" fontSize={8} fill="rgba(255,255,255,0.85)" style={ts}>{n.sub && mask(n.sub)}/mois</text>
                 </>}
               </g>;
             })}
@@ -1301,6 +1327,10 @@ export default function GalaxyView({
       {/* ── PANEL ── */}
       <div className="grid" style={{ gridTemplateRows: "44px 1fr" }}>
         <div className="border-l border-b border-border bg-surface/40 flex items-center justify-end gap-2 pl-4 pr-5 min-w-0">
+          <button title={hideAmounts ? "Afficher les montants" : "Masquer les montants"} onClick={() => setHideAmounts(h => !h)} className={`shrink-0 ${hideAmounts ? "text-accent" : "text-text-muted"} hover:text-text`}>
+            {hideAmounts ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+          <div className="w-px h-5 bg-border shrink-0" />
           <button title="Notifications" className="shrink-0 text-text-muted hover:text-text">
             <Bell size={16} />
           </button>
@@ -1325,7 +1355,7 @@ export default function GalaxyView({
           </div>
         </div>
         <div className="min-h-0">
-          <NodePanel selected={selected} loans={loans} portfolios={portfolios} members={members} goals={goals} flows={flows} goalLinks={goalLinks} actions={actions} onClear={() => setSelected(null)} createMode={createMode} setCreateMode={setCreateMode} salary={salary} onUpdateSalary={onUpdateSalary} groups={groups.map(g => ({ key: g.key, total: g.total, valued: g.valued }))} grossTotal={grossTotal} debt={debt} ownerName={ownerName}
+          <NodePanel selected={selected} loans={loans} portfolios={portfolios} members={members} goals={goals} flows={flows} goalLinks={goalLinks} actions={actions} onClear={() => setSelected(null)} createMode={createMode} setCreateMode={setCreateMode} salary={salary} onUpdateSalary={onUpdateSalary} groups={groups.map(g => ({ key: g.key, total: g.total, valued: g.valued }))} grossTotal={grossTotal} debt={debt} ownerName={ownerName} expenseMemberId={expenseMemberId}
             onPortfolioCreated={p => setSelected({ kind: "portfolio", id: p.id, name: p.name, color: p.color, skin: p.skin, total: 0, count: 0, memberId: p.memberId })} />
         </div>
       </div>

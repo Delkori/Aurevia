@@ -157,9 +157,9 @@ function GoalForm({ initial, progress, members, ownerName, onSubmit, onDelete, o
 }
 
 // ── Flow Form ────────────────────────────────────────────────────────────────
-function FlowForm({ portfolios, goals, members, defaultTargetType, onSubmit, onCancel }:
-  { portfolios: Portfolio[]; goals: Goal[]; members: Member[]; defaultTargetType?: string; onSubmit: (d: Record<string, unknown>) => void; onCancel: () => void }) {
-  const [f, setF] = useState({ sourceType: "salary", sourceId: "", targetType: defaultTargetType ?? "portfolio", targetId: "", amount: "", frequency: "monthly", name: "" });
+function FlowForm({ portfolios, goals, members, ownerName, defaultTargetType, defaultMemberId, onSubmit, onCancel }:
+  { portfolios: Portfolio[]; goals: Goal[]; members: Member[]; ownerName: string; defaultTargetType?: string; defaultMemberId?: number | null; onSubmit: (d: Record<string, unknown>) => void; onCancel: () => void }) {
+  const [f, setF] = useState({ sourceType: "salary", sourceId: "", targetType: defaultTargetType ?? "portfolio", targetId: "", amount: "", frequency: "monthly", name: "", memberId: defaultMemberId ? String(defaultMemberId) : "" });
   const membersWithSalary = members.filter(m => m.salary && Number(m.salary) > 0);
   const targets = f.targetType === "portfolio" ? portfolios.map(p => ({ id: p.id, name: p.name }))
     : f.targetType === "goal" ? goals.map(g => ({ id: g.id, name: g.name }))
@@ -169,8 +169,9 @@ function FlowForm({ portfolios, goals, members, defaultTargetType, onSubmit, onC
     : [];
   const needsTargetPicker = f.targetType !== "expense" && f.targetType !== "income";
   const isIncome = f.targetType === "income";
+  const isExpenseOrIncome = f.targetType === "expense" || isIncome;
   return (
-    <form onSubmit={e => { e.preventDefault(); onSubmit({ ...f, sourceType: isIncome ? "external" : f.sourceType, sourceId: isIncome ? null : (f.sourceId ? Number(f.sourceId) : null), targetId: f.targetId ? Number(f.targetId) : null }); }} className="space-y-1">
+    <form onSubmit={e => { e.preventDefault(); onSubmit({ ...f, sourceType: isIncome ? "external" : f.sourceType, sourceId: isIncome ? null : (f.sourceId ? Number(f.sourceId) : null), targetId: f.targetId ? Number(f.targetId) : null, memberId: f.memberId ? Number(f.memberId) : null }); }} className="space-y-1">
       <p className="text-[10px] text-text-muted uppercase tracking-wide">Nouveau flux</p>
       <Label>Nom (optionnel)</Label><Inp value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="Loyer, Épargne PEA…" />
       {!isIncome && <>
@@ -181,6 +182,10 @@ function FlowForm({ portfolios, goals, members, defaultTargetType, onSubmit, onC
       {needsTargetPicker && <Sel value={f.targetId} onChange={e => setF({ ...f, targetId: e.target.value })}><option value="">—</option>{targets.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</Sel>}
       {f.targetType === "expense" && <Inp value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="Loyer, Courses, Transport…" />}
       {isIncome && <Inp value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="Loyer perçu, Retraite, Rente…" />}
+      {isExpenseOrIncome && members.length > 0 && <>
+        <Label>Appartient à</Label>
+        <Sel value={f.memberId} onChange={e => setF({ ...f, memberId: e.target.value })}><option value="">{ownerName}</option>{members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</Sel>
+      </>}
       <Label>Montant</Label><Inp required type="number" step="any" value={f.amount} onChange={e => setF({ ...f, amount: e.target.value })} placeholder="800" className="tabular" />
       <Label>Fréquence</Label><Sel value={f.frequency} onChange={e => setF({ ...f, frequency: e.target.value })}><option value="monthly">Mensuel</option><option value="weekly">Hebdo</option><option value="yearly">Annuel</option></Sel>
       <div className="flex gap-2 pt-3"><Btn type="submit" variant="accent" className="flex-1">Créer</Btn><Btn type="button" onClick={onCancel}>Fermer</Btn></div>
@@ -271,8 +276,8 @@ function TemplatesPanel({ portfolios, onCreatePortfolio, onCancel }:
 }
 
 // ── Main Panel ───────────────────────────────────────────────────────────────
-export default function NodePanel({ selected, loans, portfolios, members, goals, flows, goalLinks, actions, onClear, createMode, setCreateMode, salary, onUpdateSalary, groups, grossTotal, debt, onPortfolioCreated, ownerName }:
-  { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; goalLinks: GoalLink[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number; onPortfolioCreated?: (p: Portfolio) => void; ownerName: string }) {
+export default function NodePanel({ selected, loans, portfolios, members, goals, flows, goalLinks, actions, onClear, createMode, setCreateMode, salary, onUpdateSalary, groups, grossTotal, debt, onPortfolioCreated, ownerName, expenseMemberId }:
+  { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; goalLinks: GoalLink[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number; onPortfolioCreated?: (p: Portfolio) => void; ownerName: string; expenseMemberId?: number | null }) {
 
   useEffect(() => { setCreateMode(null); }, [selected]); // eslint-disable-line
 
@@ -284,9 +289,9 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
       {createMode === "portfolio" && <PortfolioForm members={members} ownerName={ownerName} onSubmit={async d => { const p = await actions.createPortfolio(d); setCreateMode(null); if (onPortfolioCreated) onPortfolioCreated(p); else onClear(); }} onCancel={clear} />}
       {createMode === "asset" && <AssetForm portfolios={portfolios} defaultPortfolioId={selected?.kind === "portfolio" && selected.id !== "unassigned" ? selected.id as number : undefined} onSubmit={async d => { await actions.createAsset(d); clear(); }} onCancel={clear} />}
       {createMode === "goal" && <GoalForm members={members} ownerName={ownerName} onSubmit={async d => { await actions.createGoal(d); clear(); }} onCancel={clear} />}
-      {createMode === "flow" && <FlowForm portfolios={portfolios} goals={goals} members={members} onSubmit={async d => { await actions.createFlow(d); clear(); }} onCancel={clear} />}
-      {createMode === "expense" && <FlowForm portfolios={portfolios} goals={goals} members={members} defaultTargetType="expense" onSubmit={async d => { await actions.createFlow(d); clear(); }} onCancel={clear} />}
-      {createMode === "income" && <FlowForm portfolios={portfolios} goals={goals} members={members} defaultTargetType="income" onSubmit={async d => { await actions.createFlow(d); clear(); }} onCancel={clear} />}
+      {createMode === "flow" && <FlowForm portfolios={portfolios} goals={goals} members={members} ownerName={ownerName} onSubmit={async d => { await actions.createFlow(d); clear(); }} onCancel={clear} />}
+      {createMode === "expense" && <FlowForm portfolios={portfolios} goals={goals} members={members} ownerName={ownerName} defaultTargetType="expense" defaultMemberId={expenseMemberId} onSubmit={async d => { await actions.createFlow(d); clear(); }} onCancel={clear} />}
+      {createMode === "income" && <FlowForm portfolios={portfolios} goals={goals} members={members} ownerName={ownerName} defaultTargetType="income" onSubmit={async d => { await actions.createFlow(d); clear(); }} onCancel={clear} />}
 
       {createMode === "salary" && <SalaryForm currentSalary={salary} onSubmit={async v => { await onUpdateSalary(v); clear(); }} onCancel={clear} />}
       {createMode === "member" && <MemberForm onSubmit={async d => { await actions.createMember(d); clear(); }} onCancel={clear} />}
