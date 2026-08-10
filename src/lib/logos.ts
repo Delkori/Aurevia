@@ -1,5 +1,6 @@
 // Résolution des logos pour les actifs (actions, ETF, crypto, etc.)
-// Utilise Clearbit pour les entreprises et CoinGecko CDN pour les cryptos.
+// Utilise les favicons Google pour les entreprises et CoinGecko CDN pour les cryptos
+// (Clearbit Logo API, utilisé avant, a été fermé après le rachat par HubSpot).
 
 const TICKER_TO_DOMAIN: Record<string, string> = {
   // US Tech
@@ -76,7 +77,7 @@ export function getLogoUrl(type: string, ticker: string | null): string | null {
 
   const domain = TICKER_TO_DOMAIN[ticker] ?? TICKER_TO_DOMAIN[ticker.toUpperCase()];
   if (domain) {
-    return `/api/logo?url=${encodeURIComponent("https://logo.clearbit.com/" + domain)}`;
+    return `/api/logo?url=${encodeURIComponent(`https://www.google.com/s2/favicons?domain=${domain}&sz=128`)}`;
   }
 
   return null;

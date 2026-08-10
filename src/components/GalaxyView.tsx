@@ -194,6 +194,7 @@ export default function GalaxyView({
   const [alertsOpen, setAlertsOpen] = useState(false);
   const [expenseMemberId, setExpenseMemberId] = useState<number | null>(null);
   const [hideAmounts, setHideAmounts] = useState(false);
+  const [logoErrors, setLogoErrors] = useState<Set<string>>(new Set());
   const [showScrubBar, setShowScrubBar] = useState(true);
   const mask = (s: string) => hideAmounts ? "•••" : s;
   const [scrubYears, setScrubYears] = useState(0);
@@ -1226,7 +1227,7 @@ export default function GalaxyView({
                 {n.kind === "asset" && (() => {
                   const isPos = (n.gainVal ?? 0) >= 0;
                   const isCracked = (n.gainPct ?? 0) <= -20;
-                  const hasLogo = !!n.logoUrl && !isCracked;
+                  const hasLogo = !!n.logoUrl && !isCracked && !logoErrors.has(n.id);
                   const logoR = Math.max(8, n.r - 4);
                   return <>
                     {isCracked ? <>
@@ -1237,7 +1238,8 @@ export default function GalaxyView({
                     </> : <circle r={n.r} fill={isPos ? "rgba(52,211,153,0.06)" : "rgba(251,113,133,0.06)"} stroke={isPos ? "rgba(52,211,153,0.25)" : "rgba(251,113,133,0.25)"} strokeWidth={0.6} />}
                     {hasLogo && <>
                       <clipPath id={`logo-${n.id}`}><circle r={logoR * 0.55} /></clipPath>
-                      <image href={n.logoUrl!} x={-logoR * 0.55} y={-logoR * 0.75} width={logoR * 1.1} height={logoR * 1.1} clipPath={`url(#logo-${n.id})`} style={{ opacity: 0.9 }} />
+                      <image href={n.logoUrl!} x={-logoR * 0.55} y={-logoR * 0.75} width={logoR * 1.1} height={logoR * 1.1} clipPath={`url(#logo-${n.id})`} style={{ opacity: 0.9 }}
+                        onError={() => setLogoErrors(prev => prev.has(n.id) ? prev : new Set(prev).add(n.id))} />
                     </>}
                     <text y={hasLogo ? n.r * 0.55 : -3} textAnchor="middle" fontSize={hasLogo ? 7.5 : 9} fontWeight={500} fill={isCracked ? "#c8c4d2" : "#d8d8dc"}>{n.label.length > 11 ? n.label.slice(0, 10) + "…" : n.label}</text>
                     {n.gainVal !== undefined && <text y={hasLogo ? n.r * 0.55 + 10 : 8} textAnchor="middle" fontSize={hasLogo ? 7 : 8} fill={isCracked ? "#fb7185" : n.gainVal >= 0 ? "#34d399" : "#fb7185"} fontWeight={isCracked ? 700 : 400}>{mask(`${n.gainVal >= 0 ? "+" : ""}${formatMoney(n.gainVal)}`)}</text>}
