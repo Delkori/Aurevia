@@ -28,6 +28,17 @@ export const portfolios = pgTable("portfolios", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// ── Quotes-parts (répartition d'un portefeuille entre plusieurs propriétaires) ──
+// Absence de ligne pour un portefeuille = comportement historique (100% au
+// memberId du portefeuille, ou à "Moi" si memberId est null).
+export const portfolioOwnerships = pgTable("portfolio_ownerships", {
+  id: serial("id").primaryKey(),
+  portfolioId: integer("portfolio_id").notNull().references(() => portfolios.id, { onDelete: "cascade" }),
+  memberId: integer("member_id").references(() => members.id, { onDelete: "cascade" }), // null = "Moi"
+  sharePercent: numeric("share_percent").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // ── Actifs ────────────────────────────────────────────────────────────────────
 export const assets = pgTable("assets", {
   id: serial("id").primaryKey(),
