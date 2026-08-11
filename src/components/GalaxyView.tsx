@@ -151,7 +151,7 @@ function planetSkin(name: string, valued: { asset: { type: string }; value: numb
 
 interface GNode extends SimulationNodeDatum {
   id: string; kind: string; label: string; r: number; color: string;
-  portfolioKey?: number | "unassigned"; assetId?: number; goalId?: number; memberId?: number;
+  portfolioKey?: number | "unassigned"; assetId?: number; goalId?: number; memberId?: number | null;
   gainVal?: number; gainPct?: number; sub?: string; logoUrl?: string | null; skin?: PlanetSkin;
   ownerExpenseTotal?: number; ownerRevenue?: number; flowId?: number; amount?: number;
 }
@@ -265,6 +265,11 @@ export default function GalaxyView({
 
     if (totalRevenue > 0) nodes.push({ id: "salary", kind: "salary", label: "Revenus", r: 32, color: "#34d399", sub: formatMoney(totalRevenue), amount: totalRevenue });
     nodes.push({ id: "center", kind: "center", label: "Patrimoine", r: CENTER_R, color: "#7c6af5" });
+    // "Moi" est son propre système (comme chaque membre), pas juste un fourre-tout collé
+    // au centre — ses planètes non attribuées à un membre s'accrochent ici plutôt que
+    // directement à Patrimoine, symétrique à `m-${m.id}` pour un membre du foyer.
+    nodes.push({ id: "self", kind: "member", label: ownerName, r: 30, color: centerColor, memberId: null });
+    links.push({ source: "center", target: "self" });
     if (totalRevenue > 0) links.push({ source: "salary", target: "center" });
 
     incomeFlows.forEach(inf => {
@@ -327,7 +332,7 @@ export default function GalaxyView({
       const totalGain = g.valued.reduce((s, v) => { const a = v.asset; return s + ((a.avgBuyPrice && Number(a.avgBuyPrice) > 0) ? gain(a, a.ticker ? quotes[a.ticker] : null) : 0); }, 0);
       const skin = planetSkin(g.portfolio.name, g.valued, g.portfolio.skin);
       nodes.push({ id: pid, kind: "portfolio", label: g.portfolio.name, r: sr(g.total, maxPV, 20, 78), color: g.portfolio.color, portfolioKey: g.key, gainVal: totalGain, sub: formatMoney(g.total), skin });
-      links.push({ source: memberNode ?? "center", target: pid });
+      links.push({ source: memberNode ?? "self", target: pid });
       if (expanded.has(g.key)) {
         const maxAV = Math.max(1, ...g.valued.map(v => v.value));
         for (const v of g.valued) {
@@ -347,7 +352,7 @@ export default function GalaxyView({
       const linkedPortfolioIds = goalLinks.filter(gl => gl.goalId === goal.id).map(gl => gl.portfolioId);
       const prog = goalProgress(goal);
       nodes.push({ id: `g-${goal.id}`, kind: "goal", label: goal.name, r: 16 + Math.min(1, prog) * 44, color: goal.color, goalId: goal.id, sub: `${Math.round(prog * 100)}%` });
-      links.push({ source: memberNode ?? "center", target: `g-${goal.id}` });
+      links.push({ source: memberNode ?? "self", target: `g-${goal.id}` });
       linkedPortfolioIds.forEach(pid => { if (nodes.find(n => n.id === `p-${pid}`)) goalLinkEdges.push({ source: `g-${goal.id}`, target: `p-${pid}` }); });
     }
 
@@ -400,7 +405,7 @@ export default function GalaxyView({
     };
     const directChildren = [...nm.values()].filter(n => structuralParent.get(n.id) === "center");
     const unowned = directChildren.filter(n => n.kind !== "member").sort((a, b) => (a.kind === "goal" ? 1 : 0) - (b.kind === "goal" ? 1 : 0) || a.id.localeCompare(b.id));
-    const memberHubs = directChildren.filter(n => n.kind === "member").sort((a, b) => a.id.localeCompare(b.id));
+    const memberHubs = directChildren.filter(n => n.kind === "member").sort((a, b) => (a.id === "self" ? -1 : b.id === "self" ? 1 : a.id.localeCompare(b.id)));
     const radialTargets = new Map<string, { x: number; y: number }>();
     if (unowned.length > 0) {
       const r1 = packRadius(unowned, Math.PI * 2, 34, 190);
@@ -586,7 +591,7 @@ export default function GalaxyView({
       const isGoal = n.kind === "goal" && n.goalId != null;
       if (!ownerSourceNode) {
         if (isCenter) setOwnerSourceNode({ id: n.id, kind: "center", label: ownerName });
-        else if (isMember) setOwnerSourceNode({ id: n.id, kind: "member", memberId: n.memberId, label: n.label });
+        else if (isMember) setOwnerSourceNode({ id: n.id, kind: "member", memberId: n.memberId ?? undefined, label: n.label });
         return;
       }
       const newMemberId = ownerSourceNode.kind === "center" ? null : (ownerSourceNode.memberId as number);
@@ -610,7 +615,7 @@ export default function GalaxyView({
       const eligibleSource = isSalary || isMemberSalary || isPortfolio;
       const eligibleTarget = isPortfolio || isGoal;
       if (!linkSourceNode) {
-        if (eligibleSource) setLinkSourceNode({ id: n.id, kind: n.kind, portfolioKey: n.portfolioKey, memberId: n.memberId, label: n.label });
+        if (eligibleSource) setLinkSourceNode({ id: n.id, kind: n.kind, portfolioKey: n.portfolioKey, memberId: n.memberId ?? undefined, label: n.label });
         return;
       }
       if (n.id === linkSourceNode.id) { setLinkSourceNode(null); return; }
@@ -646,6 +651,7 @@ export default function GalaxyView({
       const goal = goals.find(g => g.id === n.goalId)!;
       setSelected({ kind: "goal", goal, progress: goalProgress(goal), linkedPortfolioIds: goalLinks.filter(gl => gl.goalId === goal.id).map(gl => gl.portfolioId) });
     }
+    else if (n.id === "self") setSelected({ kind: "total", total: grandTotal, grossTotal, debt });
     else if (n.kind === "member" && n.memberId != null) {
       const member = members.find(m => m.id === n.memberId)!;
       const mTotal = portfolios.filter(p => p.memberId === member.id).reduce((s, p) => s + (groups.find(gr => gr.key === p.id)?.total ?? 0), 0);
