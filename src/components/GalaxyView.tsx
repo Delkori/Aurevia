@@ -196,7 +196,7 @@ export default function GalaxyView({
   const [expenseMemberId, setExpenseMemberId] = useState<number | null>(null);
   const [hideAmounts, setHideAmounts] = useState(false);
   const [logoErrors, setLogoErrors] = useState<Set<string>>(new Set());
-  const [showScrubBar, setShowScrubBar] = useState(true);
+  const [showScrubBar, setShowScrubBar] = useState(false);
   const mask = (s: string) => hideAmounts ? "•••" : s;
   const [scrubYears, setScrubYears] = useState(0);
   const [scrubGrowth, setScrubGrowth] = useState(5);
@@ -379,6 +379,40 @@ export default function GalaxyView({
     const s = nm.get("salary"); if (s && !getNodePosition("salary")) { s.fx = CX; s.fy = 80; }
     const e = nm.get("expenses"); if (e && !getNodePosition("expenses")) { e.fx = CX + 350; e.fy = 180; }
 
+    // Radial layout: instead of leaving members/portfolios/goals to pure spring physics
+    // (which reads as chaotic clutter with crossing links once there are more than a
+    // handful), arrange them like an orrery — members + unowned planets on a first ring
+    // around Patrimoine, and each member's own planets fanned out on a second ring around
+    // that member. Only applies to nodes without a saved manual position, so dragged
+    // layouts are never fought.
+    const structuralParent = new Map<string, string>();
+    for (const l of links) {
+      const tgt = nm.get(l.target);
+      if (tgt && (tgt.kind === "portfolio" || tgt.kind === "goal" || tgt.kind === "member" || tgt.kind === "member-salary")) {
+        structuralParent.set(l.target, l.source);
+      }
+    }
+    const kindOrder: Record<string, number> = { member: 0, portfolio: 1, goal: 2 };
+    const ringA = [...nm.values()]
+      .filter(n => structuralParent.get(n.id) === "center")
+      .sort((a, b) => (kindOrder[a.kind] ?? 3) - (kindOrder[b.kind] ?? 3) || a.id.localeCompare(b.id));
+    const radialTargets = new Map<string, { x: number; y: number }>();
+    ringA.forEach((n, i) => {
+      const angle = (i / ringA.length) * Math.PI * 2 - Math.PI / 2;
+      radialTargets.set(n.id, { x: CX + Math.cos(angle) * 250, y: CY + Math.sin(angle) * 250 });
+    });
+    ringA.filter(n => n.kind === "member").forEach(member => {
+      const children = [...nm.values()].filter(n => structuralParent.get(n.id) === member.id);
+      const base = radialTargets.get(member.id)!;
+      const baseAngle = Math.atan2(base.y - CY, base.x - CX);
+      const spread = Math.min(Math.PI * 0.7, 0.35 * children.length);
+      children.forEach((child, i) => {
+        const off = children.length > 1 ? (i / (children.length - 1) - 0.5) * spread : 0;
+        const angle = baseAngle + off;
+        radialTargets.set(child.id, { x: base.x + Math.cos(angle) * 160, y: base.y + Math.sin(angle) * 160 });
+      });
+    });
+
     // Locks satellites (assets, expense/income items) to an evenly-spaced ring around
     // their parent planet every tick, instead of letting them drift semi-independently
     // under generic link/charge forces — they now visually move as one piece with the
@@ -431,6 +465,10 @@ export default function GalaxyView({
       return tgt?.kind === "expense-item" || tgt?.kind === "income-item" ? 45 : tgt?.kind === "asset" ? 65 : tgt?.kind === "member" ? 130 : 180;
     }).strength(0.3));
     simRef.current.force("goalLink", forceLink<GNode, GLink>(goalLinkEdges.map(l => ({ ...l }))).id(d => d.id).distance(160).strength(0.08));
+    simRef.current.force("radialX", forceX<GNode>(d => radialTargets.get(d.id)?.x ?? d.x ?? CX)
+      .strength(d => radialTargets.has(d.id) && !getNodePosition(d.id) ? 0.12 : 0));
+    simRef.current.force("radialY", forceY<GNode>(d => radialTargets.get(d.id)?.y ?? d.y ?? CY)
+      .strength(d => radialTargets.has(d.id) && !getNodePosition(d.id) ? 0.12 : 0));
     simRef.current.alpha(0.7).restart();
   }, [targetNodes, links, goalLinkEdges]);
 
