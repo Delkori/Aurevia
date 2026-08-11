@@ -20,6 +20,7 @@ export type Selection =
   | { kind: "asset"; asset: Asset; value: number; gain: number; gainPct: number; portfolioName: string }
   | { kind: "goal"; goal: Goal; progress: number; linkedPortfolioIds: number[] }
   | { kind: "member"; member: Member; total: number }
+  | { kind: "self"; name: string; color: string }
   | { kind: "flow-item"; flowId: number; label: string; isExpense: boolean }
   | null;
 
@@ -405,9 +406,25 @@ function MemberForm({ initial, onSubmit, onDelete, onCancel }:
   );
 }
 
+// ── Self ("Moi") Form ────────────────────────────────────────────────────────
+function SelfForm({ name: initialName, color: initialColor, onSubmit, onCancel }:
+  { name: string; color: string; onSubmit: (name: string, color: string) => Promise<void>; onCancel: () => void }) {
+  const [name, setName] = useState(initialName);
+  const [color, setColor] = useState(initialColor);
+  return (
+    <form onSubmit={e => { e.preventDefault(); onSubmit(name, color).then(onCancel); }} className="space-y-1">
+      <p className="text-[10px] text-text-muted uppercase tracking-wide">Ta planète</p>
+      <Label>Prénom</Label><Inp required value={name} onChange={e => setName(e.target.value)} placeholder="Toi" />
+      <Label>Couleur</Label><ColorPick value={color} onChange={setColor} />
+      <p className="text-[10px] text-text-muted">Recolore aussi la planète Patrimoine et le petit personnage.</p>
+      <div className="flex gap-2 pt-3"><Btn type="submit" variant="accent" className="flex-1">Enregistrer</Btn><Btn type="button" onClick={onCancel}>Fermer</Btn></div>
+    </form>
+  );
+}
+
 // ── Main Panel ───────────────────────────────────────────────────────────────
-export default function NodePanel({ selected, loans, portfolios, members, goals, flows, goalLinks, portfolioOwnerships, actions, onClear, createMode, setCreateMode, salary, onUpdateSalary, groups, grossTotal, debt, onPortfolioCreated, ownerName, expenseMemberId }:
-  { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number; onPortfolioCreated?: (p: Portfolio) => void; ownerName: string; expenseMemberId?: number | null }) {
+export default function NodePanel({ selected, loans, portfolios, members, goals, flows, goalLinks, portfolioOwnerships, actions, onClear, createMode, setCreateMode, salary, onUpdateSalary, onUpdateSelf, groups, grossTotal, debt, onPortfolioCreated, ownerName, expenseMemberId }:
+  { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; onUpdateSelf: (name: string, color: string) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number; onPortfolioCreated?: (p: Portfolio) => void; ownerName: string; expenseMemberId?: number | null }) {
 
   useEffect(() => { setCreateMode(null); }, [selected]); // eslint-disable-line
 
@@ -684,6 +701,10 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
             </div>;
           })()}
         </div>
+      )}
+
+      {selected?.kind === "self" && (
+        <SelfForm name={selected.name} color={selected.color} onSubmit={onUpdateSelf} onCancel={clear} />
       )}
 
       {selected?.kind === "member" && (

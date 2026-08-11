@@ -103,6 +103,10 @@ export default function HomePage() {
     await api("/api/settings", "PUT", { monthly_salary: String(v) });
   };
 
+  const updateSelf = async (name: string, color: string) => {
+    await api("/api/settings", "PUT", { owner_name: name, center_color: color });
+  };
+
   if (loading) return <div className="h-screen flex items-center justify-center text-text-muted text-sm">Chargement…</div>;
 
   return (
@@ -123,6 +127,7 @@ export default function HomePage() {
           ownerName={settings.owner_name || "Moi"}
           centerColor={settings.center_color || "#ffcc55"}
           onUpdateSalary={updateSalary}
+          onUpdateSelf={updateSelf}
           onRefresh={load}
         />
       </div>

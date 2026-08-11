@@ -177,11 +177,11 @@ const STARS = Array.from({ length: 180 }, (_, i) => ({
 }));
 
 export default function GalaxyView({
-  assets, portfolios, goals, loans, members, flows, goalLinks, portfolioOwnerships, quotes, actions, salary, onUpdateSalary, onRefresh, showCountdown, ownerName, centerColor,
+  assets, portfolios, goals, loans, members, flows, goalLinks, portfolioOwnerships, quotes, actions, salary, onUpdateSalary, onUpdateSelf, onRefresh, showCountdown, ownerName, centerColor,
 }: {
   assets: Asset[]; portfolios: Portfolio[]; goals: Goal[]; loans: Loan[];
   members: Member[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; quotes: Record<string, Quote>;
-  actions: Actions; salary: number; onUpdateSalary: (v: number) => Promise<void>; onRefresh: () => void; showCountdown: boolean;
+  actions: Actions; salary: number; onUpdateSalary: (v: number) => Promise<void>; onUpdateSelf: (name: string, color: string) => Promise<void>; onRefresh: () => void; showCountdown: boolean;
   ownerName: string; centerColor: string;
 }) {
   const [expanded, setExpanded] = useState<Set<number | "unassigned">>(new Set());
@@ -651,7 +651,7 @@ export default function GalaxyView({
       const goal = goals.find(g => g.id === n.goalId)!;
       setSelected({ kind: "goal", goal, progress: goalProgress(goal), linkedPortfolioIds: goalLinks.filter(gl => gl.goalId === goal.id).map(gl => gl.portfolioId) });
     }
-    else if (n.id === "self") setSelected({ kind: "total", total: grandTotal, grossTotal, debt });
+    else if (n.id === "self") setSelected({ kind: "self", name: ownerName, color: centerColor });
     else if (n.kind === "member" && n.memberId != null) {
       const member = members.find(m => m.id === n.memberId)!;
       const mTotal = portfolios.filter(p => p.memberId === member.id).reduce((s, p) => s + (groups.find(gr => gr.key === p.id)?.total ?? 0), 0);
@@ -1442,7 +1442,7 @@ export default function GalaxyView({
           </div>
         </div>
         <div className="min-h-0">
-          <NodePanel selected={selected} loans={loans} portfolios={portfolios} members={members} goals={goals} flows={flows} goalLinks={goalLinks} portfolioOwnerships={portfolioOwnerships} actions={actions} onClear={() => setSelected(null)} createMode={createMode} setCreateMode={setCreateMode} salary={salary} onUpdateSalary={onUpdateSalary} groups={groups.map(g => ({ key: g.key, total: g.total, valued: g.valued }))} grossTotal={grossTotal} debt={debt} ownerName={ownerName} expenseMemberId={expenseMemberId}
+          <NodePanel selected={selected} loans={loans} portfolios={portfolios} members={members} goals={goals} flows={flows} goalLinks={goalLinks} portfolioOwnerships={portfolioOwnerships} actions={actions} onClear={() => setSelected(null)} createMode={createMode} setCreateMode={setCreateMode} salary={salary} onUpdateSalary={onUpdateSalary} onUpdateSelf={onUpdateSelf} groups={groups.map(g => ({ key: g.key, total: g.total, valued: g.valued }))} grossTotal={grossTotal} debt={debt} ownerName={ownerName} expenseMemberId={expenseMemberId}
             onPortfolioCreated={p => setSelected({ kind: "portfolio", id: p.id, name: p.name, color: p.color, skin: p.skin, total: 0, count: 0, memberId: p.memberId })} />
         </div>
       </div>
