@@ -5,7 +5,7 @@ import {
   forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY,
   type Simulation, type SimulationNodeDatum,
 } from "d3-force";
-import { FolderPlus, Plus, PlusCircle, Star, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, Sparkles, AlertTriangle, Bell, Clock } from "lucide-react";
+import { FolderPlus, Plus, PlusCircle, Star, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, AlertTriangle, Bell, Clock } from "lucide-react";
 import { formatMoney } from "@/lib/format";
 import { currentValue, gain, gainPercent, totalDebt } from "@/lib/networth";
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
@@ -380,11 +380,13 @@ export default function GalaxyView({
     const e = nm.get("expenses"); if (e && !getNodePosition("expenses")) { e.fx = CX + 350; e.fy = 180; }
 
     // Radial layout: instead of leaving members/portfolios/goals to pure spring physics
-    // (which reads as chaotic clutter with crossing links once there are more than a
-    // handful), arrange them like an orrery — members + unowned planets on a first ring
-    // around Patrimoine, and each member's own planets fanned out on a second ring around
-    // that member. Only applies to nodes without a saved manual position, so dragged
-    // layouts are never fought.
+    // (which reads as chaotic clutter with crossing links and overlap once there are more
+    // than a handful), arrange them like an orrery — Patrimoine at the center is the
+    // household's own planet, its directly-owned planets/objectifs sit on a close inner
+    // ring, and each member becomes their own "system": a hub further out, with their own
+    // planets fanned out around them. Ring/fan radii are packed from each node's actual
+    // size so bigger planets always get more room instead of overlapping. Only applies to
+    // nodes without a saved manual position, so dragged layouts are never fought.
     const structuralParent = new Map<string, string>();
     for (const l of links) {
       const tgt = nm.get(l.target);
@@ -392,24 +394,39 @@ export default function GalaxyView({
         structuralParent.set(l.target, l.source);
       }
     }
-    const kindOrder: Record<string, number> = { member: 0, portfolio: 1, goal: 2 };
-    const ringA = [...nm.values()]
-      .filter(n => structuralParent.get(n.id) === "center")
-      .sort((a, b) => (kindOrder[a.kind] ?? 3) - (kindOrder[b.kind] ?? 3) || a.id.localeCompare(b.id));
+    const packRadius = (arr: GNode[], span: number, gap: number, minR: number) => {
+      const arc = arr.reduce((s, n) => s + n.r * 2 + gap, 0);
+      return Math.max(minR, arc / span);
+    };
+    const directChildren = [...nm.values()].filter(n => structuralParent.get(n.id) === "center");
+    const unowned = directChildren.filter(n => n.kind !== "member").sort((a, b) => (a.kind === "goal" ? 1 : 0) - (b.kind === "goal" ? 1 : 0) || a.id.localeCompare(b.id));
+    const memberHubs = directChildren.filter(n => n.kind === "member").sort((a, b) => a.id.localeCompare(b.id));
     const radialTargets = new Map<string, { x: number; y: number }>();
-    ringA.forEach((n, i) => {
-      const angle = (i / ringA.length) * Math.PI * 2 - Math.PI / 2;
-      radialTargets.set(n.id, { x: CX + Math.cos(angle) * 250, y: CY + Math.sin(angle) * 250 });
-    });
-    ringA.filter(n => n.kind === "member").forEach(member => {
+    if (unowned.length > 0) {
+      const r1 = packRadius(unowned, Math.PI * 2, 34, 190);
+      unowned.forEach((n, i) => {
+        const angle = (i / unowned.length) * Math.PI * 2 - Math.PI / 2;
+        radialTargets.set(n.id, { x: CX + Math.cos(angle) * r1, y: CY + Math.sin(angle) * r1 });
+      });
+    }
+    if (memberHubs.length > 0) {
+      const r2 = packRadius(memberHubs, Math.PI * 2, 70, 320);
+      memberHubs.forEach((n, i) => {
+        const angle = (i / memberHubs.length) * Math.PI * 2 - Math.PI / 2;
+        radialTargets.set(n.id, { x: CX + Math.cos(angle) * r2, y: CY + Math.sin(angle) * r2 });
+      });
+    }
+    memberHubs.forEach(member => {
       const children = [...nm.values()].filter(n => structuralParent.get(n.id) === member.id);
+      if (children.length === 0) return;
       const base = radialTargets.get(member.id)!;
       const baseAngle = Math.atan2(base.y - CY, base.x - CX);
-      const spread = Math.min(Math.PI * 0.7, 0.35 * children.length);
+      const spread = Math.min(Math.PI * 1.4, 0.6 + 0.4 * children.length);
+      const r3 = packRadius(children, spread, 30, 150);
       children.forEach((child, i) => {
         const off = children.length > 1 ? (i / (children.length - 1) - 0.5) * spread : 0;
         const angle = baseAngle + off;
-        radialTargets.set(child.id, { x: base.x + Math.cos(angle) * 160, y: base.y + Math.sin(angle) * 160 });
+        radialTargets.set(child.id, { x: base.x + Math.cos(angle) * r3, y: base.y + Math.sin(angle) * r3 });
       });
     });
 
@@ -446,7 +463,7 @@ export default function GalaxyView({
     if (!simRef.current) {
       simRef.current = forceSimulation<GNode>(nodes)
         .force("charge", forceManyBody().strength(d => { const k = (d as GNode).kind; return k === "expense-item" || k === "income-item" ? -30 : k === "asset" ? -60 : -180; }))
-        .force("collide", forceCollide<GNode>().radius(d => d.r + 16))
+        .force("collide", forceCollide<GNode>().radius(d => d.r + 26).strength(0.9))
         .force("x", forceX<GNode>(CX).strength(0.02))
         .force("y", forceY<GNode>(CY).strength(0.02))
         .alphaDecay(0.018).on("tick", () => { snapSatellites(); setTick(n => n + 1); });
@@ -466,9 +483,9 @@ export default function GalaxyView({
     }).strength(0.3));
     simRef.current.force("goalLink", forceLink<GNode, GLink>(goalLinkEdges.map(l => ({ ...l }))).id(d => d.id).distance(160).strength(0.08));
     simRef.current.force("radialX", forceX<GNode>(d => radialTargets.get(d.id)?.x ?? d.x ?? CX)
-      .strength(d => radialTargets.has(d.id) && !getNodePosition(d.id) ? 0.12 : 0));
+      .strength(d => radialTargets.has(d.id) && !getNodePosition(d.id) ? 0.22 : 0));
     simRef.current.force("radialY", forceY<GNode>(d => radialTargets.get(d.id)?.y ?? d.y ?? CY)
-      .strength(d => radialTargets.has(d.id) && !getNodePosition(d.id) ? 0.12 : 0));
+      .strength(d => radialTargets.has(d.id) && !getNodePosition(d.id) ? 0.22 : 0));
     simRef.current.alpha(0.7).restart();
   }, [targetNodes, links, goalLinkEdges]);
 
@@ -806,7 +823,6 @@ export default function GalaxyView({
             { icon: Star, label: "Objectifs", mode: "goal" },
             { icon: Users, label: "Membres", mode: "member" },
             { icon: Link2, label: "Liens", mode: "link" },
-            { icon: Sparkles, label: "Modèles", mode: "templates" },
           ].map(({ icon: Icon, label, mode }) => {
             const active = mode === "link" ? linkMode : createMode === mode;
             return <button key={mode} onClick={() => {

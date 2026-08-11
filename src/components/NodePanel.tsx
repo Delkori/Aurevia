@@ -55,14 +55,6 @@ const METAL_TICKERS = [
 ];
 const COLORS = ["#7c6af5", "#34d399", "#60a5fa", "#fb923c", "#f0abfc", "#fbbf24", "#f87171"];
 
-const PLANET_TEMPLATES: { name: string; description: string; planets: string[] }[] = [
-  { name: "Diversifié standard", description: "Un peu de tout : bourse, épargne sécurisée, assurance vie.", planets: ["PEA", "CTO", "Livret A", "Assurance Vie"] },
-  { name: "Orienté Immobilier", description: "Focalisé sur la pierre.", planets: ["Résidence principale", "SCPI", "Immobilier locatif"] },
-  { name: "Orienté Actions & Bourse", description: "Priorité aux marchés financiers.", planets: ["PEA", "CTO", "Compte-titres international"] },
-  { name: "Orienté Crypto", description: "Focalisé sur les actifs numériques.", planets: ["Portefeuille Crypto", "Cold Wallet", "Staking"] },
-  { name: "Épargne de précaution", description: "Priorité à la sécurité et la disponibilité.", planets: ["Livret A", "LDDS", "Fonds euro"] },
-];
-
 function Label({ children }: { children: React.ReactNode }) {
   return <label className="text-[10px] text-text-muted uppercase tracking-wide block mb-1 mt-2 first:mt-0">{children}</label>;
 }
@@ -413,46 +405,6 @@ function MemberForm({ initial, onSubmit, onDelete, onCancel }:
   );
 }
 
-// ── Templates Panel ──────────────────────────────────────────────────────────
-function TemplatesPanel({ portfolios, onCreatePortfolio, onCancel }:
-  { portfolios: Portfolio[]; onCreatePortfolio: (data: Record<string, unknown>) => Promise<Portfolio>; onCancel: () => void }) {
-  const [applying, setApplying] = useState<string | null>(null);
-  const existing = new Set(portfolios.map(p => p.name.trim().toLowerCase()));
-  return (
-    <div className="space-y-3">
-      <p className="text-[10px] text-text-muted uppercase tracking-wide">Modèles de galaxie</p>
-      <p className="text-xs text-text-muted">
-        Des suggestions de structure pour démarrer — pas un conseil financier, juste ce qu&apos;il est possible de mettre en place. Les planètes déjà existantes (même nom) ne sont pas recréées ; ajuste ensuite librement.
-      </p>
-      {PLANET_TEMPLATES.map(tpl => {
-        const toCreate = tpl.planets.filter(n => !existing.has(n.trim().toLowerCase()));
-        return (
-          <div key={tpl.name} className="border border-border rounded-lg p-3 space-y-2">
-            <p className="text-sm font-medium">{tpl.name}</p>
-            <p className="text-[10px] text-text-muted">{tpl.description}</p>
-            <div className="flex flex-wrap gap-1">
-              {tpl.planets.map(n => (
-                <span key={n} className={`text-[10px] px-2 py-0.5 rounded-full border ${existing.has(n.trim().toLowerCase()) ? "border-border text-text-muted" : "border-accent/40 text-accent"}`}>{n}</span>
-              ))}
-            </div>
-            <Btn variant="accent" className="w-full" disabled={applying !== null || toCreate.length === 0}
-              onClick={async () => {
-                setApplying(tpl.name);
-                for (const name of toCreate) {
-                  await onCreatePortfolio({ name, color: COLORS[Math.floor(Math.random() * COLORS.length)] });
-                }
-                setApplying(null);
-              }}>
-              {toCreate.length === 0 ? "Déjà en place" : applying === tpl.name ? "Création…" : `Utiliser (+${toCreate.length})`}
-            </Btn>
-          </div>
-        );
-      })}
-      <Btn type="button" className="w-full" onClick={onCancel}>Fermer</Btn>
-    </div>
-  );
-}
-
 // ── Main Panel ───────────────────────────────────────────────────────────────
 export default function NodePanel({ selected, loans, portfolios, members, goals, flows, goalLinks, portfolioOwnerships, actions, onClear, createMode, setCreateMode, salary, onUpdateSalary, groups, grossTotal, debt, onPortfolioCreated, ownerName, expenseMemberId }:
   { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number; onPortfolioCreated?: (p: Portfolio) => void; ownerName: string; expenseMemberId?: number | null }) {
@@ -473,7 +425,6 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
 
       {createMode === "salary" && <SalaryForm currentSalary={salary} onSubmit={async v => { await onUpdateSalary(v); clear(); }} onCancel={clear} />}
       {createMode === "member" && <MemberForm onSubmit={async d => { await actions.createMember(d); clear(); }} onCancel={clear} />}
-      {createMode === "templates" && <TemplatesPanel portfolios={portfolios} onCreatePortfolio={actions.createPortfolio} onCancel={clear} />}
 
       {!createMode && !selected && (
         <div className="space-y-3">
