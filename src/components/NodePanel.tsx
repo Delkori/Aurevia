@@ -5,6 +5,7 @@ import { Trash2, Pencil } from "lucide-react";
 import { formatMoney } from "@/lib/format";
 import { ASSET_TYPE_LABELS } from "@/lib/networth";
 import { ASTRONAUT_ACCESSORIES } from "@/lib/astronautAccessories";
+import { monthsToReach } from "@/lib/projection";
 
 type Asset = { id: number; name: string; type: string; ticker: string | null; quantity: string | null; avgBuyPrice: string | null; manualValue: string | null; yieldRate: string | null; currency: string; portfolioId: number | null };
 type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null };
@@ -428,6 +429,60 @@ function MemberForm({ initial, onSubmit, onDelete, onCancel }:
 }
 
 // ── Self ("Moi") Form ────────────────────────────────────────────────────────
+// ── Estimation du délai avant d'atteindre un objectif ────────────────────────
+// Utilise monthsToReach() (lib/projection.ts) — intérêts composés, pas une simple
+// division linéaire — avec un taux de croissance annuel que l'utilisateur peut
+// ajuster (0% par défaut : hypothèse prudente pour un objectif court terme type
+// "Vacances", à monter pour un objectif qui reste investi en attendant).
+function GoalTimeEstimate({ current, target, totalMonthly }: { current: number; target: number; totalMonthly: number }) {
+  const [rate, setRate] = useState(0);
+
+  if (current >= target) return null; // le parent affiche déjà "Objectif atteint" dans ce cas
+
+  const months = monthsToReach(current, totalMonthly, rate, target);
+
+  // Sous ~2 mois, un chiffre en jours est plus parlant qu'"1 mois" — approximation
+  // linéaire sur ce court horizon (l'effet des intérêts composés y est négligeable).
+  const remaining = Math.max(0, target - current);
+  const dailyRate = totalMonthly / 30.44;
+  const daysLinear = dailyRate > 0 ? Math.ceil(remaining / dailyRate) : null;
+  const showDays = daysLinear !== null && daysLinear <= 62;
+
+  const targetDate = months !== null ? (() => {
+    const d = new Date();
+    d.setDate(d.getDate() + (showDays ? daysLinear! : Math.round(months * 30.44)));
+    return d;
+  })() : null;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex justify-between items-baseline">
+        <span className="text-text-muted">Objectif atteint dans</span>
+        {months === null ? (
+          <span className="tabular text-text-muted">jamais à ce rythme</span>
+        ) : (
+          <span className="tabular font-medium">
+            {showDays ? `${daysLinear} jour${daysLinear! > 1 ? "s" : ""}` : months < 12 ? `${months} mois` : `${Math.round(months / 12 * 10) / 10} ans`}
+          </span>
+        )}
+      </div>
+      {targetDate && (
+        <p className="text-[10px] text-text-muted text-right">
+          vers le {targetDate.toLocaleDateString("fr-FR", showDays ? { day: "numeric", month: "long" } : { month: "long", year: "numeric" })}
+        </p>
+      )}
+      <label className="flex items-center justify-between gap-2 text-[10px] text-text-muted pt-1 border-t border-border">
+        <span>Croissance annuelle supposée</span>
+        <span className="flex items-center gap-1">
+          <input type="number" step="0.5" min={0} max={20} value={rate} onChange={e => setRate(Number(e.target.value))}
+            className="w-12 bg-bg border border-border rounded px-1 py-0.5 text-[10px] tabular text-text" />
+          %
+        </span>
+      </label>
+    </div>
+  );
+}
+
 function SelfForm({ name: initialName, color: initialColor, accessory: initialAccessory, onSubmit, onCancel }:
   { name: string; color: string; accessory: string | null; onSubmit: (name: string, color: string, accessory: string | null) => Promise<void>; onCancel: () => void }) {
   const [name, setName] = useState(initialName);
@@ -738,9 +793,10 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
             const incoming = flows.filter(f => f.targetType === "goal" && f.targetId === selected.goal.id);
             const totalMonthly = incoming.reduce((s, f) => s + Number(f.amount), 0);
             const target = Number(selected.goal.targetAmount);
-            const current = grossTotal - debt;
-            const remaining = Math.max(0, target - current);
-            const monthsLeft = totalMonthly > 0 ? Math.ceil(remaining / totalMonthly) : null;
+            // Progression réelle de CET objectif (planètes liées), pas le patrimoine total du
+            // foyer — l'ancien calcul utilisait `grossTotal - debt`, ce qui rendait l'estimation
+            // fausse dès que le patrimoine global dépassait le montant de l'objectif.
+            const current = selected.linkedPortfolioIds.reduce((s, pid) => s + (groups.find(g => g.key === pid)?.total ?? 0), 0);
 
             return <div className="pt-2 border-t border-border space-y-2">
               {incoming.length > 0 && <>
@@ -757,16 +813,19 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
                     </div>
                   </div>;
                 })}
-                <div className="bg-bg rounded-lg px-3 py-2 text-xs space-y-1">
-                  <div className="flex justify-between"><span className="text-text-muted">Versement total</span><span className="tabular text-accent">{formatMoney(totalMonthly)}/mois</span></div>
-                  {selected.progress < 1 && monthsLeft !== null && <div className="flex justify-between">
-                    <span className="text-text-muted">Objectif atteint dans</span>
-                    <span className="tabular">{monthsLeft < 12 ? `${monthsLeft} mois` : `${Math.round(monthsLeft / 12 * 10) / 10} ans`}</span>
-                  </div>}
+                <div className="bg-bg rounded-lg px-3 py-2 text-xs">
+                  <div className="flex justify-between pb-2 mb-2 border-b border-border"><span className="text-text-muted">Versement total</span><span className="tabular text-accent">{formatMoney(totalMonthly)}/mois</span></div>
+                  {selected.progress < 1 && <GoalTimeEstimate current={current} target={target} totalMonthly={totalMonthly} />}
                   {selected.progress >= 1 && <p className="text-positive font-medium">Objectif atteint</p>}
                 </div>
               </>}
-              {incoming.length === 0 && <p className="text-xs text-text-muted">Aucun flux vers cet objectif. Crée un flux pour alimenter cette étoile.</p>}
+              {incoming.length === 0 && selected.progress < 1 && (
+                <div className="bg-bg rounded-lg px-3 py-2 text-xs space-y-2">
+                  <p className="text-text-muted">Aucun flux dédié vers cet objectif — estimation à partir de la croissance seule si tu en supposes une.</p>
+                  <GoalTimeEstimate current={current} target={target} totalMonthly={0} />
+                </div>
+              )}
+              {incoming.length === 0 && selected.progress >= 1 && <p className="text-xs text-positive font-medium">Objectif atteint</p>}
             </div>;
           })()}
         </div>
