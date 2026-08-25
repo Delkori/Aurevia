@@ -6,6 +6,7 @@ import {
   type Simulation, type SimulationNodeDatum,
 } from "d3-force";
 import { FolderPlus, Plus, PlusCircle, Star, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, AlertTriangle, Bell, Clock } from "lucide-react";
+import { findAccessory } from "@/lib/astronautAccessories";
 import { formatMoney } from "@/lib/format";
 import { currentValue, gain, gainPercent, totalDebt } from "@/lib/networth";
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
@@ -17,7 +18,7 @@ type Asset = { id: number; name: string; type: string; ticker: string | null; qu
 type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null };
 type Goal = { id: number; name: string; targetAmount: string; targetDate: string | null; color: string; memberId: number | null };
 type Loan = { id: number; name: string; remainingBalance: string; currency: string; assetId: number | null };
-type Member = { id: number; name: string; role: string; color: string; salary: string | null };
+type Member = { id: number; name: string; role: string; color: string; salary: string | null; accessory: string | null };
 type Flow = { id: number; name: string | null; sourceType: string; sourceId: number | null; targetType: string; targetId: number | null; amount: string; frequency: string; memberId: number | null; createdAt: string };
 type GoalLink = { id: number; goalId: number; portfolioId: number };
 type PortfolioOwnership = { id: number; portfolioId: number; memberId: number | null; sharePercent: string };
@@ -155,7 +156,7 @@ interface GNode extends SimulationNodeDatum {
   id: string; kind: string; label: string; r: number; color: string;
   portfolioKey?: number | "unassigned"; assetId?: number; goalId?: number; memberId?: number | null;
   gainVal?: number; gainPct?: number; sub?: string; logoUrl?: string | null; skin?: PlanetSkin;
-  ownerExpenseTotal?: number; ownerRevenue?: number; flowId?: number; amount?: number; isProjected?: boolean;
+  ownerExpenseTotal?: number; ownerRevenue?: number; flowId?: number; amount?: number; isProjected?: boolean; accessory?: string | null;
 }
 interface GLink { source: string; target: string }
 
@@ -179,12 +180,12 @@ const STARS = Array.from({ length: 260 }, (_, i) => ({
 }));
 
 export default function GalaxyView({
-  assets, portfolios, goals, loans, members, flows, goalLinks, portfolioOwnerships, quotes, dividends, actions, salary, onUpdateSalary, onUpdateSelf, onRefresh, showCountdown, ownerName, centerColor,
+  assets, portfolios, goals, loans, members, flows, goalLinks, portfolioOwnerships, quotes, dividends, actions, salary, onUpdateSalary, onUpdateSelf, onRefresh, showCountdown, ownerName, centerColor, ownerAccessory,
 }: {
   assets: Asset[]; portfolios: Portfolio[]; goals: Goal[]; loans: Loan[];
   members: Member[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; quotes: Record<string, Quote>; dividends: Record<string, DividendInfo | null>;
-  actions: Actions; salary: number; onUpdateSalary: (v: number) => Promise<void>; onUpdateSelf: (name: string, color: string) => Promise<void>; onRefresh: () => void; showCountdown: boolean;
-  ownerName: string; centerColor: string;
+  actions: Actions; salary: number; onUpdateSalary: (v: number) => Promise<void>; onUpdateSelf: (name: string, color: string, accessory: string | null) => Promise<void>; onRefresh: () => void; showCountdown: boolean;
+  ownerName: string; centerColor: string; ownerAccessory: string | null;
 }) {
   const [expanded, setExpanded] = useState<Set<number | "unassigned">>(new Set());
   const [selected, setSelected] = useState<Selection>(null);
@@ -299,7 +300,13 @@ export default function GalaxyView({
     // "Moi" est son propre système (comme chaque membre), pas juste un fourre-tout collé
     // au centre — ses planètes non attribuées à un membre s'accrochent ici plutôt que
     // directement à Patrimoine, symétrique à `m-${m.id}` pour un membre du foyer.
-    nodes.push({ id: "self", kind: "member", label: ownerName, r: 30, color: centerColor, memberId: null });
+    // Chaque planète-personne grossit avec SON patrimoine (portefeuilles qui lui sont
+    // directement attribués), sur une échelle commune à Moi + tous les membres, pour que
+    // les tailles restent comparables d'une personne à l'autre.
+    const selfTotal = groups.filter(g => !g.portfolio.memberId).reduce((s, g) => s + g.total, 0);
+    const memberTotal = (mid: number) => groups.filter(g => g.portfolio.memberId === mid).reduce((s, g) => s + g.total, 0);
+    const maxPersonTotal = Math.max(1, selfTotal, ...members.map(m => memberTotal(m.id)));
+    nodes.push({ id: "self", kind: "member", label: ownerName, r: sr(selfTotal, maxPersonTotal, 24, 48), color: centerColor, memberId: null, sub: formatMoney(selfTotal), accessory: ownerAccessory });
     links.push({ source: "center", target: "self" });
     if (totalRevenue > 0) links.push({ source: "salary", target: "center" });
 
@@ -338,7 +345,8 @@ export default function GalaxyView({
     }
 
     members.forEach(m => {
-      nodes.push({ id: `m-${m.id}`, kind: "member", label: m.name, r: 24, color: m.color, memberId: m.id });
+      const mTotal = memberTotal(m.id);
+      nodes.push({ id: `m-${m.id}`, kind: "member", label: m.name, r: sr(mTotal, maxPersonTotal, 20, 44), color: m.color, memberId: m.id, sub: formatMoney(mTotal), accessory: m.accessory });
       links.push({ source: "center", target: `m-${m.id}` });
       if (m.salary && Number(m.salary) > 0) {
         nodes.push({ id: `ms-${m.id}`, kind: "member-salary", label: `Salaire de ${m.name}`, r: 22, color: m.color, memberId: m.id, sub: formatMoney(Number(m.salary)), amount: Number(m.salary) });
@@ -400,7 +408,7 @@ export default function GalaxyView({
     });
 
     return { targetNodes: nodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows, totalRevenue, totalInvest };
-  }, [groups, expanded, goals, members, portfolios, flows, quotes, salary, goalLinks, goalProgress, scrubYears, scrubGrowth]);
+  }, [groups, expanded, goals, members, flows, quotes, salary, goalLinks, goalProgress, scrubYears, scrubGrowth, ownerName, centerColor, ownerAccessory]);
   linksRef.current = links;
 
   // Simulation
@@ -687,7 +695,7 @@ export default function GalaxyView({
       const goal = goals.find(g => g.id === n.goalId)!;
       setSelected({ kind: "goal", goal, progress: goalProgress(goal), linkedPortfolioIds: goalLinks.filter(gl => gl.goalId === goal.id).map(gl => gl.portfolioId) });
     }
-    else if (n.id === "self") setSelected({ kind: "self", name: ownerName, color: centerColor });
+    else if (n.id === "self") setSelected({ kind: "self", name: ownerName, color: centerColor, accessory: ownerAccessory });
     else if (n.kind === "member" && n.memberId != null) {
       const member = members.find(m => m.id === n.memberId)!;
       const mTotal = portfolios.filter(p => p.memberId === member.id).reduce((s, p) => s + (groups.find(gr => gr.key === p.id)?.total ?? 0), 0);
@@ -1457,6 +1465,7 @@ export default function GalaxyView({
 
                 {n.kind === "member" && (() => {
                   const bob = Math.sin(t * 1.4 + n.r) * 1;
+                  const accessory = findAccessory(n.accessory);
                   return <>
                     <circle r={n.r} fill={`url(#sph-${n.id})`} />
                     <circle r={n.r} fill="url(#sph-hl)" />
@@ -1469,8 +1478,11 @@ export default function GalaxyView({
                       <circle cy={-5.2} r={4.3} fill="#f5f5fa" stroke={n.color} strokeWidth={0.6} />
                       <ellipse cx={0.4} cy={-5.2} rx={2.7} ry={2.4} fill="#2a3550" />
                       <ellipse cx={-0.4} cy={-6} rx={0.8} ry={0.6} fill="rgba(255,255,255,0.5)" />
+                      {/* Accessoire cosmétique du petit astronaute — un badge sur la poitrine */}
+                      {accessory && <accessory.Icon x={-3.2} y={0.5} size={6.4} color={accessory.color} strokeWidth={2.5} fill={accessory.id === "flag" || accessory.id === "rocket" ? "none" : accessory.color} />}
                     </g>
                     <text y={4} textAnchor="middle" fontSize={10} fontWeight={500} fill="#fff" style={ts}>{n.label}</text>
+                    {n.sub && <text y={16} textAnchor="middle" fontSize={8} fill="rgba(255,255,255,0.75)" style={ts}>{mask(n.sub)}</text>}
                   </>;
                 })()}
 

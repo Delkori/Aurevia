@@ -11,7 +11,7 @@ type Asset = { id: number; name: string; type: string; ticker: string | null; qu
 type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null };
 type Goal = { id: number; name: string; targetAmount: string; targetDate: string | null; color: string; memberId: number | null };
 type Loan = { id: number; name: string; remainingBalance: string; principal: string; interestRate: string | null; monthlyPayment: string | null; assetId: number | null; currency: string };
-type Member = { id: number; name: string; role: string; color: string; salary: string | null };
+type Member = { id: number; name: string; role: string; color: string; salary: string | null; accessory: string | null };
 type Flow = { id: number; name: string | null; sourceType: string; sourceId: number | null; targetType: string; targetId: number | null; amount: string; frequency: string; memberId: number | null; createdAt: string };
 type GoalLink = { id: number; goalId: number; portfolioId: number };
 type PortfolioOwnership = { id: number; portfolioId: number; memberId: number | null; sharePercent: string };
@@ -108,8 +108,8 @@ export default function HomePage() {
     await api("/api/settings", "PUT", { monthly_salary: String(v) });
   };
 
-  const updateSelf = async (name: string, color: string) => {
-    await api("/api/settings", "PUT", { owner_name: name, center_color: color });
+  const updateSelf = async (name: string, color: string, accessory: string | null) => {
+    await api("/api/settings", "PUT", { owner_name: name, center_color: color, owner_accessory: accessory ?? "" });
   };
 
   if (loading) return <div className="h-screen flex items-center justify-center text-text-muted text-sm">Chargement…</div>;
@@ -131,6 +131,7 @@ export default function HomePage() {
           showCountdown={settings.show_payment_countdown !== "false"}
           ownerName={settings.owner_name || "Moi"}
           centerColor={settings.center_color || "#ffcc55"}
+          ownerAccessory={settings.owner_accessory || null}
           onUpdateSalary={updateSalary}
           onUpdateSelf={updateSelf}
           onRefresh={load}

@@ -4,12 +4,13 @@ import { useState, useEffect } from "react";
 import { Trash2, Pencil } from "lucide-react";
 import { formatMoney } from "@/lib/format";
 import { ASSET_TYPE_LABELS } from "@/lib/networth";
+import { ASTRONAUT_ACCESSORIES } from "@/lib/astronautAccessories";
 
 type Asset = { id: number; name: string; type: string; ticker: string | null; quantity: string | null; avgBuyPrice: string | null; manualValue: string | null; yieldRate: string | null; currency: string; portfolioId: number | null };
 type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null };
 type Goal = { id: number; name: string; targetAmount: string; targetDate: string | null; color: string; memberId: number | null };
 type Loan = { id: number; name: string; remainingBalance: string; currency: string; assetId: number | null };
-type Member = { id: number; name: string; role: string; color: string; salary: string | null };
+type Member = { id: number; name: string; role: string; color: string; salary: string | null; accessory: string | null };
 type Flow = { id: number; name: string | null; sourceType: string; sourceId: number | null; targetType: string; targetId: number | null; amount: string; frequency: string; memberId: number | null; createdAt: string };
 type GoalLink = { id: number; goalId: number; portfolioId: number };
 type PortfolioOwnership = { id: number; portfolioId: number; memberId: number | null; sharePercent: string };
@@ -22,7 +23,7 @@ export type Selection =
   | { kind: "asset"; asset: Asset; value: number; gain: number; gainPct: number; portfolioName: string }
   | { kind: "goal"; goal: Goal; progress: number; linkedPortfolioIds: number[] }
   | { kind: "member"; member: Member; total: number }
-  | { kind: "self"; name: string; color: string }
+  | { kind: "self"; name: string; color: string; accessory: string | null }
   | { kind: "flow-item"; flowId: number; label: string; isExpense: boolean }
   | null;
 
@@ -76,6 +77,22 @@ function ColorPick({ value, onChange }: { value: string; onChange: (c: string) =
     <button key={c} type="button" onClick={() => onChange(c)}
       className={`w-5 h-5 rounded-full ${value === c ? "ring-2 ring-offset-1 ring-offset-surface ring-text" : ""}`} style={{ background: c }} />
   ))}</div>;
+}
+
+// ── Accessoire cosmétique du petit astronaute ────────────────────────────────
+function AccessoryPick({ value, onChange }: { value: string | null; onChange: (a: string | null) => void }) {
+  return <div className="flex flex-wrap gap-1.5 mt-1">
+    <button type="button" onClick={() => onChange(null)}
+      className={`w-7 h-7 rounded-md flex items-center justify-center text-[9px] text-text-muted border border-border ${!value ? "ring-2 ring-offset-1 ring-offset-surface ring-text" : ""}`}>
+      Aucun
+    </button>
+    {ASTRONAUT_ACCESSORIES.map(a => (
+      <button key={a.id} type="button" onClick={() => onChange(a.id)} title={a.label}
+        className={`w-7 h-7 rounded-md flex items-center justify-center bg-bg border border-border ${value === a.id ? "ring-2 ring-offset-1 ring-offset-surface ring-text" : ""}`}>
+        <a.Icon size={13} color={a.color} fill={a.id === "flag" || a.id === "rocket" ? "none" : a.color} />
+      </button>
+    ))}
+  </div>;
 }
 
 // ── Portfolio Form ───────────────────────────────────────────────────────────
@@ -394,12 +411,14 @@ function MemberForm({ initial, onSubmit, onDelete, onCancel }:
   const [role, setRole] = useState(initial?.role ?? "spouse");
   const [color, setColor] = useState(initial?.color ?? COLORS[1]);
   const [salary, setSalary] = useState(initial?.salary ?? "");
+  const [accessory, setAccessory] = useState<string | null>(initial?.accessory ?? null);
   return (
-    <form onSubmit={e => { e.preventDefault(); onSubmit({ name, role, color, salary: salary || null }); }} className="space-y-1">
+    <form onSubmit={e => { e.preventDefault(); onSubmit({ name, role, color, salary: salary || null, accessory }); }} className="space-y-1">
       <p className="text-[10px] text-text-muted uppercase tracking-wide">{initial ? "Membre" : "Nouveau membre du foyer"}</p>
       <Label>Nom</Label><Inp required value={name} onChange={e => setName(e.target.value)} placeholder="Léa, Tom…" />
       <Label>Rôle</Label><Sel value={role} onChange={e => setRole(e.target.value)}>{ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}</Sel>
       <Label>Couleur</Label><ColorPick value={color} onChange={setColor} />
+      <Label>Accessoire de l&apos;astronaute</Label><AccessoryPick value={accessory} onChange={setAccessory} />
       <Label>Salaire mensuel net (optionnel)</Label>
       <Inp type="number" step="any" value={salary} onChange={e => setSalary(e.target.value)} placeholder="1800" className="tabular" />
       <p className="text-[10px] text-text-muted">Si renseigné, une planète Salaire dédiée apparaît près de ce membre — tu peux y créer des flux vers ses propres planètes.</p>
@@ -409,15 +428,17 @@ function MemberForm({ initial, onSubmit, onDelete, onCancel }:
 }
 
 // ── Self ("Moi") Form ────────────────────────────────────────────────────────
-function SelfForm({ name: initialName, color: initialColor, onSubmit, onCancel }:
-  { name: string; color: string; onSubmit: (name: string, color: string) => Promise<void>; onCancel: () => void }) {
+function SelfForm({ name: initialName, color: initialColor, accessory: initialAccessory, onSubmit, onCancel }:
+  { name: string; color: string; accessory: string | null; onSubmit: (name: string, color: string, accessory: string | null) => Promise<void>; onCancel: () => void }) {
   const [name, setName] = useState(initialName);
   const [color, setColor] = useState(initialColor);
+  const [accessory, setAccessory] = useState<string | null>(initialAccessory);
   return (
-    <form onSubmit={e => { e.preventDefault(); onSubmit(name, color).then(onCancel); }} className="space-y-1">
+    <form onSubmit={e => { e.preventDefault(); onSubmit(name, color, accessory).then(onCancel); }} className="space-y-1">
       <p className="text-[10px] text-text-muted uppercase tracking-wide">Ta planète</p>
       <Label>Prénom</Label><Inp required value={name} onChange={e => setName(e.target.value)} placeholder="Toi" />
       <Label>Couleur</Label><ColorPick value={color} onChange={setColor} />
+      <Label>Accessoire de l&apos;astronaute</Label><AccessoryPick value={accessory} onChange={setAccessory} />
       <p className="text-[10px] text-text-muted">Recolore aussi la planète Patrimoine et le petit personnage.</p>
       <div className="flex gap-2 pt-3"><Btn type="submit" variant="accent" className="flex-1">Enregistrer</Btn><Btn type="button" onClick={onCancel}>Fermer</Btn></div>
     </form>
@@ -426,7 +447,7 @@ function SelfForm({ name: initialName, color: initialColor, onSubmit, onCancel }
 
 // ── Main Panel ───────────────────────────────────────────────────────────────
 export default function NodePanel({ selected, loans, portfolios, members, goals, flows, goalLinks, portfolioOwnerships, actions, onClear, createMode, setCreateMode, salary, onUpdateSalary, onUpdateSelf, groups, grossTotal, debt, onPortfolioCreated, ownerName, expenseMemberId, dividends }:
-  { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; onUpdateSelf: (name: string, color: string) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number; onPortfolioCreated?: (p: Portfolio) => void; ownerName: string; expenseMemberId?: number | null; dividends: Record<string, DividendInfo | null> }) {
+  { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; onUpdateSelf: (name: string, color: string, accessory: string | null) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number; onPortfolioCreated?: (p: Portfolio) => void; ownerName: string; expenseMemberId?: number | null; dividends: Record<string, DividendInfo | null> }) {
 
   useEffect(() => { setCreateMode(null); }, [selected]); // eslint-disable-line
 
@@ -752,7 +773,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
       )}
 
       {selected?.kind === "self" && (
-        <SelfForm name={selected.name} color={selected.color} onSubmit={onUpdateSelf} onCancel={clear} />
+        <SelfForm name={selected.name} color={selected.color} accessory={selected.accessory} onSubmit={onUpdateSelf} onCancel={clear} />
       )}
 
       {selected?.kind === "member" && (

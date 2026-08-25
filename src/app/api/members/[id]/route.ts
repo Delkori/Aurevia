@@ -9,7 +9,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const { id } = await params;
     const body = await req.json();
     const [updated] = await db.update(members).set({
-      name: body.name, role: body.role, color: body.color, salary: body.salary || null,
+      name: body.name, role: body.role, color: body.color, salary: body.salary || null, accessory: body.accessory ?? null,
     }).where(eq(members.id, Number(id))).returning();
     if (!updated) return NextResponse.json({ error: "Introuvable." }, { status: 404 });
     return NextResponse.json(updated);

@@ -15,6 +15,7 @@ export const members = pgTable("members", {
   role: text("role").notNull().default("owner"), // owner | spouse | child | other
   color: text("color").notNull().default("#7c6af5"),
   salary: numeric("salary"), // salaire mensuel net propre à ce membre (optionnel)
+  accessory: text("accessory"), // accessoire cosmétique du petit astronaute (star | heart | flag | crown | bolt | rocket), null = aucun
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
