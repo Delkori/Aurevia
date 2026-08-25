@@ -21,6 +21,8 @@ type Member = { id: number; name: string; role: string; color: string; salary: s
 type Flow = { id: number; name: string | null; sourceType: string; sourceId: number | null; targetType: string; targetId: number | null; amount: string; frequency: string; memberId: number | null; createdAt: string };
 type GoalLink = { id: number; goalId: number; portfolioId: number };
 type PortfolioOwnership = { id: number; portfolioId: number; memberId: number | null; sharePercent: string };
+type DividendEvent = { date: string; amount: number };
+type DividendInfo = { ticker: string; currency: string; received: DividendEvent[]; projected: DividendEvent[] };
 type Quote = { price: number; currency: string } | null;
 
 const W = 1200, H = 800, CX = W / 2, CY = H / 2, CENTER_R = 32;
@@ -153,7 +155,7 @@ interface GNode extends SimulationNodeDatum {
   id: string; kind: string; label: string; r: number; color: string;
   portfolioKey?: number | "unassigned"; assetId?: number; goalId?: number; memberId?: number | null;
   gainVal?: number; gainPct?: number; sub?: string; logoUrl?: string | null; skin?: PlanetSkin;
-  ownerExpenseTotal?: number; ownerRevenue?: number; flowId?: number; amount?: number;
+  ownerExpenseTotal?: number; ownerRevenue?: number; flowId?: number; amount?: number; isProjected?: boolean;
 }
 interface GLink { source: string; target: string }
 
@@ -169,18 +171,18 @@ function useAnimClock() {
   return t;
 }
 
-const STARS = Array.from({ length: 180 }, (_, i) => ({
+const STARS = Array.from({ length: 260 }, (_, i) => ({
   x: (Math.sin(i * 127.1 + 311.7) * 0.5 + 0.5) * W,
   y: (Math.sin(i * 269.5 + 183.3) * 0.5 + 0.5) * H,
   r: i < 8 ? 1 + (i % 3) * 0.4 : 0.3 + (i % 5) * 0.15,
-  op: i < 8 ? 0.4 + (i % 3) * 0.15 : 0.1 + (i % 7) * 0.05,
+  op: i < 8 ? 0.4 + (i % 3) * 0.15 : 0.14 + (i % 7) * 0.06,
 }));
 
 export default function GalaxyView({
-  assets, portfolios, goals, loans, members, flows, goalLinks, portfolioOwnerships, quotes, actions, salary, onUpdateSalary, onUpdateSelf, onRefresh, showCountdown, ownerName, centerColor,
+  assets, portfolios, goals, loans, members, flows, goalLinks, portfolioOwnerships, quotes, dividends, actions, salary, onUpdateSalary, onUpdateSelf, onRefresh, showCountdown, ownerName, centerColor,
 }: {
   assets: Asset[]; portfolios: Portfolio[]; goals: Goal[]; loans: Loan[];
-  members: Member[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; quotes: Record<string, Quote>;
+  members: Member[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; quotes: Record<string, Quote>; dividends: Record<string, DividendInfo | null>;
   actions: Actions; salary: number; onUpdateSalary: (v: number) => Promise<void>; onUpdateSelf: (name: string, color: string) => Promise<void>; onRefresh: () => void; showCountdown: boolean;
   ownerName: string; centerColor: string;
 }) {
@@ -244,7 +246,6 @@ export default function GalaxyView({
   const scrubProjectedTotal = scrubYears === 0 ? grandTotal : projectedValue(grandTotal, scrubMonthlyContribution, scrubGrowth, scrubYears * 12);
   const currentYearForScrub = new Date().getFullYear();
   const scrubYear = currentYearForScrub + scrubYears;
-  const maxPV = Math.max(1, ...groups.map(g => g.total));
 
   const goalProgress = useCallback((goal: Goal) => {
     const linkedIds = goalLinks.filter(gl => gl.goalId === goal.id).map(gl => gl.portfolioId);
@@ -259,12 +260,42 @@ export default function GalaxyView({
     const links: GLink[] = [];
     const flowLinks: { source: string; target: string; label: string; amount: number; days?: number; isSalarySource?: boolean }[] = [];
 
+    // Normalise un flux à son équivalent mensuel — même barème que scrubMonthlyContribution
+    // plus haut, dupliqué ici volontairement pour ne pas ajouter une dépendance externe à
+    // ce useMemo (qui casserait sa mémoïsation à chaque render).
+    const monthlyAmount = (f: Flow) =>
+      f.frequency === "monthly" ? Number(f.amount)
+      : f.frequency === "daily" ? Number(f.amount) * 30.44
+      : f.frequency === "weekly" ? Number(f.amount) * 4.345
+      : f.frequency === "yearly" ? Number(f.amount) / 12
+      : 0;
+
+    // Simulateur "avance rapide" : projette la valeur de CE portefeuille (pas une moyenne
+    // globale) à scrubYears, à partir de ses propres flux entrants réguliers — deux
+    // portefeuilles alimentés différemment ne grossissent pas au même rythme.
+    const projectedGroupTotal = (g: typeof groups[number]) => {
+      if (scrubYears === 0) return g.total;
+      const monthlyContribution = flows
+        .filter(f => f.targetType === "portfolio" && f.targetId === g.key)
+        .reduce((s, f) => s + monthlyAmount(f), 0);
+      return projectedValue(g.total, monthlyContribution, scrubGrowth, scrubYears * 12);
+    };
+    const maxPV = Math.max(1, ...groups.map(g => projectedGroupTotal(g)));
+
     const incomeFlows = flows.filter(f => f.targetType === "income");
     const totalIncomeItems = incomeFlows.reduce((s, f) => s + Number(f.amount), 0);
     const totalRevenue = salary + totalIncomeItems;
 
     if (totalRevenue > 0) nodes.push({ id: "salary", kind: "salary", label: "Revenus", r: 32, color: "#34d399", sub: formatMoney(totalRevenue), amount: totalRevenue });
-    nodes.push({ id: "center", kind: "center", label: "Patrimoine", r: CENTER_R, color: "#7c6af5" });
+    // Le Soleil grossit lui aussi avec la projection globale (racine carrée, comme sr(),
+    // pour une croissance visuelle proportionnée plutôt que linéaire — un patrimoine x4
+    // ne doit pas donner un Soleil x4 en rayon, sinon il avale tout le reste).
+    const grossNow = groups.reduce((s, g) => s + g.total, 0);
+    const globalMonthlyContribution = flows.reduce((s, f) => (f.targetType === "portfolio" || f.targetType === "goal") ? s + monthlyAmount(f) : s, 0);
+    const sunProjectedTotal = scrubYears === 0 ? grossNow : projectedValue(grossNow, globalMonthlyContribution, scrubGrowth, scrubYears * 12);
+    const growthRatio = scrubYears === 0 ? 1 : sunProjectedTotal / Math.max(1, grossNow);
+    const centerR = CENTER_R * Math.max(0.85, Math.min(1.55, Math.sqrt(growthRatio)));
+    nodes.push({ id: "center", kind: "center", label: "Patrimoine", r: centerR, color: "#7c6af5" });
     // "Moi" est son propre système (comme chaque membre), pas juste un fourre-tout collé
     // au centre — ses planètes non attribuées à un membre s'accrochent ici plutôt que
     // directement à Patrimoine, symétrique à `m-${m.id}` pour un membre du foyer.
@@ -331,7 +362,11 @@ export default function GalaxyView({
       const memberNode = g.portfolio.memberId ? `m-${g.portfolio.memberId}` : null;
       const totalGain = g.valued.reduce((s, v) => { const a = v.asset; return s + ((a.avgBuyPrice && Number(a.avgBuyPrice) > 0) ? gain(a, a.ticker ? quotes[a.ticker] : null) : 0); }, 0);
       const skin = planetSkin(g.portfolio.name, g.valued, g.portfolio.skin);
-      nodes.push({ id: pid, kind: "portfolio", label: g.portfolio.name, r: sr(g.total, maxPV, 20, 78), color: g.portfolio.color, portfolioKey: g.key, gainVal: totalGain, sub: formatMoney(g.total), skin });
+      const projTotal = projectedGroupTotal(g);
+      // En simulation, le gain affiché (calculé sur les cours réels du jour) perdrait son
+      // sens à côté d'une valeur projetée dans le futur — on le masque plutôt que d'afficher
+      // un chiffre qui semblerait porter sur la projection alors qu'il ne la concerne pas.
+      nodes.push({ id: pid, kind: "portfolio", label: g.portfolio.name, r: sr(projTotal, maxPV, 20, 78), color: g.portfolio.color, portfolioKey: g.key, gainVal: scrubYears > 0 ? undefined : totalGain, sub: formatMoney(projTotal), skin, isProjected: scrubYears > 0 });
       links.push({ source: memberNode ?? "self", target: pid });
       if (expanded.has(g.key)) {
         const maxAV = Math.max(1, ...g.valued.map(v => v.value));
@@ -365,7 +400,7 @@ export default function GalaxyView({
     });
 
     return { targetNodes: nodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows, totalRevenue, totalInvest };
-  }, [groups, maxPV, expanded, goals, members, portfolios, flows, quotes, salary, goalLinks, goalProgress]);
+  }, [groups, expanded, goals, members, portfolios, flows, quotes, salary, goalLinks, goalProgress, scrubYears, scrubGrowth]);
   linksRef.current = links;
 
   // Simulation
@@ -566,6 +601,7 @@ export default function GalaxyView({
   };
 
   const nodes = [...nodesMapRef.current.values()];
+  const nowMs = new Date().getTime(); // référence unique pour situer les dividendes proches/à venir
   const nodeById = nodesMapRef.current;
   const toggle = (key: number | "unassigned") => setExpanded(prev => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n; });
 
@@ -787,7 +823,7 @@ export default function GalaxyView({
   return (
     <div className="grid h-full" style={{ gridTemplateColumns: "160px 1fr 280px" }}>
       {/* ── LEFT MENU ── */}
-      <div className="bg-surface/40 border-r border-border flex flex-col overflow-y-auto">
+      <div className="glass-panel border-r border-border flex flex-col overflow-y-auto">
         {/* Stats header */}
         <div className="px-4 pt-4 pb-3 border-b border-border space-y-1">
           <div>
@@ -883,7 +919,15 @@ export default function GalaxyView({
       </div>
 
       {/* ── GRAPH ── */}
-      <div className="relative overflow-hidden" style={{ background: "radial-gradient(ellipse at 30% 20%, rgba(124,106,245,0.16), transparent 45%), radial-gradient(ellipse at 75% 65%, rgba(45,180,190,0.10), transparent 42%), radial-gradient(ellipse at 15% 80%, rgba(200,90,60,0.06), transparent 35%), #06060a" }}>
+      <div className="relative overflow-hidden" style={{
+        background: [
+          "radial-gradient(ellipse 70% 50% at 30% 15%, rgba(124,106,245,0.22), transparent 55%)",
+          "radial-gradient(ellipse 60% 45% at 78% 68%, rgba(45,180,190,0.13), transparent 52%)",
+          "radial-gradient(ellipse 55% 50% at 12% 82%, rgba(200,90,60,0.09), transparent 48%)",
+          "radial-gradient(ellipse 40% 35% at 55% 45%, rgba(255,255,255,0.025), transparent 65%)",
+          "#050409",
+        ].join(", "),
+      }}>
         <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full h-full select-none touch-none block absolute inset-0"
           onPointerDown={onBgDown} onPointerMove={onBgMove} onPointerUp={onBgUp} onPointerLeave={onBgUp}
           onClick={() => { if (linkSourceNode) { setLinkSourceNode(null); return; } if (ownerSourceNode) { setOwnerSourceNode(null); return; } setSelected(null); setCreateMode(null); }}>
@@ -909,6 +953,19 @@ export default function GalaxyView({
             <clipPath id="clip-sal"><circle r={32} /></clipPath>
             <radialGradient id="vignette" cx="50%" cy="45%" r="72%"><stop offset="55%" stopColor="#000" stopOpacity={0} /><stop offset="100%" stopColor="#000" stopOpacity={0.55} /></radialGradient>
             <radialGradient id="rocket-trail" cx="50%" cy="50%" r="50%"><stop offset="0%" stopColor="#ffb870" stopOpacity={0.9} /><stop offset="100%" stopColor="#ffb870" stopOpacity={0} /></radialGradient>
+
+            {/* Trame HUD discrète — un léger quadrillage technique qui rappelle un
+                dashboard de contrôle, estompé vers les bords pour ne jamais rivaliser
+                avec les planètes ni la lisibilité du texte. */}
+            <pattern id="hud-grid" width={56} height={56} patternUnits="userSpaceOnUse">
+              <path d="M 56 0 L 0 0 0 56" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth={1} />
+            </pattern>
+            <radialGradient id="hud-grid-fade" cx="50%" cy="42%" r="65%">
+              <stop offset="0%" stopColor="#fff" stopOpacity={1} />
+              <stop offset="70%" stopColor="#fff" stopOpacity={0.4} />
+              <stop offset="100%" stopColor="#fff" stopOpacity={0} />
+            </radialGradient>
+            <mask id="hud-grid-mask"><rect x={0} y={0} width={W} height={H} fill="url(#hud-grid-fade)" /></mask>
 
             {/* Planet skins by dominant asset type */}
             <radialGradient id="sph-skin-tech" cx="38%" cy="28%" r="60%"><stop offset="0%" stopColor="#baffee" /><stop offset="25%" stopColor="#2dd4c8" /><stop offset="55%" stopColor="#0e8a80" /><stop offset="80%" stopColor="#0a3a38" /><stop offset="100%" stopColor="#041816" /></radialGradient>
@@ -957,6 +1014,20 @@ export default function GalaxyView({
             ))}
           </defs>
 
+          {/* Nébuleuses dérivantes — profondeur derrière les planètes, mouvement à peine
+              perceptible (comme les filtres de turbulence, en beaucoup plus lent) */}
+          <g opacity={0.5}>
+            <ellipse cx={W * 0.22} cy={H * 0.18} rx={260} ry={150} fill="url(#glow-center)" opacity={0.35}>
+              <animate attributeName="cx" values={`${W * 0.22};${W * 0.26};${W * 0.22}`} dur="40s" repeatCount="indefinite" />
+            </ellipse>
+            <ellipse cx={W * 0.8} cy={H * 0.72} rx={220} ry={170} fill="url(#glow-crypto)" opacity={0.3}>
+              <animate attributeName="cy" values={`${H * 0.72};${H * 0.66};${H * 0.72}`} dur="46s" repeatCount="indefinite" />
+            </ellipse>
+          </g>
+          {/* Quadrillage HUD, estompé vers les bords */}
+          <rect x={0} y={0} width={W} height={H} fill="url(#hud-grid)" mask="url(#hud-grid-mask)" opacity={0.6} pointerEvents="none" />
+          {/* Fond étoilé — 180 points fixes (seedés, stables entre rendus serveur/client),
+              8 d'entre eux scintillent doucement */}
           {STARS.map((s, i) => <circle key={`s${i}`} cx={s.x} cy={s.y} r={s.r} fill="#fff" opacity={i < 8 ? s.op * (0.65 + 0.35 * Math.sin(t * 1.3 + i * 0.9)) : s.op} />)}
           <circle cx={CX} cy={CY} r={200} fill="none" stroke="rgba(255,255,255,0.03)" strokeDasharray="4 12" />
           <circle cx={CX} cy={CY} r={350} fill="none" stroke="rgba(255,255,255,0.02)" strokeDasharray="4 16" />
@@ -979,7 +1050,9 @@ export default function GalaxyView({
               const seed = hashSeed(f.source, f.target), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
               const mid = bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, 0.5);
               return <g key={`fl-${i}`}>
-                <path d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke="#9585ff" strokeOpacity={0.3} strokeWidth={1.5} strokeDasharray="6 4" />
+                <path d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke="#9585ff" strokeOpacity={0.3} strokeWidth={1.5} strokeDasharray="6 4">
+                  <animate attributeName="stroke-dashoffset" from="0" to="-20" dur={f.isSalarySource ? "0.9s" : "1.6s"} repeatCount="indefinite" />
+                </path>
                 <text x={mid.x} y={mid.y - 12} textAnchor="middle" fontSize={10} fill="#b8a5ff" opacity={0.75} fontWeight={500}>{mask(f.label)}</text>
                 {showCountdown && f.days !== undefined && !Number.isNaN(f.days) && (
                   <text x={mid.x} y={mid.y + 2} textAnchor="middle" fontSize={8} fill="#fbbf24" opacity={0.85} fontWeight={600}>
@@ -1194,8 +1267,40 @@ export default function GalaxyView({
                   const skinFilter = skin === "tech" ? "url(#circuits)" : skin === "ocean" ? "url(#turb-water)" : "url(#terrain)";
                   return <>
                     {isExp && <ellipse rx={n.r + 42} ry={(n.r + 42) * 0.55} fill="none" stroke={n.color} strokeOpacity={0.18} strokeWidth={1} strokeDasharray="2 7" />}
+                    {/* Simulateur "avance rapide" : anneau fantôme + opacité réduite pour
+                        qu'une planète en projection ne soit jamais confondue avec son état
+                        réel actuel — la taille bouge, mais l'habillage reste clairement
+                        "hypothétique" tant que le curseur temporel n'est pas revenu à zéro. */}
+                    {n.isProjected && <circle r={n.r + 14} fill="none" stroke="#9585ff" strokeOpacity={0.35} strokeWidth={1.5} strokeDasharray="1 5">
+                      <animate attributeName="stroke-dashoffset" from="0" to="-12" dur="1.4s" repeatCount="indefinite" />
+                    </circle>}
+                    <g opacity={n.isProjected ? 0.72 : 1}>
                     <clipPath id={`cp-${n.id}`}><circle r={n.r} /></clipPath>
                     <circle r={n.r + 5} fill={`url(#atmo-${n.id})`} />
+                    {/* Anneau(x) d'objectif — un anneau par objectif lié à cette planète,
+                        concentriques si plusieurs (le plus avancé à l'intérieur). Les
+                        objectifs restent aussi des satellites cliquables à part entière
+                        (utile quand un même objectif est réparti sur plusieurs planètes, ou
+                        alimenté par un flux dédié) — ces anneaux ne sont qu'un raccourci
+                        visuel en plus, jamais la seule source de vérité. */}
+                    {(() => {
+                      const linkedGoals = goalLinks.filter(gl => gl.portfolioId === n.portfolioKey)
+                        .map(gl => goals.find(g => g.id === gl.goalId)).filter((g): g is Goal => !!g);
+                      if (linkedGoals.length === 0) return null;
+                      return <g pointerEvents="none">
+                        {linkedGoals.map((goal, gi) => {
+                          const prog = goalProgress(goal);
+                          const done = prog >= 1;
+                          const ringR = n.r + 9 + gi * 6, circ = 2 * Math.PI * ringR;
+                          return <g key={goal.id}>
+                            <circle r={ringR} fill="none" stroke={goal.color} strokeOpacity={0.16} strokeWidth={3} />
+                            <circle r={ringR} fill="none" stroke={goal.color} strokeWidth={3} strokeLinecap="round"
+                              strokeDasharray={`${circ * prog} ${circ}`} transform="rotate(-90)"
+                              opacity={0.9} style={done ? { filter: `drop-shadow(0 0 5px ${goal.color})` } : undefined} />
+                          </g>;
+                        })}
+                      </g>;
+                    })()}
                     {skin === "crypto" && !imageHref && <circle r={n.r + 14 + Math.sin(t * 2) * 3} fill="url(#glow-crypto)" />}
 
                     {imageHref ? (
@@ -1250,8 +1355,26 @@ export default function GalaxyView({
                     <circle r={n.r} fill="url(#sph-hl)" stroke={n.color} strokeOpacity={isExp ? 0.35 : 0.1} strokeWidth={isExp ? 1.5 : 0.5} />
                     {imageHref && <rect x={-n.r * 0.95} y={-15} width={n.r * 1.9} height={(n.gainVal ?? 0) !== 0 ? 40 : 27} rx={(n.gainVal ?? 0) !== 0 ? 20 : 13.5} fill="rgba(6,6,10,0.55)" />}
                     <text y={-6} textAnchor="middle" fontSize={11} fontWeight={600} fill="#fff" style={ts}>{n.label}</text>
-                    <text y={9} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.85)" style={ts}>{n.sub && mask(n.sub)}</text>
-                    {(n.gainVal ?? 0) !== 0 && <text y={22} textAnchor="middle" fontSize={8} fill={(n.gainVal ?? 0) >= 0 ? "#34d399" : "#fb7185"} style={ts}>{mask(`${(n.gainVal ?? 0) >= 0 ? "+" : ""}${formatMoney(n.gainVal ?? 0)}`)}</text>}
+                    <text y={9} textAnchor="middle" fontSize={9} fill={n.isProjected ? "#c8bfff" : "rgba(255,255,255,0.85)"} style={ts}>{n.sub && mask(n.sub)}</text>
+                    {n.isProjected && <text y={20} textAnchor="middle" fontSize={7} fontWeight={600} fill="#9585ff" style={ts}>projection {scrubYear}</text>}
+                    {!n.isProjected && (n.gainVal ?? 0) !== 0 && <text y={22} textAnchor="middle" fontSize={8} fill={(n.gainVal ?? 0) >= 0 ? "#34d399" : "#fb7185"} style={ts}>{mask(`${(n.gainVal ?? 0) >= 0 ? "+" : ""}${formatMoney(n.gainVal ?? 0)}`)}</text>}
+                    {(() => {
+                      const linkedGoals = goalLinks.filter(gl => gl.portfolioId === n.portfolioKey)
+                        .map(gl => goals.find(g => g.id === gl.goalId)).filter((g): g is Goal => !!g);
+                      if (linkedGoals.length === 0) return null;
+                      const baseY = n.isProjected ? 32 : (n.gainVal ?? 0) !== 0 ? 34 : 22;
+                      return <>
+                        {linkedGoals.slice(0, 2).map((goal, gi) => {
+                          const prog = goalProgress(goal);
+                          const done = prog >= 1;
+                          return <text key={goal.id} y={baseY + gi * 11} textAnchor="middle" fontSize={8} fontWeight={600} fill={goal.color} style={ts}>
+                            {done ? "✓ " : "🎯 "}{goal.name.length > 14 ? goal.name.slice(0, 13) + "…" : goal.name} · {Math.round(prog * 100)}%
+                          </text>;
+                        })}
+                        {linkedGoals.length > 2 && <text y={baseY + 2 * 11} textAnchor="middle" fontSize={7} fill="rgba(255,255,255,0.5)" style={ts}>+{linkedGoals.length - 2} autre{linkedGoals.length - 2 > 1 ? "s" : ""}</text>}
+                      </>;
+                    })()}
+                    </g>
                     {selected?.kind === "portfolio" && selected.id === n.portfolioKey && (
                       <g transform={`translate(${(n.r + 13) * 0.7071},${(n.r + 13) * 0.7071})`} style={{ cursor: "pointer" }}
                         onPointerDown={e => e.stopPropagation()}
@@ -1290,6 +1413,18 @@ export default function GalaxyView({
                   const isCracked = (n.gainPct ?? 0) <= -20;
                   const hasLogo = !!n.logoUrl && !isCracked && !logoErrors.has(n.id);
                   const logoR = Math.max(8, n.r - 4);
+                  // ── Calendrier de dividendes : pluie de particules dorées si un versement
+                  // (réel ou estimé) tombe dans les 7 jours ; sinon un petit badge discret
+                  // si un versement est estimé dans les 30 prochains jours.
+                  const assetRow = n.assetId != null ? assets.find(a => a.id === n.assetId) : undefined;
+                  const divInfo = assetRow?.ticker ? dividends[assetRow.ticker] : null;
+                  const DAY_MS = 86_400_000;
+                  const nearDividend = divInfo
+                    ? [...divInfo.received, ...divInfo.projected].some(e => Math.abs(new Date(e.date).getTime() - nowMs) <= 7 * DAY_MS)
+                    : false;
+                  const nextUpcoming = divInfo
+                    ? [...divInfo.projected].filter(e => new Date(e.date).getTime() >= nowMs).sort((a, b) => a.date.localeCompare(b.date))[0]
+                    : undefined;
                   return <>
                     {isCracked ? <>
                       <circle r={n.r} fill="rgba(120,116,130,0.14)" stroke="rgba(180,175,190,0.4)" strokeWidth={0.8} />
@@ -1305,6 +1440,18 @@ export default function GalaxyView({
                     <text y={hasLogo ? n.r * 0.55 : -3} textAnchor="middle" fontSize={hasLogo ? 7.5 : 9} fontWeight={500} fill={isCracked ? "#c8c4d2" : "#d8d8dc"}>{n.label.length > 11 ? n.label.slice(0, 10) + "…" : n.label}</text>
                     {n.gainVal !== undefined && <text y={hasLogo ? n.r * 0.55 + 10 : 8} textAnchor="middle" fontSize={hasLogo ? 7 : 8} fill={isCracked ? "#fb7185" : n.gainVal >= 0 ? "#34d399" : "#fb7185"} fontWeight={isCracked ? 700 : 400}>{mask(`${n.gainVal >= 0 ? "+" : ""}${formatMoney(n.gainVal)}`)}</text>}
                     {n.gainVal === undefined && <text y={hasLogo ? n.r * 0.55 + 10 : 8} textAnchor="middle" fontSize={hasLogo ? 7 : 8} fill="rgba(255,255,255,0.5)">{n.sub && mask(n.sub)}</text>}
+                    {nearDividend && Array.from({ length: 5 }, (_, i) => {
+                      const phase = (t * 0.45 + i * 0.37) % 1;
+                      const px = Math.sin(i * 13.7) * n.r * 0.7;
+                      const py = -n.r * 1.7 + phase * n.r * 3.4;
+                      const op = phase < 0.85 ? (1 - phase) * 0.85 : 0;
+                      return <circle key={`div-${n.id}-${i}`} cx={px} cy={py} r={1.3} fill="#ffd76a" opacity={op} style={{ filter: "drop-shadow(0 0 3px #ffcf4a)" }} />;
+                    })}
+                    {!nearDividend && nextUpcoming && (
+                      <circle cx={n.r * 0.7} cy={-n.r * 0.7} r={3.5} fill="#12121a" stroke="#ffd76a" strokeWidth={1} opacity={0.85}>
+                        <title>{`Prochain dividende estimé le ${nextUpcoming.date}`}</title>
+                      </circle>
+                    )}
                   </>;
                 })()}
 
@@ -1367,7 +1514,7 @@ export default function GalaxyView({
 
         {/* Curseur chronologique : projette le Patrimoine à une date future, hypothèse à taux constant */}
         {showScrubBar && (
-          <div className="absolute bottom-10 left-1/2 -translate-x-1/2 w-[min(620px,92%)] bg-surface/80 border border-border rounded-lg px-4 py-2.5 backdrop-blur flex items-center gap-3">
+          <div className="absolute bottom-10 left-1/2 -translate-x-1/2 w-[min(620px,92%)] glass-panel border border-border rounded-lg px-4 py-2.5 flex items-center gap-3">
             <span className="text-[10px] text-text-muted tabular shrink-0">{currentYearForScrub}</span>
             <input type="range" min={0} max={30} value={scrubYears} onChange={e => setScrubYears(Number(e.target.value))} className="flex-1" />
             <span className="text-[10px] text-text-muted tabular shrink-0">{currentYearForScrub + 30}</span>
@@ -1428,7 +1575,7 @@ export default function GalaxyView({
               {alerts.length > 0 && <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-negative" />}
             </button>
             {alertsOpen && (
-              <div className="absolute right-0 top-8 z-10 w-72 max-w-[90vw] bg-surface border border-border rounded-lg shadow-xl p-3 space-y-1.5">
+              <div className="absolute right-0 top-8 z-10 w-72 max-w-[90vw] glass-panel border border-border rounded-lg shadow-xl p-3 space-y-1.5">
                 {alerts.length === 0 ? (
                   <p className="text-xs text-text-muted">Aucune alerte.</p>
                 ) : alerts.map(a => (
@@ -1442,7 +1589,7 @@ export default function GalaxyView({
           </div>
         </div>
         <div className="min-h-0">
-          <NodePanel selected={selected} loans={loans} portfolios={portfolios} members={members} goals={goals} flows={flows} goalLinks={goalLinks} portfolioOwnerships={portfolioOwnerships} actions={actions} onClear={() => setSelected(null)} createMode={createMode} setCreateMode={setCreateMode} salary={salary} onUpdateSalary={onUpdateSalary} onUpdateSelf={onUpdateSelf} groups={groups.map(g => ({ key: g.key, total: g.total, valued: g.valued }))} grossTotal={grossTotal} debt={debt} ownerName={ownerName} expenseMemberId={expenseMemberId}
+          <NodePanel selected={selected} loans={loans} portfolios={portfolios} members={members} goals={goals} flows={flows} goalLinks={goalLinks} portfolioOwnerships={portfolioOwnerships} actions={actions} onClear={() => setSelected(null)} createMode={createMode} setCreateMode={setCreateMode} salary={salary} onUpdateSalary={onUpdateSalary} onUpdateSelf={onUpdateSelf} groups={groups.map(g => ({ key: g.key, total: g.total, valued: g.valued }))} grossTotal={grossTotal} debt={debt} ownerName={ownerName} expenseMemberId={expenseMemberId} dividends={dividends}
             onPortfolioCreated={p => setSelected({ kind: "portfolio", id: p.id, name: p.name, color: p.color, skin: p.skin, total: 0, count: 0, memberId: p.memberId })} />
         </div>
       </div>

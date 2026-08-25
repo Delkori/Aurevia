@@ -5,6 +5,7 @@ import { AlertTriangle, X } from "lucide-react";
 import GalaxyView from "@/components/GalaxyView";
 import { apiFetch, ApiError } from "@/lib/api";
 import { fetchAllQuotes } from "@/lib/allQuotes";
+import { fetchAllDividends, type DividendInfo } from "@/lib/allDividends";
 
 type Asset = { id: number; name: string; type: string; ticker: string | null; quantity: string | null; avgBuyPrice: string | null; manualValue: string | null; yieldRate: string | null; currency: string; portfolioId: number | null };
 type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null };
@@ -26,6 +27,7 @@ export default function HomePage() {
   const [goalLinks, setGoalLinks] = useState<GoalLink[]>([]);
   const [portfolioOwnerships, setPortfolioOwnerships] = useState<PortfolioOwnership[]>([]);
   const [quotes, setQuotes] = useState<Record<string, Quote>>({});
+  const [dividends, setDividends] = useState<Record<string, DividendInfo | null>>({});
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -50,6 +52,9 @@ export default function HomePage() {
       setPortfolioOwnerships(po.status === "fulfilled" ? (po.value as PortfolioOwnership[]) : []);
       if (a.status === "rejected") throw a.reason;
       try { setQuotes(await fetchAllQuotes(ad) as Record<string, Quote>); } catch {}
+      // Non bloquant et indépendant des cours : un échec ici ne doit jamais empêcher
+      // l'affichage du reste du dashboard.
+      fetchAllDividends(ad).then(setDividends).catch(() => {});
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Erreur de chargement.");
     } finally { setLoading(false); }
@@ -121,7 +126,7 @@ export default function HomePage() {
       <div className="flex-1 min-h-0">
         <GalaxyView
           assets={assets} portfolios={portfolios} goals={goals} loans={loans}
-          members={members} flows={flows} goalLinks={goalLinks} portfolioOwnerships={portfolioOwnerships} quotes={quotes} actions={actions}
+          members={members} flows={flows} goalLinks={goalLinks} portfolioOwnerships={portfolioOwnerships} quotes={quotes} dividends={dividends} actions={actions}
           salary={Number(settings.monthly_salary) || 0}
           showCountdown={settings.show_payment_countdown !== "false"}
           ownerName={settings.owner_name || "Moi"}

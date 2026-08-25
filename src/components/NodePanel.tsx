@@ -13,6 +13,8 @@ type Member = { id: number; name: string; role: string; color: string; salary: s
 type Flow = { id: number; name: string | null; sourceType: string; sourceId: number | null; targetType: string; targetId: number | null; amount: string; frequency: string; memberId: number | null; createdAt: string };
 type GoalLink = { id: number; goalId: number; portfolioId: number };
 type PortfolioOwnership = { id: number; portfolioId: number; memberId: number | null; sharePercent: string };
+type DividendEvent = { date: string; amount: number };
+type DividendInfo = { ticker: string; currency: string; received: DividendEvent[]; projected: DividendEvent[] };
 
 export type Selection =
   | { kind: "total"; total: number; grossTotal: number; debt: number }
@@ -423,15 +425,15 @@ function SelfForm({ name: initialName, color: initialColor, onSubmit, onCancel }
 }
 
 // ── Main Panel ───────────────────────────────────────────────────────────────
-export default function NodePanel({ selected, loans, portfolios, members, goals, flows, goalLinks, portfolioOwnerships, actions, onClear, createMode, setCreateMode, salary, onUpdateSalary, onUpdateSelf, groups, grossTotal, debt, onPortfolioCreated, ownerName, expenseMemberId }:
-  { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; onUpdateSelf: (name: string, color: string) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number; onPortfolioCreated?: (p: Portfolio) => void; ownerName: string; expenseMemberId?: number | null }) {
+export default function NodePanel({ selected, loans, portfolios, members, goals, flows, goalLinks, portfolioOwnerships, actions, onClear, createMode, setCreateMode, salary, onUpdateSalary, onUpdateSelf, groups, grossTotal, debt, onPortfolioCreated, ownerName, expenseMemberId, dividends }:
+  { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; onUpdateSelf: (name: string, color: string) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number; onPortfolioCreated?: (p: Portfolio) => void; ownerName: string; expenseMemberId?: number | null; dividends: Record<string, DividendInfo | null> }) {
 
   useEffect(() => { setCreateMode(null); }, [selected]); // eslint-disable-line
 
   const clear = () => { setCreateMode(null); onClear(); };
 
   return (
-    <div className="bg-surface/40 border-l border-border p-5 space-y-3 overflow-y-auto h-full">
+    <div className="glass-panel border-l border-border p-5 space-y-3 overflow-y-auto h-full">
 
       {createMode === "portfolio" && <PortfolioForm members={members} ownerName={ownerName} onSubmit={async d => { const p = await actions.createPortfolio(d); setCreateMode(null); if (onPortfolioCreated) onPortfolioCreated(p); else onClear(); }} onCancel={clear} />}
       {createMode === "asset" && <AssetForm portfolios={portfolios} defaultPortfolioId={selected?.kind === "portfolio" && selected.id !== "unassigned" ? selected.id as number : undefined} onSubmit={async d => { await actions.createAsset(d); clear(); }} onCancel={clear} />}
@@ -451,6 +453,34 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
             <p className="tabular">{formatMoney(grossTotal)} d&apos;actifs</p>
             <p className="tabular text-negative">− {formatMoney(debt)} de crédits</p>
           </div>}
+          {(() => {
+            // Revenus passifs projetés (12 prochains mois) : somme, pour chaque action/ETF
+            // détenu, de (quantité × montant par action) sur les versements estimés à venir.
+            const allHeld = groups.flatMap(g => g.valued);
+            const upcomingByTicker = new Map<string, { amount: number; count: number }>();
+            let totalProjected = 0;
+            for (const { asset } of allHeld) {
+              if (!asset.ticker) continue;
+              const info = dividends[asset.ticker];
+              if (!info || info.projected.length === 0) continue;
+              const qty = Number(asset.quantity ?? 0);
+              const perShareTotal = info.projected.reduce((s, e) => s + e.amount, 0);
+              const total = qty * perShareTotal;
+              if (total <= 0) continue;
+              totalProjected += total;
+              upcomingByTicker.set(asset.ticker, { amount: total, count: info.projected.length });
+            }
+            if (totalProjected <= 0) return null;
+            return (
+              <div className="pt-2 border-t border-border">
+                <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Revenus passifs estimés (12 mois)</p>
+                <p className="text-lg font-[family-name:var(--font-mono-num)] tabular text-positive">{formatMoney(totalProjected)}</p>
+                <p className="text-[10px] text-text-muted mt-0.5">
+                  Sur {upcomingByTicker.size} ligne{upcomingByTicker.size > 1 ? "s" : ""} — estimation à partir de l&apos;historique de versement, pas une annonce officielle.
+                </p>
+              </div>
+            );
+          })()}
           {loans.length > 0 && <div className="pt-2 border-t border-border">
             <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Crédits</p>
             {loans.map(l => <div key={l.id} className="flex justify-between items-center gap-2 text-xs py-0.5 group">
@@ -628,10 +658,28 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
       )}
 
       {!createMode && selected?.kind === "asset" && (
-        <AssetForm initial={selected.asset} portfolios={portfolios}
-          onSubmit={async d => { await actions.updateAsset(selected.asset.id, d); clear(); }}
-          onDelete={async () => { if (!confirm(`Supprimer "${selected.asset.name}" ?`)) return; await actions.deleteAsset(selected.asset.id); clear(); }}
-          onCancel={clear} />
+        <>
+          <AssetForm initial={selected.asset} portfolios={portfolios}
+            onSubmit={async d => { await actions.updateAsset(selected.asset.id, d); clear(); }}
+            onDelete={async () => { if (!confirm(`Supprimer "${selected.asset.name}" ?`)) return; await actions.deleteAsset(selected.asset.id); clear(); }}
+            onCancel={clear} />
+          {(() => {
+            const ticker = selected.asset.ticker;
+            const info = ticker ? dividends[ticker] : null;
+            if (!info) return null;
+            const qty = Number(selected.asset.quantity ?? 0);
+            const receivedTotal = info.received.reduce((s, e) => s + e.amount, 0) * qty;
+            const next = [...info.projected].filter(e => new Date(e.date).getTime() >= Date.now()).sort((a, b) => a.date.localeCompare(b.date))[0];
+            if (receivedTotal <= 0 && !next) return null;
+            return (
+              <div className="pt-3 mt-3 border-t border-border space-y-1">
+                <p className="text-[10px] text-text-muted uppercase tracking-wide">Dividendes</p>
+                {receivedTotal > 0 && <p className="text-xs">Reçus (12 mois) : <span className="tabular font-medium">{formatMoney(receivedTotal, info.currency)}</span></p>}
+                {next && <p className="text-xs text-text-muted">Prochain versement estimé le <span className="tabular">{next.date}</span> ({formatMoney(next.amount * qty, info.currency)})</p>}
+              </div>
+            );
+          })()}
+        </>
       )}
 
       {!createMode && selected?.kind === "goal" && (
