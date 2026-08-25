@@ -9,7 +9,7 @@ export default function Sidebar() {
   if (pathname === "/login") return null;
 
   return (
-    <aside className="w-12 shrink-0 border-r border-border glass-panel flex flex-col items-center py-4 gap-2 h-screen sticky top-0">
+    <aside className="w-12 shrink-0 border-r border-border bg-surface/30 flex flex-col items-center py-4 gap-2 h-screen sticky top-0">
       <Link href="/" className="text-accent font-[family-name:var(--font-heading)] font-bold text-lg mb-4" title="Aurevia" style={{ textShadow: "0 0 12px var(--accent)" }}>
         A
       </Link>

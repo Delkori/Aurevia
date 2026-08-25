@@ -1441,9 +1441,13 @@ export default function GalaxyView({
                       ))}
                     </> : <circle r={n.r} fill={isPos ? "rgba(52,211,153,0.06)" : "rgba(251,113,133,0.06)"} stroke={isPos ? "rgba(52,211,153,0.25)" : "rgba(251,113,133,0.25)"} strokeWidth={0.6} />}
                     {hasLogo && <>
-                      <clipPath id={`logo-${n.id}`}><circle r={logoR * 0.55} /></clipPath>
-                      <image href={n.logoUrl!} x={-logoR * 0.55} y={-logoR * 0.75} width={logoR * 1.1} height={logoR * 1.1} clipPath={`url(#logo-${n.id})`} style={{ opacity: 0.9 }}
+                      {/* Fond clair discret derrière le logo : beaucoup de favicons ont une icône
+                          sombre ou semi-transparente qui disparaîtrait sinon sur le satellite. */}
+                      <circle cy={-logoR * 0.2} r={logoR * 0.58} fill="rgba(255,255,255,0.92)" />
+                      <clipPath id={`logo-${n.id}`}><circle cy={-logoR * 0.2} r={logoR * 0.55} /></clipPath>
+                      <image href={n.logoUrl!} x={-logoR * 0.55} y={-logoR * 0.75} width={logoR * 1.1} height={logoR * 1.1} clipPath={`url(#logo-${n.id})`} style={{ opacity: 0.95 }}
                         onError={() => setLogoErrors(prev => prev.has(n.id) ? prev : new Set(prev).add(n.id))} />
+                      <circle cy={-logoR * 0.2} r={logoR * 0.55} fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth={0.6} />
                     </>}
                     <text y={hasLogo ? n.r * 0.55 : -3} textAnchor="middle" fontSize={hasLogo ? 7.5 : 9} fontWeight={500} fill={isCracked ? "#c8c4d2" : "#d8d8dc"}>{n.label.length > 11 ? n.label.slice(0, 10) + "…" : n.label}</text>
                     {n.gainVal !== undefined && <text y={hasLogo ? n.r * 0.55 + 10 : 8} textAnchor="middle" fontSize={hasLogo ? 7 : 8} fill={isCracked ? "#fb7185" : n.gainVal >= 0 ? "#34d399" : "#fb7185"} fontWeight={isCracked ? 700 : 400}>{mask(`${n.gainVal >= 0 ? "+" : ""}${formatMoney(n.gainVal)}`)}</text>}
