@@ -929,10 +929,10 @@ export default function GalaxyView({
       {/* ── GRAPH ── */}
       <div className="relative overflow-hidden" style={{
         background: [
-          "radial-gradient(ellipse 70% 50% at 30% 15%, rgba(124,106,245,0.22), transparent 55%)",
-          "radial-gradient(ellipse 60% 45% at 78% 68%, rgba(45,180,190,0.13), transparent 52%)",
-          "radial-gradient(ellipse 55% 50% at 12% 82%, rgba(200,90,60,0.09), transparent 48%)",
-          "radial-gradient(ellipse 40% 35% at 55% 45%, rgba(255,255,255,0.025), transparent 65%)",
+          "radial-gradient(ellipse 55% 40% at 25% 22%, rgba(124,106,245,0.08), transparent 60%)",
+          "radial-gradient(ellipse 60% 45% at 78% 68%, rgba(45,180,190,0.10), transparent 55%)",
+          "radial-gradient(ellipse 55% 50% at 12% 82%, rgba(200,90,60,0.07), transparent 50%)",
+          "radial-gradient(ellipse 40% 35% at 55% 45%, rgba(255,255,255,0.02), transparent 65%)",
           "#050409",
         ].join(", "),
       }}>
@@ -1022,13 +1022,13 @@ export default function GalaxyView({
             ))}
           </defs>
 
-          {/* Nébuleuses dérivantes — profondeur derrière les planètes, mouvement à peine
-              perceptible (comme les filtres de turbulence, en beaucoup plus lent) */}
-          <g opacity={0.5}>
-            <ellipse cx={W * 0.22} cy={H * 0.18} rx={260} ry={150} fill="url(#glow-center)" opacity={0.35}>
-              <animate attributeName="cx" values={`${W * 0.22};${W * 0.26};${W * 0.22}`} dur="40s" repeatCount="indefinite" />
-            </ellipse>
-            <ellipse cx={W * 0.8} cy={H * 0.72} rx={220} ry={170} fill="url(#glow-crypto)" opacity={0.3}>
+          {/* Nébuleuse dérivante — profondeur derrière les planètes, mouvement à peine
+              perceptible (comme les filtres de turbulence, en beaucoup plus lent).
+              Une seule, discrète : deux halos superposés près du même coin (celui-ci
+              + le dégradé CSS du fond) créaient une bande violette trop marquée en haut
+              de l'écran sur les moniteurs larges et peu hauts. */}
+          <g opacity={0.35}>
+            <ellipse cx={W * 0.8} cy={H * 0.72} rx={220} ry={170} fill="url(#glow-crypto)" opacity={0.28}>
               <animate attributeName="cy" values={`${H * 0.72};${H * 0.66};${H * 0.72}`} dur="46s" repeatCount="indefinite" />
             </ellipse>
           </g>

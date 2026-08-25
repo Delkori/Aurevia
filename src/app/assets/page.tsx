@@ -280,7 +280,7 @@ export default function AssetsPage() {
                       value={a.name}
                       onChange={(e) => updateAssetField(a.id, { name: e.target.value })}
                       onBlur={() => saveAsset(a)}
-                      className="w-full bg-transparent focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
+                      className="w-full bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
                     />
                   </td>
                   <td className="px-3 py-2">
@@ -290,7 +290,7 @@ export default function AssetsPage() {
                         updateAssetField(a.id, { type: e.target.value });
                         saveAsset({ ...a, type: e.target.value });
                       }}
-                      className="bg-transparent focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
+                      className="bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
                     >
                       {Object.entries(ASSET_TYPE_LABELS).map(([value, label]) => (
                         <option key={value} value={value}>
@@ -307,7 +307,7 @@ export default function AssetsPage() {
                         updateAssetField(a.id, { portfolioId });
                         saveAsset({ ...a, portfolioId });
                       }}
-                      className="bg-transparent focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent max-w-[140px]"
+                      className="bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent max-w-[140px]"
                     >
                       <option value="">—</option>
                       {portfolios.map((p) => (
@@ -326,7 +326,7 @@ export default function AssetsPage() {
                             updateAssetField(a.id, { ticker: e.target.value });
                             saveAsset({ ...a, ticker: e.target.value });
                           }}
-                          className="bg-transparent focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent max-w-[130px]"
+                          className="bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent max-w-[130px]"
                         >
                           <option value="">—</option>
                           {METAL_TICKERS.map((m) => (
@@ -341,7 +341,7 @@ export default function AssetsPage() {
                           onChange={(e) => updateAssetField(a.id, { ticker: e.target.value })}
                           onBlur={() => saveAsset(a)}
                           placeholder={a.type === "crypto" ? "bitcoin" : "AAPL"}
-                          className="w-24 bg-transparent focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
+                          className="w-24 bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
                         />
                       )
                     ) : (
@@ -356,7 +356,7 @@ export default function AssetsPage() {
                         value={a.quantity ?? ""}
                         onChange={(e) => updateAssetField(a.id, { quantity: e.target.value })}
                         onBlur={() => saveAsset(a)}
-                        className="w-20 bg-transparent focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent text-right tabular"
+                        className="w-20 bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent text-right tabular"
                       />
                     ) : (
                       <span className="text-text-muted px-2">—</span>
@@ -376,7 +376,7 @@ export default function AssetsPage() {
                         )
                       }
                       onBlur={() => saveAsset(a)}
-                      className="w-28 bg-transparent focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent text-right tabular"
+                      className="w-28 bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent text-right tabular"
                     />
                     {YIELD_TYPES.has(a.type) && (
                       <input
@@ -398,7 +398,7 @@ export default function AssetsPage() {
                         updateAssetField(a.id, { currency: e.target.value });
                         saveAsset({ ...a, currency: e.target.value });
                       }}
-                      className="bg-transparent focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
+                      className="bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
                     >
                       {CURRENCIES.map((c) => (
                         <option key={c} value={c}>
@@ -447,7 +447,7 @@ export default function AssetsPage() {
                 <select
                   value={draft.type}
                   onChange={(e) => setDraft({ ...draft, type: e.target.value })}
-                  className="bg-transparent focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
+                  className="bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
                 >
                   {Object.entries(ASSET_TYPE_LABELS).map(([value, label]) => (
                     <option key={value} value={value}>
@@ -460,7 +460,7 @@ export default function AssetsPage() {
                 <select
                   value={draft.portfolioId}
                   onChange={(e) => setDraft({ ...draft, portfolioId: e.target.value })}
-                  className="bg-transparent focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent max-w-[140px]"
+                  className="bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent max-w-[140px]"
                 >
                   <option value="">—</option>
                   {portfolios.map((p) => (
@@ -476,7 +476,7 @@ export default function AssetsPage() {
                     <select
                       value={draft.ticker}
                       onChange={(e) => setDraft({ ...draft, ticker: e.target.value })}
-                      className="bg-transparent focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent max-w-[130px]"
+                      className="bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent max-w-[130px]"
                     >
                       <option value="">—</option>
                       {METAL_TICKERS.map((m) => (
@@ -491,7 +491,7 @@ export default function AssetsPage() {
                       onChange={(e) => setDraft({ ...draft, ticker: e.target.value })}
                       onBlur={commitDraft}
                       placeholder={draft.type === "crypto" ? "bitcoin" : "AAPL"}
-                      className="w-24 bg-transparent focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
+                      className="w-24 bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
                     />
                   )
                 ) : (
@@ -506,7 +506,7 @@ export default function AssetsPage() {
                     value={draft.quantity}
                     onChange={(e) => setDraft({ ...draft, quantity: e.target.value })}
                     onBlur={commitDraft}
-                    className="w-20 bg-transparent focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent text-right tabular"
+                    className="w-20 bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent text-right tabular"
                   />
                 ) : (
                   <span className="text-text-muted px-2">—</span>
@@ -525,7 +525,7 @@ export default function AssetsPage() {
                     )
                   }
                   onBlur={commitDraft}
-                  className="w-28 bg-transparent focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent text-right tabular"
+                  className="w-28 bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent text-right tabular"
                 />
                 {YIELD_TYPES.has(draft.type) && (
                   <input
@@ -544,7 +544,7 @@ export default function AssetsPage() {
                 <select
                   value={draft.currency}
                   onChange={(e) => setDraft({ ...draft, currency: e.target.value })}
-                  className="bg-transparent focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
+                  className="bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
                 >
                   {CURRENCIES.map((c) => (
                     <option key={c} value={c}>
