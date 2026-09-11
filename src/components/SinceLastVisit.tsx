@@ -81,7 +81,7 @@ export default function SinceLastVisit({
   };
 
   return (
-    <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 w-[min(28rem,calc(100%-2rem))]">
+    <div className="absolute top-16 lg:top-4 left-1/2 -translate-x-1/2 z-10 w-[min(28rem,calc(100%-2rem))]">
       <div className="bg-surface/95 border border-border rounded-xl shadow-xl backdrop-blur px-4 py-3.5">
         <div className="flex items-start justify-between gap-3 mb-2.5">
           <p className="text-[10px] uppercase tracking-wider text-text-muted">

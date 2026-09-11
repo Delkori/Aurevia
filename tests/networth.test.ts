@@ -10,6 +10,7 @@ import {
   isStale,
   normalizeQuoteCurrency,
   ownedShare,
+  quoteAsOf,
   totalDebt,
   type ValuationContext,
 } from "../src/lib/networth.ts";
@@ -239,5 +240,29 @@ describe("goalProgress", () => {
     assert.equal(goalProgress({ id: 1, targetAmount: "0" }, links, totalOf), 0);
     assert.equal(goalProgress({ id: 1, targetAmount: "" }, links, totalOf), 0);
     assert.equal(goalProgress({ id: 1, targetAmount: "-5" }, links, totalOf), 0);
+  });
+});
+
+describe("quoteAsOf", () => {
+  test("null quand le cours vient d'être récupéré", () => {
+    assert.equal(quoteAsOf({ price: 100, currency: "EUR" }), null);
+    assert.equal(quoteAsOf(null), null);
+    assert.equal(quoteAsOf(undefined), null);
+  });
+
+  test("rend la date quand le cours vient du dernier prix connu", () => {
+    const d = quoteAsOf({ price: 100, currency: "EUR", asOf: "2026-09-09T14:00:00Z" });
+    assert.equal(d?.toISOString(), "2026-09-09T14:00:00.000Z");
+  });
+
+  test("une date illisible ne fait pas planter l'affichage", () => {
+    assert.equal(quoteAsOf({ price: 100, currency: "EUR", asOf: "hier" }), null);
+  });
+
+  test("un cours daté reste un vrai cours, pas un repli sur le prix de revient", () => {
+    const a = stock();
+    const cached = { price: 200, currency: "USD", asOf: "2026-09-09T14:00:00Z" };
+    assert.equal(isStale(a, cached), false);
+    assert.equal(Math.round(currentValue(a, cached, inEur)), 1852);
   });
 });

@@ -5,7 +5,7 @@ import {
   forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY,
   type Simulation, type SimulationNodeDatum,
 } from "d3-force";
-import { FolderPlus, Plus, PlusCircle, Star, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, AlertTriangle, Bell, Clock } from "lucide-react";
+import { FolderPlus, Plus, PlusCircle, Star, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, AlertTriangle, Bell, Clock, Menu, PanelRight } from "lucide-react";
 import { findAccessory } from "@/lib/astronautAccessories";
 import { formatMoney } from "@/lib/format";
 import { currentValue, gain, gainPercent, goalProgress, totalDebt, ownedShare, type Rates, type ValuationContext } from "@/lib/networth";
@@ -241,6 +241,9 @@ export default function GalaxyView({
   const [alertsOpen, setAlertsOpen] = useState(false);
   const [expenseMemberId, setExpenseMemberId] = useState<number | null>(null);
   const [hideAmounts, setHideAmounts] = useState(false);
+  // Sous `lg`, les deux panneaux latéraux ne tiennent pas à côté de la galaxie :
+  // ils deviennent des tiroirs superposés, et la galaxie garde toute la largeur.
+  const [drawer, setDrawer] = useState<"menu" | "details" | null>(null);
   const [logoErrors, setLogoErrors] = useState<Set<string>>(new Set());
   const [showScrubBar, setShowScrubBar] = useState(false);
   const mask = (s: string) => hideAmounts ? "•••" : s;
@@ -887,9 +890,26 @@ export default function GalaxyView({
   }, [totalRevenue, totalExpenseFlows, totalInvest, fmt]);
 
   return (
-    <div className="grid h-full" style={{ gridTemplateColumns: "160px 1fr 280px" }}>
+    <div className="relative grid h-full grid-cols-1 lg:grid-cols-[160px_1fr_280px]">
+      {/* Voile sous le tiroir ouvert : un clic en dehors le referme. */}
+      {drawer && (
+        <button
+          aria-label="Fermer le panneau"
+          onClick={() => setDrawer(null)}
+          className="lg:hidden absolute inset-0 z-20 bg-bg/70 cursor-default"
+        />
+      )}
       {/* ── LEFT MENU ── */}
-      <div className="glass-panel border-r border-border flex flex-col overflow-y-auto">
+      <div className={`glass-panel border-r border-border flex-col overflow-y-auto
+        max-lg:absolute max-lg:inset-y-0 max-lg:left-0 max-lg:z-30 max-lg:w-52 max-lg:shadow-2xl
+        ${drawer === "menu" ? "flex" : "hidden lg:flex"}`}>
+        <button
+          onClick={() => setDrawer(null)}
+          aria-label="Fermer le menu"
+          className="lg:hidden self-end p-3 text-text-muted hover:text-text"
+        >
+          <X size={16} />
+        </button>
         {/* Stats header */}
         <div className="px-4 pt-4 pb-3 border-b border-border space-y-1">
           <div>
@@ -995,6 +1015,31 @@ export default function GalaxyView({
           "#050409",
         ].join(", "),
       }}>
+        {/* Commandes mobiles : sous `lg`, les panneaux sont des tiroirs, il faut
+            de quoi les ouvrir — et le patrimoine net doit rester lisible sans
+            avoir à en ouvrir un. */}
+        <div className="lg:hidden absolute top-0 inset-x-0 z-10 flex items-center gap-2 px-3 py-2 bg-bg/80 backdrop-blur border-b border-border">
+          <button
+            onClick={() => setDrawer(d => (d === "menu" ? null : "menu"))}
+            aria-label="Ouvrir le menu"
+            aria-expanded={drawer === "menu"}
+            className="shrink-0 p-1.5 -m-1.5 text-text-muted hover:text-text"
+          >
+            <Menu size={18} />
+          </button>
+          <div className="flex-1 min-w-0 text-center">
+            <p className="text-sm font-[family-name:var(--font-mono-num)] tabular font-semibold truncate">{fmt(grandTotal)}</p>
+            <p className="text-[9px] text-text-muted -mt-0.5">Patrimoine net</p>
+          </div>
+          <button
+            onClick={() => setDrawer(d => (d === "details" ? null : "details"))}
+            aria-label="Ouvrir le détail"
+            aria-expanded={drawer === "details"}
+            className="shrink-0 p-1.5 -m-1.5 text-text-muted hover:text-text"
+          >
+            <PanelRight size={18} />
+          </button>
+        </div>
         <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full h-full select-none touch-none block absolute inset-0"
           onPointerDown={onBgDown} onPointerMove={onBgMove} onPointerUp={onBgUp} onPointerLeave={onBgUp}
           onClick={() => { if (linkSourceNode) { setLinkSourceNode(null); return; } if (ownerSourceNode) { setOwnerSourceNode(null); return; } setSelected(null); setCreateMode(null); }}>
@@ -1585,7 +1630,7 @@ export default function GalaxyView({
           </g>
           <rect x={0} y={0} width={W} height={H} fill="url(#vignette)" pointerEvents="none" />
         </svg>
-        <p className="absolute bottom-3 left-1/2 -translate-x-1/2 text-[10px] text-white/20 pointer-events-none">Molette = zoom · glisser pour déplacer · glisser un actif vers un portefeuille pour le réassigner</p>
+        <p className="hidden lg:block absolute bottom-3 left-1/2 -translate-x-1/2 text-[10px] text-white/20 pointer-events-none">Molette = zoom · glisser pour déplacer · glisser un actif vers un portefeuille pour le réassigner</p>
 
         {/* Curseur chronologique : projette le Patrimoine à une date future, hypothèse à taux constant */}
         {showScrubBar && (
@@ -1630,8 +1675,17 @@ export default function GalaxyView({
       </div>
 
       {/* ── PANEL ── */}
-      <div className="grid" style={{ gridTemplateRows: "44px 1fr" }}>
+      <div className={`grid grid-rows-[44px_1fr]
+        max-lg:absolute max-lg:inset-y-0 max-lg:right-0 max-lg:z-30 max-lg:w-[19rem] max-lg:bg-surface max-lg:shadow-2xl
+        ${drawer === "details" ? "" : "max-lg:hidden"}`}>
         <div className="border-l border-b border-border bg-surface/40 flex items-center justify-end gap-2 pl-4 pr-5 min-w-0">
+          <button
+            onClick={() => setDrawer(null)}
+            aria-label="Fermer le détail"
+            className="lg:hidden mr-auto text-text-muted hover:text-text"
+          >
+            <X size={16} />
+          </button>
           <button title={hideAmounts ? "Afficher les montants" : "Masquer les montants"} onClick={() => setHideAmounts(h => !h)} className={`shrink-0 ${hideAmounts ? "text-accent" : "text-text-muted"} hover:text-text`}>
             {hideAmounts ? <EyeOff size={16} /> : <Eye size={16} />}
           </button>

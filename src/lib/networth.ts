@@ -7,7 +7,12 @@ export type AssetLike = {
   currency?: string;
 };
 
-export type Quote = { price: number; currency: string } | null | undefined;
+/**
+ * Un cours. `asOf` n'est renseigné que lorsque la valeur vient du dernier prix
+ * connu en base parce que l'API n'a pas répondu — l'interface doit alors dire
+ * de quand date le cours, pas le présenter comme frais.
+ */
+export type Quote = { price: number; currency: string; asOf?: string } | null | undefined;
 
 export type Rates = Record<string, number>;
 
@@ -89,6 +94,17 @@ export function currentValue(asset: AssetLike, quote: Quote, ctx?: ValuationCont
  */
 export function isStale(asset: AssetLike, quote: Quote): boolean {
   return Boolean(HAS_LIVE_PRICE.has(asset.type) && asset.ticker && !quote?.price);
+}
+
+/**
+ * Date du cours quand il ne vient pas d'une récupération réussie à l'instant,
+ * `null` sinon. Sert à afficher « cours du 9 sept. » au lieu de laisser croire
+ * à une valorisation de la minute.
+ */
+export function quoteAsOf(quote: Quote): Date | null {
+  if (!quote?.asOf) return null;
+  const d = new Date(quote.asOf);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 /** Montant investi (coût d'achat), pour calculer la plus-value latente. */

@@ -152,6 +152,19 @@ export const netWorthSnapshots = pgTable("net_worth_snapshots", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [unique("net_worth_snapshots_date_unique").on(t.date)]);
 
+// ── Dernier cours connu ──────────────────────────────────────────────────────
+// Les caches mémoire de lib/prices.ts et lib/cryptoPrices.ts meurent avec
+// l'instance serverless : après chaque démarrage à froid, l'app re-tape Yahoo et
+// CoinGecko pour chaque ticker. Cette table leur sert de second niveau — et
+// surtout de dernier prix connu quand l'API ne répond pas, ce qui vaut mieux que
+// de retomber sur le prix de revient.
+export const priceCache = pgTable("price_cache", {
+  ticker: text("ticker").primaryKey(),
+  price: numeric("price").notNull(),
+  currency: text("currency").notNull(),
+  fetchedAt: timestamp("fetched_at").defaultNow().notNull(),
+});
+
 // ── Limitation des tentatives de connexion ───────────────────────────────────
 // Une ligne par IP. Sans ça, le mot de passe unique de l'app est exposé à un
 // nombre illimité d'essais.

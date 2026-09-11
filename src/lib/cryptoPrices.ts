@@ -1,3 +1,6 @@
+import { readCachedQuotes, writeCachedQuotes } from "@/lib/priceCache";
+import type { Quote } from "@/lib/prices";
+
 type CacheEntry = { price: number; currency: string; at: number };
 const cache = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -9,8 +12,10 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
  */
 export async function getCryptoQuotes(
   items: { id: string; currency: string }[]
-): Promise<Record<string, { price: number; currency: string } | null>> {
-  const result: Record<string, { price: number; currency: string } | null> = {};
+): Promise<Record<string, Quote | null>> {
+  const result: Record<string, Quote | null> = {};
+  const fresh: { ticker: string; price: number; currency: string }[] = [];
+  const missing: string[] = [];
 
   const byCurrency = new Map<string, Set<string>>();
   for (const { id, currency } of items) {
@@ -43,18 +48,34 @@ export async function getCryptoQuotes(
         if (typeof price === "number") {
           cache.set(`${id}:${currency}`, { price, currency, at: Date.now() });
           result[id] = { price, currency };
+          fresh.push({ ticker: id, price, currency });
         } else {
-          result[id] = null;
+          missing.push(id);
         }
       }
     } catch (err) {
       console.error("Erreur récupération cours CoinGecko:", err);
       for (const id of idsToFetch) {
         const cached = cache.get(`${id}:${currency}`);
-        result[id] = cached ? { price: cached.price, currency: cached.currency } : null;
+        if (cached) result[id] = { price: cached.price, currency: cached.currency };
+        else missing.push(id);
       }
     }
   }
+
+  // Ce qui a échoué : dernier prix connu en base, daté — mieux qu'un trou qui
+  // fait retomber la valorisation sur le prix de revient sans le dire.
+  if (missing.length > 0) {
+    const cached = await readCachedQuotes(missing);
+    for (const id of missing) {
+      const hit = cached[id];
+      result[id] = hit
+        ? { price: hit.price, currency: hit.currency, asOf: hit.asOf.toISOString() }
+        : null;
+    }
+  }
+
+  if (fresh.length > 0) void writeCachedQuotes(fresh);
 
   return result;
 }
