@@ -56,3 +56,111 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Anneaux pulsants de la galaxie (modes lien / propriétaire / aimantation).
+   Animer `transform` plutôt que l'attribut `r` : le navigateur compose le
+   résultat sur le GPU au lieu de repeindre le disque à chaque image. */
+@keyframes pulse-ring {
+  0%, 100% { transform: scale(0.94); }
+  50% { transform: scale(1.06); }
+}
+.pulse-ring {
+  animation: pulse-ring 1s ease-in-out infinite;
+  will-change: transform;
+}
+.pulse-ring-fast {
+  animation-duration: 0.7s;
+}
+
+/* Anneau de la simulation « avance rapide » : une rotation composée sur le GPU
+   remplace le défilement de `stroke-dashoffset`, qui repeignait le tracé. */
+@keyframes spin-ring { to { transform: rotate(360deg); } }
+.spin-ring {
+  animation: spin-ring 6s linear infinite;
+  transform-origin: center;
+  will-change: transform;
+}
+
+/* ── Animations ambiantes de la galaxie ──────────────────────────────────────
+   Elles étaient calculées en JavaScript à chaque image et re-rendues par React :
+   ~1000 éléments SVG reconstruits 22 fois par seconde, pour des mouvements
+   périodiques de quelques pixels. En CSS, le navigateur les compose sur le GPU
+   et le fil principal n'a plus rien à faire.
+   `transform-box: fill-box` fait porter l'origine sur la boîte de l'élément SVG
+   lui-même, sinon elle se réfère au repère du SVG entier. */
+.g-anim {
+  transform-box: fill-box;
+  transform-origin: center;
+  will-change: transform;
+}
+
+@keyframes g-bob { 0%, 100% { transform: translateY(-1.2px); } 50% { transform: translateY(1.2px); } }
+.g-bob { animation: g-bob 4.19s ease-in-out infinite; }
+.g-bob-slow { animation: g-bob 4.49s ease-in-out infinite; }
+
+@keyframes g-twinkle { 0%, 100% { opacity: var(--g-op-min, 0.3); } 50% { opacity: var(--g-op-max, 1); } }
+.g-twinkle { animation: g-twinkle 4.83s ease-in-out infinite; }
+
+@keyframes g-blink { 0%, 100% { opacity: 0.2; } 50% { opacity: 1; } }
+.g-blink { animation: g-blink 1.57s ease-in-out infinite; }
+.g-blink-fast { animation: g-blink 0.79s ease-in-out infinite; }
+
+@keyframes g-pulse { 0%, 100% { transform: scale(0.93); } 50% { transform: scale(1.07); } }
+.g-pulse { animation: g-pulse 3.14s ease-in-out infinite; }
+.g-pulse-fast { animation: g-pulse 2.09s ease-in-out infinite; }
+
+@keyframes g-shake { 0%, 100% { transform: translateX(-0.8px); } 50% { transform: translateX(0.8px); } }
+.g-shake { animation: g-shake 0.31s linear infinite; }
+
+@keyframes g-spin { to { transform: rotate(360deg); } }
+.g-spin-slow { animation: g-spin 18s linear infinite; }
+.g-spin-med { animation: g-spin 42s linear infinite; }
+.g-spin-rev { animation: g-spin 31s linear infinite reverse; }
+.g-spin-ring { animation: g-spin 60s linear infinite; }
+
+@keyframes g-wave { 0%, 100% { transform: translateX(-1px); } 50% { transform: translateX(1px); } }
+.g-wave { animation: g-wave 10.47s ease-in-out infinite; }
+
+/* Respiration de l'astronaute : la translation de base est passée en variable
+   CSS pour que l'animation puisse la composer avec son propre balancement,
+   sans toucher à la structure du SVG. */
+@keyframes g-bob-t {
+  0%, 100% { transform: translateY(calc(var(--g-y) - 1.2px)); }
+  50%      { transform: translateY(calc(var(--g-y) + 1.2px)); }
+}
+.g-bob-t { animation: g-bob-t 4.19s ease-in-out infinite; }
+@keyframes g-bob-slow-t {
+  0%, 100% { transform: translateY(calc(var(--g-y) - 1px)); }
+  50%      { transform: translateY(calc(var(--g-y) + 1px)); }
+}
+.g-bob-slow-t { animation: g-bob-slow-t 4.49s ease-in-out infinite; }
+
+/* Particules (éruption des dépenses, étincelles de dividende). Chaque particule
+   reçoit sa trajectoire dans des variables CSS et son propre décalage de
+   départ : le navigateur les anime toutes sans qu'aucune position ne soit
+   recalculée en JavaScript. */
+@keyframes g-ember {
+  from { transform: translate(0, 0) scale(1); opacity: 0.8; }
+  to   { transform: translate(var(--g-dx), var(--g-dy)) scale(0.15); opacity: 0; }
+}
+.g-ember { animation: g-ember 1.25s linear infinite; transform-box: fill-box; }
+
+@keyframes g-smoke {
+  from { transform: translate(0, 0) scale(0.33); opacity: 0.25; }
+  to   { transform: translate(var(--g-dx), var(--g-dy)) scale(1.3); opacity: 0; }
+}
+.g-smoke { animation: g-smoke 3.33s linear infinite; transform-box: fill-box; }
+
+@keyframes g-arc {
+  from { transform: translate(0, 0); opacity: 1; }
+  50%  { transform: translate(calc(var(--g-dx) / 2), -30px); opacity: 0.6; }
+  to   { transform: translate(var(--g-dx), 0); opacity: 0; }
+}
+.g-arc { animation: g-arc 1.67s linear infinite; transform-box: fill-box; }
+
+@keyframes g-spark {
+  from { transform: translateY(0); opacity: 0.85; }
+  85%  { opacity: 0; }
+  to   { transform: translateY(var(--g-dy)); opacity: 0; }
+}
+.g-spark { animation: g-spark 2.22s linear infinite; transform-box: fill-box; }

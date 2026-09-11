@@ -221,6 +221,74 @@ const STARS = Array.from({ length: 260 }, (_, i) => ({
   op: i < 8 ? 0.4 + (i % 3) * 0.15 : 0.14 + (i % 7) * 0.06,
 }));
 
+/**
+ * Marqueurs qui parcourent les courbes : vaisseaux des versements et points de
+ * circulation. Ce sont les seules animations dont la position dépend du tracé
+ * et ne peut donc pas se réduire à une transformation CSS périodique.
+ *
+ * Ils vivent dans leur propre composant, avec leur propre horloge : c'est ce
+ * qui permet à GalaxyView de ne plus dépendre du temps du tout. Avant, une
+ * cinquantaine de marqueurs en mouvement obligeaient React à reconstruire les
+ * ~1000 éléments de la galaxie 22 fois par seconde.
+ */
+function TravelingMarkers({
+  flowLinks, links, goalLinkEdges, nodeById, totalRevenue, centerColor,
+}: {
+  flowLinks: { source: string; target: string; amount: number }[];
+  links: GLink[];
+  goalLinkEdges: { source: string; target: string }[];
+  nodeById: Map<string, GNode>;
+  totalRevenue: number;
+  centerColor: string;
+}) {
+  const t = useAnimClock();
+
+
+  return <>
+    {flowLinks.map((f, i) => {
+      const s = nodeById.get(f.source), tg = nodeById.get(f.target);
+      if (!s || !tg || s.x == null || tg.x == null) return null;
+      const seed = hashSeed(f.source, f.target), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
+      const sp = 3 + i * 0.6, p = (t / sp) % 1;
+      const head = bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, p);
+      const trail = [0.05, 0.1, 0.16, 0.23].map(off =>
+        bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, Math.max(0, p - off)));
+      const pct = totalRevenue > 0 ? f.amount / totalRevenue : f.amount / 500;
+      const shipTier: "small" | "medium" | "large" = pct < 0.08 ? "small" : pct < 0.25 ? "medium" : "large";
+      const d = SHIP_DIMS[shipTier];
+      return <g key={`rk-${i}`}>
+        {trail.map((pt, ti) => <circle key={`tr-${i}-${ti}`} cx={pt.x} cy={pt.y} r={3.5 - ti * 0.7} fill="url(#rocket-trail)" opacity={0.55 - ti * 0.12} />)}
+        <g transform={`translate(${head.x},${head.y}) rotate(${head.angle})`}>
+          <image href={SHIP_IMAGES[shipTier]} x={-d.w / 2} y={-d.h / 2} width={d.w} height={d.h} opacity={0.95} />
+        </g>
+      </g>;
+    })}
+
+    {links.filter(l => nodeById.get(l.target)?.kind !== "expense-item" && nodeById.get(l.target)?.kind !== "income-item").map(l => {
+      const s = nodeById.get(l.source), tg = nodeById.get(l.target);
+      if (!s || !tg || s.x == null || tg.x == null) return null;
+      // Les liens de propriété (patrimoine/membre → planète) font circuler leur
+      // point à l'envers : visuellement, la valeur de la planète remonte vers
+      // son propriétaire, elle ne s'en éloigne pas.
+      const isOwnershipLink = (s.kind === "member" || s.kind === "center") && (tg.kind === "portfolio" || tg.kind === "goal" || tg.kind === "member" || tg.kind === "member-salary");
+      const from = isOwnershipLink ? tg : s, to = isOwnershipLink ? s : tg;
+      const seed = hashSeed(s.id, tg.id), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
+      const sp = 5 + (s.id.charCodeAt(0) % 4), p = (t / sp) % 1;
+      const pt = bezierPoint({ x: from.x!, y: from.y! }, c, { x: to.x!, y: to.y! }, p);
+      const dotColor = isOwnershipLink ? (s.kind === "center" ? centerColor : s.color) : tg.color;
+      return <circle key={`dot-${s.id}-${tg.id}`} cx={pt.x} cy={pt.y} r={isOwnershipLink ? 2.6 : 2} fill={dotColor} opacity={isOwnershipLink ? 0.75 : 0.5} />;
+    })}
+
+    {goalLinkEdges.map((l, i) => {
+      const s = nodeById.get(l.source), tg = nodeById.get(l.target);
+      if (!s || !tg || s.x == null || tg.x == null) return null;
+      const seed = hashSeed(l.source, l.target), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
+      const pt = bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, (t / 6) % 1);
+      return <circle key={`gd-${i}`} cx={pt.x} cy={pt.y} r={2.5} fill="#34d399" opacity={0.85} />;
+    })}
+  </>;
+}
+
 export default function GalaxyView({
   assets, portfolios, goals, loans, members, flows, goalLinks, portfolioOwnerships, quotes, dividends, actions, salary, onUpdateSalary, onUpdateSelf, onRefresh, showCountdown, ownerName, centerColor, ownerAccessory, rates, displayCurrency, readOnly = false,
 }: {
@@ -253,7 +321,6 @@ export default function GalaxyView({
   const [pendingLink, setPendingLink] = useState<{ sourceType: string; sourceId: number | null; sourceLabel: string; targetType: string; targetId: number; targetLabel: string } | null>(null);
   const [linkAmount, setLinkAmount] = useState("");
   const [linkFrequency, setLinkFrequency] = useState("monthly");
-  const t = useAnimClock();
   const simRef = useRef<Simulation<GNode, GLink> | null>(null);
   const nodesMapRef = useRef<Map<string, GNode>>(new Map());
   const [, setTick] = useState(0);
@@ -1046,11 +1113,6 @@ export default function GalaxyView({
           <defs>
             <filter id="gl" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3" /></filter>
             <filter id="glow-strong" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="6" result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
-            <filter id="turb-lava"><feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="3" seed="5"><animate attributeName="seed" values="1;20;1" dur="2s" repeatCount="indefinite" /></feTurbulence><feDisplacementMap in="SourceGraphic" scale="6" /></filter>
-            <filter id="turb-water"><feTurbulence type="fractalNoise" baseFrequency="0.015" numOctaves="3" seed="7"><animate attributeName="baseFrequency" values="0.015;0.025;0.015" dur="5s" repeatCount="indefinite" /></feTurbulence><feDisplacementMap in="SourceGraphic" scale="4" /></filter>
-            <filter id="terrain" x="0%" y="0%" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency="0.045" numOctaves="5" seed="12" result="noise" /><feComponentTransfer in="noise" result="soft"><feFuncA type="gamma" amplitude="0.5" exponent="2" offset="0" /></feComponentTransfer><feComposite in="SourceGraphic" in2="soft" operator="arithmetic" k1="1.2" k2="0.3" k3="0" k4="0" /></filter>
-            <filter id="clouds" x="0%" y="0%" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency="0.025 0.04" numOctaves="3" seed="42" result="t"><animate attributeName="seed" values="42;44;42" dur="8s" repeatCount="indefinite" /></feTurbulence><feComponentTransfer in="t" result="tc"><feFuncA type="discrete" tableValues="0 0 0 0 0.1 0.25 0.35" /></feComponentTransfer><feColorMatrix in="tc" type="matrix" values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.5 0" result="c" /><feComposite in="c" in2="SourceGraphic" operator="atop" /></filter>
-            <filter id="circuits" x="-10%" y="-10%" width="120%" height="120%"><feTurbulence type="turbulence" baseFrequency="0.08" numOctaves="2" seed="99" /><feColorMatrix type="luminanceToAlpha" /><feComponentTransfer><feFuncA type="discrete" tableValues="0 0 0.15 0.55 0.9" /></feComponentTransfer><feFlood floodColor="#5cfff0" floodOpacity="1" result="c" /><feComposite in="c" operator="in" /><feComposite in2="SourceGraphic" /></filter>
 
             <radialGradient id="sph-center" cx="35%" cy="28%" r="65%"><stop offset="0%" stopColor={shade(centerColor, 0.85)} /><stop offset="15%" stopColor={shade(centerColor, 0.45)} /><stop offset="35%" stopColor={centerColor} /><stop offset="60%" stopColor={shade(centerColor, -0.35)} /><stop offset="100%" stopColor={shade(centerColor, -0.8)} /></radialGradient>
             <radialGradient id="glow-center" cx="50%" cy="50%" r="50%"><stop offset="0%" stopColor={shade(centerColor, 0.4)} stopOpacity="0.3" /><stop offset="60%" stopColor={centerColor} stopOpacity="0.08" /><stop offset="100%" stopColor={centerColor} stopOpacity="0" /></radialGradient>
@@ -1132,15 +1194,16 @@ export default function GalaxyView({
               + le dégradé CSS du fond) créaient une bande violette trop marquée en haut
               de l'écran sur les moniteurs larges et peu hauts. */}
           <g opacity={0.35}>
-            <ellipse cx={W * 0.8} cy={H * 0.72} rx={220} ry={170} fill="url(#glow-crypto)" opacity={0.28}>
-              <animate attributeName="cy" values={`${H * 0.72};${H * 0.66};${H * 0.72}`} dur="46s" repeatCount="indefinite" />
-            </ellipse>
+            <ellipse cx={W * 0.8} cy={H * 0.72} rx={220} ry={170} fill="url(#glow-crypto)" opacity={0.28} />
           </g>
           {/* Quadrillage HUD, estompé vers les bords */}
           <rect x={0} y={0} width={W} height={H} fill="url(#hud-grid)" mask="url(#hud-grid-mask)" opacity={0.6} pointerEvents="none" />
           {/* Fond étoilé — 180 points fixes (seedés, stables entre rendus serveur/client),
               8 d'entre eux scintillent doucement */}
-          {STARS.map((s, i) => <circle key={`s${i}`} cx={s.x} cy={s.y} r={s.r} fill="#fff" opacity={i < 8 ? s.op * (0.65 + 0.35 * Math.sin(t * 1.3 + i * 0.9)) : s.op} />)}
+          {STARS.map((s, i) => i < 8
+            ? <circle key={`s${i}`} cx={s.x} cy={s.y} r={s.r} fill="#fff" className="g-twinkle"
+                style={{ "--g-op-min": s.op * 0.65, "--g-op-max": s.op, animationDelay: `${i * 0.6}s` } as React.CSSProperties} />
+            : <circle key={`s${i}`} cx={s.x} cy={s.y} r={s.r} fill="#fff" opacity={s.op} />)}
           <circle cx={CX} cy={CY} r={200} fill="none" stroke="rgba(255,255,255,0.03)" strokeDasharray="4 12" />
           <circle cx={CX} cy={CY} r={350} fill="none" stroke="rgba(255,255,255,0.02)" strokeDasharray="4 16" />
 
@@ -1162,9 +1225,7 @@ export default function GalaxyView({
               const seed = hashSeed(f.source, f.target), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
               const mid = bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, 0.5);
               return <g key={`fl-${i}`}>
-                <path d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke="#9585ff" strokeOpacity={0.3} strokeWidth={1.5} strokeDasharray="6 4">
-                  <animate attributeName="stroke-dashoffset" from="0" to="-20" dur={f.isSalarySource ? "0.9s" : "1.6s"} repeatCount="indefinite" />
-                </path>
+                <path d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke="#9585ff" strokeOpacity={0.3} strokeWidth={1.5} strokeDasharray="6 4" />
                 <text x={mid.x} y={mid.y - 12} textAnchor="middle" fontSize={10} fill="#b8a5ff" opacity={0.75} fontWeight={500}>{mask(f.label)}</text>
                 {showCountdown && f.days !== undefined && !Number.isNaN(f.days) && (
                   <text x={mid.x} y={mid.y + 2} textAnchor="middle" fontSize={8} fill="#fbbf24" opacity={0.85} fontWeight={600}>
@@ -1173,61 +1234,27 @@ export default function GalaxyView({
                 )}
               </g>;
             })}
-            {flowLinks.map((f, i) => {
-              const s = nodeById.get(f.source), tg = nodeById.get(f.target);
-              if (!s || !tg || s.x == null || tg.x == null) return null;
-              const seed = hashSeed(f.source, f.target), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
-              const sp = 3 + i * 0.6, p = (t / sp) % 1;
-              const head = bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, p);
-              const trail = [0.05, 0.1, 0.16, 0.23].map(off => {
-                const pp = Math.max(0, p - off);
-                return bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, pp);
-              });
-              const pct = totalRevenue > 0 ? f.amount / totalRevenue : f.amount / 500;
-              const shipTier: "small" | "medium" | "large" = pct < 0.08 ? "small" : pct < 0.25 ? "medium" : "large";
-              const shipDims = SHIP_DIMS[shipTier];
-              return <g key={`rk-${i}`}>
-                {trail.map((pt, ti) => <circle key={`tr-${i}-${ti}`} cx={pt.x} cy={pt.y} r={3.5 - ti * 0.7} fill="url(#rocket-trail)" opacity={0.55 - ti * 0.12} />)}
-                <g transform={`translate(${head.x},${head.y}) rotate(${head.angle})`}>
-                  <image href={SHIP_IMAGES[shipTier]} x={-shipDims.w / 2} y={-shipDims.h / 2} width={shipDims.w} height={shipDims.h} opacity={0.95} />
-                </g>
-              </g>;
-            })}
-            {links.filter(l => nodeById.get(l.target)?.kind !== "expense-item" && nodeById.get(l.target)?.kind !== "income-item").map(l => {
-              const s = nodeById.get(l.source), tg = nodeById.get(l.target);
-              if (!s || !tg || s.x == null || tg.x == null) return null;
-              // Ownership links (patrimoine/membre → planète) run their traveling dot in reverse:
-              // visually, the planet's value flows back INTO the owner, not away from it.
-              const isOwnershipLink = (s.kind === "member" || s.kind === "center") && (tg.kind === "portfolio" || tg.kind === "goal" || tg.kind === "member" || tg.kind === "member-salary");
-              const from = isOwnershipLink ? tg : s, to = isOwnershipLink ? s : tg;
-              const seed = hashSeed(s.id, tg.id), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
-              const sp = 5 + (s.id.charCodeAt(0) % 4), p = (t / sp) % 1;
-              const pt = bezierPoint({ x: from.x!, y: from.y! }, c, { x: to.x!, y: to.y! }, p);
-              const dotColor = isOwnershipLink ? (s.kind === "center" ? centerColor : s.color) : tg.color;
-              return <circle key={`dot-${s.id}-${tg.id}`} cx={pt.x} cy={pt.y} r={isOwnershipLink ? 2.6 : 2} fill={dotColor} opacity={isOwnershipLink ? 0.75 : 0.5} filter="url(#gl)" />;
-            })}
+            <TravelingMarkers
+              flowLinks={flowLinks} links={links} goalLinkEdges={goalLinkEdges}
+              nodeById={nodeById} totalRevenue={totalRevenue} centerColor={centerColor}
+            />
 
-            {/* Goal ↔ planet validation links */}
+            {/* Tracés objectif ↔ planète (le point qui les parcourt est dans TravelingMarkers) */}
             {goalLinkEdges.map((l, i) => {
               const s = nodeById.get(l.source), tg = nodeById.get(l.target);
               if (!s || !tg || s.x == null || tg.x == null) return null;
               const seed = hashSeed(l.source, l.target), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
-              const p = (t / 6) % 1;
-              const pt = bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, p);
-              return <g key={`gl-${i}`}>
-                <path d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke="#34d399" strokeOpacity={0.4} strokeWidth={1.4} />
-                <circle cx={pt.x} cy={pt.y} r={2.5} fill="#34d399" opacity={0.85} filter="url(#gl)" />
-              </g>;
+              return <path key={`gl-${i}`} d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke="#34d399" strokeOpacity={0.4} strokeWidth={1.4} />;
             })}
 
             {/* Link mode source highlight */}
-            {linkSourceNode && (() => { const tg = nodeById.get(linkSourceNode.id); if (!tg || tg.x == null) return null; return <circle cx={tg.x} cy={tg.y} r={tg.r + 10} fill="none" stroke="#34d399" strokeWidth={2} strokeDasharray="3 4"><animate attributeName="r" values={`${tg.r + 6};${tg.r + 14};${tg.r + 6}`} dur="1s" repeatCount="indefinite" /></circle>; })()}
+            {linkSourceNode && (() => { const tg = nodeById.get(linkSourceNode.id); if (!tg || tg.x == null) return null; return <circle cx={tg.x} cy={tg.y} r={tg.r + 10} fill="none" stroke="#34d399" strokeWidth={2} strokeDasharray="3 4" className="pulse-ring" style={{ transformOrigin: `${tg.x}px ${tg.y}px` }} />; })()}
 
             {/* Owner mode source highlight */}
-            {ownerSourceNode && (() => { const tg = nodeById.get(ownerSourceNode.id); if (!tg || tg.x == null) return null; return <circle cx={tg.x} cy={tg.y} r={tg.r + 10} fill="none" stroke={centerColor} strokeWidth={2} strokeDasharray="3 4"><animate attributeName="r" values={`${tg.r + 6};${tg.r + 14};${tg.r + 6}`} dur="1s" repeatCount="indefinite" /></circle>; })()}
+            {ownerSourceNode && (() => { const tg = nodeById.get(ownerSourceNode.id); if (!tg || tg.x == null) return null; return <circle cx={tg.x} cy={tg.y} r={tg.r + 10} fill="none" stroke={centerColor} strokeWidth={2} strokeDasharray="3 4" className="pulse-ring" style={{ transformOrigin: `${tg.x}px ${tg.y}px` }} />; })()}
 
             {/* Magnetic snap halo */}
-            {snapTarget && (() => { const tg = nodeById.get(snapTarget); if (!tg || tg.x == null) return null; return <g><circle cx={tg.x} cy={tg.y} r={tg.r + 20} fill="none" stroke="#9585ff" strokeOpacity={0.6} strokeWidth={2.5} strokeDasharray="4 3"><animate attributeName="r" values={`${tg.r + 14};${tg.r + 24};${tg.r + 14}`} dur="0.7s" repeatCount="indefinite" /></circle><circle cx={tg.x} cy={tg.y} r={tg.r + 12} fill="rgba(149,133,255,0.06)" /></g>; })()}
+            {snapTarget && (() => { const tg = nodeById.get(snapTarget); if (!tg || tg.x == null) return null; return <g><circle cx={tg.x} cy={tg.y} r={tg.r + 20} fill="none" stroke="#9585ff" strokeOpacity={0.6} strokeWidth={2.5} strokeDasharray="4 3" className="pulse-ring pulse-ring-fast" style={{ transformOrigin: `${tg.x}px ${tg.y}px` }} /><circle cx={tg.x} cy={tg.y} r={tg.r + 12} fill="rgba(149,133,255,0.06)" /></g>; })()}
 
             {/* Nodes */}
             {nodes.map(n => {
@@ -1243,14 +1270,14 @@ export default function GalaxyView({
 
                 {n.kind === "center" && (() => {
                   const R = n.r;
-                  const bob = Math.sin(t * 1.5) * 1.2; // gentle breathing animation
+                  const bob = 0; // la respiration est désormais une animation CSS (.g-bob)
                   return <>
                     <circle r={R + 25} fill="url(#glow-center)" />
                     <circle r={R} fill="url(#sph-center)" filter="url(#glow-strong)" />
                     <circle r={R} fill="url(#sph-hl)" />
 
                     {/* ── Little astronaut standing on top ── */}
-                    <g transform={`translate(0, ${-R - 16 + bob})`}>
+                    <g className="g-bob-t" style={{ ["--g-y" as string]: `${-R - 16 + bob}px` }}>
                       {/* Legs */}
                       <line x1={-2.5} y1={8} x2={-3} y2={14} stroke="#e8e8ee" strokeWidth={2.2} strokeLinecap="round" />
                       <line x1={2.5} y1={8} x2={3} y2={14} stroke="#e8e8ee" strokeWidth={2.2} strokeLinecap="round" />
@@ -1268,7 +1295,7 @@ export default function GalaxyView({
                       <ellipse cx={-0.5} cy={-7} rx={1} ry={0.7} fill="rgba(255,255,255,0.5)" />
                       {/* Antenna */}
                       <line x1={0} y1={-11} x2={0} y2={-13.5} stroke="#c8c8d5" strokeWidth={0.7} />
-                      <circle cy={-14} r={0.9} fill="#ff5555" opacity={0.6 + Math.sin(t * 4) * 0.4} />
+                      <circle cy={-14} r={0.9} fill="#ff5555" className="g-blink-fast" />
                     </g>
 
                     <text y={-3} textAnchor="middle" fontSize={12} fontWeight={600} fill="#fff" style={ts}>{scrubYears > 0 ? `Patrimoine en ${scrubYear}` : "Patrimoine"}</text>
@@ -1283,7 +1310,7 @@ export default function GalaxyView({
                     <g clipPath={`url(#cp-${n.id})`}><image href={salImg} x={-n.r} y={-n.r} width={n.r * 2} height={n.r * 2} preserveAspectRatio="xMidYMid slice" /></g>
                   ) : <>
                     <circle r={n.r} fill="url(#sph-salary)" />
-                    <g clipPath={`url(#cp-${n.id})`}><circle r={n.r} fill="url(#sph-salary)" filter="url(#terrain)" /><circle r={n.r} fill="url(#salary-land)" /><circle r={n.r} fill="url(#sph-salary)" filter="url(#clouds)" opacity={0.4} /></g>
+                    <g clipPath={`url(#cp-${n.id})`}><circle r={n.r} fill="url(#sph-salary)" /><circle r={n.r} fill="url(#salary-land)" /></g>
                     <g clipPath="url(#clip-sal)">{Array.from({ length: 18 }, (_, i) => <line key={i} x1={-n.r + 3 + i * 3.5} y1={n.r - 1} x2={-n.r + 3 + i * 3.5 + (i % 2 ? 1 : -1)} y2={n.r - 1 - (3 + (i * 7 % 7))} stroke="#30e060" strokeWidth={1.3} strokeLinecap="round" opacity={0.4 + (i % 3) * 0.2} />)}</g>
                   </>}
                   <circle r={n.r} fill="url(#sph-hl)" />
@@ -1314,8 +1341,8 @@ export default function GalaxyView({
                   const isOverBudget = tier === "eruption" || tier === "critical";
                   return <>
                     {/* Heat glow */}
-                    {tier === "critical" && <circle r={R + 26 + Math.sin(t * 3) * 5} fill="url(#glow-lava)" />}
-                    {tier === "eruption" && <circle r={R + 18 + Math.sin(t * 3) * 4} fill="url(#glow-lava)" opacity={0.8} />}
+                    {tier === "critical" && <circle r={R + 26} fill="url(#glow-lava)" className="g-anim g-pulse-fast" />}
+                    {tier === "eruption" && <circle r={R + 18} fill="url(#glow-lava)" opacity={0.8} className="g-anim g-pulse-fast" />}
                     {tier === "warning" && <circle r={R + 10} fill="url(#glow-lava)" opacity={0.4} />}
                     {/* Planet body */}
                     <clipPath id={`cp-${n.id}`}><circle r={R} /></clipPath>
@@ -1326,38 +1353,41 @@ export default function GalaxyView({
 
                     {/* ── ERUPTION: fire particles (eruption/critical only) ── */}
                     {isOverBudget && Array.from({ length: tier === "critical" ? 16 : 12 }, (_, i) => {
-                      const phase = (t * 0.8 + i * 0.35) % 1;
                       const ang = -Math.PI / 2 + (Math.sin(i * 7.3) * 0.9);
-                      const dist = R + phase * 45;
-                      const px = Math.cos(ang) * dist + Math.sin(t * 2 + i) * 6 * phase;
-                      const py = Math.sin(ang) * dist - phase * 15;
-                      const sz = (1 - phase) * 3 + 0.5;
                       const cols = ["#ff6600", "#ff4400", "#ffaa00", "#ff2200"];
-                      return <circle key={`fire-${i}`} cx={px} cy={py} r={sz} fill={cols[i % 4]} opacity={(1 - phase) * 0.8} />;
+                      return <circle key={`fire-${i}`} cx={Math.cos(ang) * R} cy={Math.sin(ang) * R} r={3.5} fill={cols[i % 4]}
+                        className="g-ember" style={{
+                          ["--g-dx" as string]: `${Math.cos(ang) * 45}px`,
+                          ["--g-dy" as string]: `${Math.sin(ang) * 45 - 15}px`,
+                          animationDelay: `${-i * 0.35}s`,
+                        }} />;
                     })}
                     {/* Smoke plumes */}
                     {isOverBudget && Array.from({ length: tier === "critical" ? 9 : 6 }, (_, i) => {
-                      const phase = (t * 0.3 + i * 0.5) % 1;
-                      const px = Math.sin(t * 0.8 + i * 2) * 10 * phase;
-                      const py = -R - phase * 55;
-                      return <circle key={`smoke-${i}`} cx={px} cy={py} r={3 + phase * 9} fill="#555" opacity={(1 - phase) * 0.25} filter="url(#gl)" />;
+                      return <circle key={`smoke-${i}`} cx={0} cy={-R} r={9} fill="#555"
+                        className="g-smoke" style={{
+                          ["--g-dx" as string]: `${Math.sin(i * 2) * 10}px`,
+                          ["--g-dy" as string]: "-55px",
+                          animationDelay: `${-i * 0.5}s`,
+                        }} />;
                     })}
                     {/* Lava projections (arcs) */}
                     {isOverBudget && Array.from({ length: 4 }, (_, i) => {
-                      const phase = (t * 0.6 + i * 0.25) % 1;
                       const dir = i % 2 === 0 ? 1 : -1;
-                      const px = dir * phase * 35;
-                      const py = -R * 0.7 - Math.sin(phase * Math.PI) * 30;
-                      return <circle key={`proj-${i}`} cx={px} cy={py} r={1.8 - phase} fill="#ff5500" opacity={1 - phase} />;
+                      return <circle key={`proj-${i}`} cx={0} cy={-R * 0.7} r={1.6} fill="#ff5500"
+                        className="g-arc" style={{
+                          ["--g-dx" as string]: `${dir * 35}px`,
+                          animationDelay: `${-i * 0.42}s`,
+                        }} />;
                     })}
                     {/* Warning shake effect on text */}
                     {tierImage && <rect x={-R * 0.95} y={-15} width={R * 1.9} height={ownerRevenue > 0 ? 42 : 27} rx={ownerRevenue > 0 ? 21 : 13.5} fill="rgba(6,6,10,0.55)" />}
-                    <g transform={isOverBudget ? `translate(${Math.sin(t * 20) * 0.8},0)` : undefined}>
+                    <g className={isOverBudget ? "g-anim g-shake" : undefined}>
                       <text y={-5} textAnchor="middle" fontSize={10} fontWeight={600} fill="#fff" style={ts}>{n.label}</text>
                       <text y={9} textAnchor="middle" fontSize={9} fill={isOverBudget ? "#ffaa70" : tier === "warning" ? "#ffd280" : "rgba(255,255,255,0.85)"} style={ts}>{mask(ownerExpenseTotal > 0 ? fmt(ownerExpenseTotal) : "0 €")}/m</text>
                       {ownerRevenue > 0 && <text y={22} textAnchor="middle" fontSize={8} fill={tier === "critical" ? "#ff2200" : tier === "eruption" ? "#ff6b35" : "#ffb84d"} fontWeight={600} style={ts}>{Math.round(ownerBudgetRatio * 100)}% des revenus</text>}
-                      {tier === "critical" && <text y={34} textAnchor="middle" fontSize={9} fill="#ff2200" fontWeight={700} opacity={0.7 + Math.sin(t * 8) * 0.3} style={ts}>DÉFICIT CRITIQUE</text>}
-                      {tier === "eruption" && <text y={34} textAnchor="middle" fontSize={9} fill="#ff6b35" fontWeight={700} opacity={0.6 + Math.sin(t * 6) * 0.4} style={ts}>DÉFICIT</text>}
+                      {tier === "critical" && <text y={34} textAnchor="middle" fontSize={9} fill="#ff2200" fontWeight={700} className="g-blink-fast" style={ts}>DÉFICIT CRITIQUE</text>}
+                      {tier === "eruption" && <text y={34} textAnchor="middle" fontSize={9} fill="#ff6b35" fontWeight={700} className="g-blink" style={ts}>DÉFICIT</text>}
                     </g>
                     <g transform={`translate(${(R + 13) * 0.7071},${(R + 13) * 0.7071})`} style={{ cursor: "pointer" }}
                       onPointerDown={e => e.stopPropagation()}
@@ -1376,16 +1406,13 @@ export default function GalaxyView({
                   const skin = n.skin ?? "generic";
                   const imageHref = skinImageForValue(skin, n.r - 20, 58);
                   const skinFill = skin === "generic" ? `url(#sph-${n.id})` : `url(#sph-skin-${skin})`;
-                  const skinFilter = skin === "tech" ? "url(#circuits)" : skin === "ocean" ? "url(#turb-water)" : "url(#terrain)";
                   return <>
                     {isExp && <ellipse rx={n.r + 42} ry={(n.r + 42) * 0.55} fill="none" stroke={n.color} strokeOpacity={0.18} strokeWidth={1} strokeDasharray="2 7" />}
                     {/* Simulateur "avance rapide" : anneau fantôme + opacité réduite pour
                         qu'une planète en projection ne soit jamais confondue avec son état
                         réel actuel — la taille bouge, mais l'habillage reste clairement
                         "hypothétique" tant que le curseur temporel n'est pas revenu à zéro. */}
-                    {n.isProjected && <circle r={n.r + 14} fill="none" stroke="#9585ff" strokeOpacity={0.35} strokeWidth={1.5} strokeDasharray="1 5">
-                      <animate attributeName="stroke-dashoffset" from="0" to="-12" dur="1.4s" repeatCount="indefinite" />
-                    </circle>}
+                    {n.isProjected && <circle r={n.r + 14} fill="none" stroke="#9585ff" strokeOpacity={0.35} strokeWidth={1.5} strokeDasharray="1 5" className="spin-ring" />}
                     <g opacity={n.isProjected ? 0.72 : 1}>
                     <clipPath id={`cp-${n.id}`}><circle r={n.r} /></clipPath>
                     <circle r={n.r + 5} fill={`url(#atmo-${n.id})`} />
@@ -1413,7 +1440,7 @@ export default function GalaxyView({
                         })}
                       </g>;
                     })()}
-                    {skin === "crypto" && !imageHref && <circle r={n.r + 14 + Math.sin(t * 2) * 3} fill="url(#glow-crypto)" />}
+                    {skin === "crypto" && !imageHref && <circle r={n.r + 14} fill="url(#glow-crypto)" className="g-anim g-pulse" />}
 
                     {imageHref ? (
                       <g clipPath={`url(#cp-${n.id})`}>
@@ -1422,13 +1449,12 @@ export default function GalaxyView({
                     ) : <>
                       <circle r={n.r} fill={skinFill} />
                       <g clipPath={`url(#cp-${n.id})`}>
-                        <circle r={n.r} fill={skinFill} filter={skinFilter} opacity={0.65} />
-                        {skin !== "tech" && <circle r={n.r} fill={skinFill} opacity={0.3} filter="url(#clouds)" />}
+                        <circle r={n.r} fill={skinFill} opacity={0.65} />
                         {skin !== "generic" && <circle r={n.r} fill={`url(#pat-${skin})`} />}
 
                         {skin === "ocean" && <>
                           {[0.22, 0.5, 0.78].map((ry, i) => (
-                            <ellipse key={`wave-${i}`} cx={Math.sin(t * 0.6 + i * 2) * n.r * 0.12} cy={n.r * (ry - 0.5) * 1.5} rx={n.r * 1.05} ry={2.5 + i * 0.8} fill="#d0f7ff" opacity={0.16 + (i === 1 ? 0.1 : 0)} />
+                            <ellipse key={`wave-${i}`} className="g-anim g-wave" style={{ animationDelay: `${-i * 3.3}s` }} cx={0} cy={n.r * (ry - 0.5) * 1.5} rx={n.r * 1.05} ry={2.5 + i * 0.8} fill="#d0f7ff" opacity={0.16 + (i === 1 ? 0.1 : 0)} />
                           ))}
                           <ellipse cx={-n.r * 0.32} cy={n.r * 0.2} rx={n.r * 0.24} ry={n.r * 0.11} fill="#245a34" opacity={0.65} />
                           <ellipse cx={-n.r * 0.32} cy={n.r * 0.14} rx={n.r * 0.1} ry={n.r * 0.05} fill="#3a8a4c" opacity={0.5} />
@@ -1440,28 +1466,28 @@ export default function GalaxyView({
 
                         {skin === "crypto" && Array.from({ length: 6 }, (_, i) => {
                           const ang = (i / 6) * Math.PI * 2;
-                          const pulse = 0.5 + 0.5 * Math.sin(t * 3 + i);
-                          return <line key={`ve-${i}`} x1={0} y1={0} x2={Math.cos(ang) * n.r * 0.95} y2={Math.sin(ang) * n.r * 0.95} stroke="#e8c0ff" strokeWidth={0.7 + pulse * 0.9} opacity={0.25 + pulse * 0.45} />;
+                          const pulse = 0.5;
+                          return <line key={`ve-${i}`} x1={0} y1={0} x2={Math.cos(ang) * n.r * 0.95} y2={Math.sin(ang) * n.r * 0.95} className="g-blink" style={{ animationDelay: `${i * 0.26}s` }} stroke="#e8c0ff" strokeWidth={0.7 + pulse * 0.9} opacity={0.25 + pulse * 0.45} />;
                         })}
                       </g>
 
-                      {skin === "empty" && Array.from({ length: 3 }, (_, i) => {
-                        const ang = (i / 3) * Math.PI * 2 + t * 0.35;
+                      {skin === "empty" && <g className="g-anim g-spin-slow">{Array.from({ length: 3 }, (_, i) => {
+                        const ang = (i / 3) * Math.PI * 2;
                         const rr = n.r + 15;
                         return <circle key={`rock-${i}`} cx={Math.cos(ang) * rr} cy={Math.sin(ang) * rr * 0.55} r={1.6 + i * 0.6} fill="#8a84a0" opacity={0.55} />;
-                      })}
+                      })}</g>}
                     </>}
 
                     {skin === "tech" && !imageHref && <>
-                      {Array.from({ length: 5 }, (_, i) => {
-                        const ang = (i / 5) * Math.PI * 2 + t * 0.15;
-                        return <line key={`tc-${i}`} x1={Math.cos(ang) * n.r * 0.12} y1={Math.sin(ang) * n.r * 0.12} x2={Math.cos(ang) * n.r * 0.92} y2={Math.sin(ang) * n.r * 0.92} stroke="#5cfff0" strokeWidth={0.6} opacity={0.35 + Math.sin(t * 2 + i) * 0.2} clipPath={`url(#cp-${n.id})`} />;
-                      })}
-                      {Array.from({ length: 4 }, (_, i) => {
-                        const ang = (i / 4) * Math.PI * 2 - t * 0.2;
-                        return <circle key={`td-${i}`} cx={Math.cos(ang) * n.r * 0.55} cy={Math.sin(ang) * n.r * 0.55} r={1.5} fill="#baffee" opacity={0.6 + Math.sin(t * 3 + i) * 0.35} clipPath={`url(#cp-${n.id})`} />;
-                      })}
-                      <ellipse rx={n.r * 1.38} ry={n.r * 0.3} fill="none" stroke="#5cfff0" strokeOpacity={0.3} strokeWidth={1} transform={`rotate(${(t * 6) % 360})`} />
+                      <g className="g-anim g-spin-med">{Array.from({ length: 5 }, (_, i) => {
+                        const ang = (i / 5) * Math.PI * 2;
+                        return <line key={`tc-${i}`} x1={Math.cos(ang) * n.r * 0.12} y1={Math.sin(ang) * n.r * 0.12} x2={Math.cos(ang) * n.r * 0.92} y2={Math.sin(ang) * n.r * 0.92} stroke="#5cfff0" strokeWidth={0.6} className="g-blink" style={{ animationDelay: `${-i * 0.31}s` }} clipPath={`url(#cp-${n.id})`} />;
+                      })}</g>
+                      <g className="g-anim g-spin-rev">{Array.from({ length: 4 }, (_, i) => {
+                        const ang = (i / 4) * Math.PI * 2;
+                        return <circle key={`td-${i}`} cx={Math.cos(ang) * n.r * 0.55} cy={Math.sin(ang) * n.r * 0.55} r={1.5} fill="#baffee" className="g-blink" style={{ animationDelay: `${-i * 0.4}s` }} clipPath={`url(#cp-${n.id})`} />;
+                      })}</g>
+                      <ellipse rx={n.r * 1.38} ry={n.r * 0.3} fill="none" stroke="#5cfff0" strokeOpacity={0.3} strokeWidth={1} className="g-anim g-spin-ring" />
                     </>}
 
                     <circle r={n.r} fill="url(#sph-hl)" stroke={n.color} strokeOpacity={isExp ? 0.35 : 0.1} strokeWidth={isExp ? 1.5 : 0.5} />
@@ -1508,7 +1534,7 @@ export default function GalaxyView({
                       <g clipPath={`url(#cp-${n.id})`}><image href={VACANCES_IMAGE} x={-n.r} y={-n.r} width={n.r * 2} height={n.r * 2} preserveAspectRatio="xMidYMid slice" /></g>
                     ) : <>
                       <circle r={n.r} fill={`url(#sph-${n.id})`} />
-                      <g clipPath={`url(#cp-${n.id})`}><circle r={n.r} fill={`url(#sph-${n.id})`} filter="url(#terrain)" opacity={0.6} /></g>
+                      <g clipPath={`url(#cp-${n.id})`}><circle r={n.r} fill={`url(#sph-${n.id})`} opacity={0.6} /></g>
                     </>}
                     <circle r={n.r} fill="url(#sph-hl)" />
                     {(gp ?? 0) >= 1 && <circle r={n.r + 6} fill="none" stroke="#34d399" strokeOpacity={0.45} strokeWidth={1.5} />}
@@ -1557,11 +1583,13 @@ export default function GalaxyView({
                     {n.gainVal !== undefined && <text y={hasLogo ? n.r * 0.55 + 10 : 8} textAnchor="middle" fontSize={hasLogo ? 7 : 8} fill={isCracked ? "#fb7185" : n.gainVal >= 0 ? "#34d399" : "#fb7185"} fontWeight={isCracked ? 700 : 400}>{mask(`${n.gainVal >= 0 ? "+" : ""}${fmt(n.gainVal)}`)}</text>}
                     {n.gainVal === undefined && <text y={hasLogo ? n.r * 0.55 + 10 : 8} textAnchor="middle" fontSize={hasLogo ? 7 : 8} fill="rgba(255,255,255,0.5)">{n.sub && mask(n.sub)}</text>}
                     {nearDividend && Array.from({ length: 5 }, (_, i) => {
-                      const phase = (t * 0.45 + i * 0.37) % 1;
                       const px = Math.sin(i * 13.7) * n.r * 0.7;
-                      const py = -n.r * 1.7 + phase * n.r * 3.4;
-                      const op = phase < 0.85 ? (1 - phase) * 0.85 : 0;
-                      return <circle key={`div-${n.id}-${i}`} cx={px} cy={py} r={1.3} fill="#ffd76a" opacity={op} style={{ filter: "drop-shadow(0 0 3px #ffcf4a)" }} />;
+                      return <circle key={`div-${n.id}-${i}`} cx={px} cy={-n.r * 1.7} r={1.3} fill="#ffd76a"
+                        className="g-spark" style={{
+                          ["--g-dy" as string]: `${n.r * 3.4}px`,
+                          filter: "drop-shadow(0 0 3px #ffcf4a)",
+                          animationDelay: `${-i * 0.82}s`,
+                        }} />;
                     })}
                     {!nearDividend && nextUpcoming && (
                       <circle cx={n.r * 0.7} cy={-n.r * 0.7} r={3.5} fill="#12121a" stroke="#ffd76a" strokeWidth={1} opacity={0.85}>
@@ -1572,12 +1600,12 @@ export default function GalaxyView({
                 })()}
 
                 {n.kind === "member" && (() => {
-                  const bob = Math.sin(t * 1.4 + n.r) * 1;
+                  const bob = 0; // idem (.g-bob-slow-t)
                   const accessory = findAccessory(n.accessory);
                   return <>
                     <circle r={n.r} fill={`url(#sph-${n.id})`} />
                     <circle r={n.r} fill="url(#sph-hl)" />
-                    <g transform={`translate(0, ${-n.r - 13 + bob})`}>
+                    <g className="g-bob-slow-t" style={{ ["--g-y" as string]: `${-n.r - 13 + bob}px` }}>
                       <line x1={-2.2} y1={7} x2={-2.6} y2={12} stroke="#e8e8ee" strokeWidth={2} strokeLinecap="round" />
                       <line x1={2.2} y1={7} x2={2.6} y2={12} stroke="#e8e8ee" strokeWidth={2} strokeLinecap="round" />
                       <rect x={-3.4} y={-2} width={6.8} height={9.5} rx={2.6} fill="#f0f0f5" stroke={n.color} strokeWidth={0.7} />
