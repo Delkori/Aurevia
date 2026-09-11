@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Trash2, Pencil } from "lucide-react";
 import { formatMoney } from "@/lib/format";
 import { ASSET_TYPE_LABELS, convert, goalProgress, type ValuationContext } from "@/lib/networth";
+import { NATURE_COLORS, NATURE_LABELS, natureOfPortfolio } from "@/lib/natures";
 import { ASTRONAUT_ACCESSORIES } from "@/lib/astronautAccessories";
 import { monthsToReach } from "@/lib/projection";
 
@@ -582,13 +583,23 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
           </div>}
           {portfolios.length > 0 && <div className="pt-2 border-t border-border">
             <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Planètes</p>
-            {portfolios.map(p => {
-              const g = groups.find(gr => gr.key === p.id);
-              return <div key={p.id} className="flex items-center justify-between text-xs py-1">
-                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />{p.name}</span>
-                <span className="tabular">{fmt(g?.total ?? 0)}</span>
-              </div>;
-            })}
+            {portfolios
+              .map(p => {
+                const g = groups.find(gr => gr.key === p.id);
+                const nature = natureOfPortfolio(g?.valued ?? []);
+                return { p, total: g?.total ?? 0, nature };
+              })
+              .sort((a, b) => b.total - a.total)
+              .map(({ p, total, nature }) => (
+                <div key={p.id} className="flex items-center justify-between text-xs py-1 gap-2">
+                  <span className="flex items-center gap-1.5 min-w-0">
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: NATURE_COLORS[nature] }}
+                      title={NATURE_LABELS[nature]} />
+                    <span className="truncate">{p.name}</span>
+                  </span>
+                  <span className="tabular shrink-0">{fmt(total)}</span>
+                </div>
+              ))}
           </div>}
           {goals.length > 0 && <div className="pt-2 border-t border-border">
             <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Objectifs</p>
