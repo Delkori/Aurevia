@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { goalLinks } from "@/db/schema";
 import { handleApiError } from "@/lib/apiError";
-import { requireSession } from "@/lib/auth";
+import { requireOwner, requireSession } from "@/lib/auth";
+import { goalLinkValues } from "@/lib/payloads";
 
 export async function GET() {
   const unauthorized = await requireSession();
@@ -16,16 +17,12 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const unauthorized = await requireSession();
+  const unauthorized = await requireOwner();
   if (unauthorized) return unauthorized;
   try {
-    const body = await req.json();
-    if (!body.goalId || !body.portfolioId) {
-      return NextResponse.json({ error: "goalId et portfolioId requis." }, { status: 400 });
-    }
     const [created] = await db
       .insert(goalLinks)
-      .values({ goalId: Number(body.goalId), portfolioId: Number(body.portfolioId) })
+      .values(await goalLinkValues(req))
       .returning();
 
     return NextResponse.json(created, { status: 201 });

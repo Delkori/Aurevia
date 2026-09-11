@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { netWorthSnapshots } from "@/db/schema";
 import { asc } from "drizzle-orm";
 import { handleApiError } from "@/lib/apiError";
-import { requireSession } from "@/lib/auth";
+import { requireOwner, requireSession } from "@/lib/auth";
 import { captureNetWorthSnapshot } from "@/lib/snapshot";
 
 export async function GET() {
@@ -22,7 +22,7 @@ export async function GET() {
 }
 
 export async function POST() {
-  const unauthorized = await requireSession();
+  const unauthorized = await requireOwner();
   if (unauthorized) return unauthorized;
 
   try {

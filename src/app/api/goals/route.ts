@@ -3,7 +3,8 @@ import { db } from "@/db";
 import { goals } from "@/db/schema";
 import { desc } from "drizzle-orm";
 import { handleApiError } from "@/lib/apiError";
-import { requireSession } from "@/lib/auth";
+import { requireOwner, requireSession } from "@/lib/auth";
+import { goalValues } from "@/lib/payloads";
 
 export async function GET() {
   const unauthorized = await requireSession();
@@ -17,19 +18,12 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const unauthorized = await requireSession();
+  const unauthorized = await requireOwner();
   if (unauthorized) return unauthorized;
   try {
-    const body = await req.json();
     const [created] = await db
       .insert(goals)
-      .values({
-        name: body.name,
-        targetAmount: body.targetAmount,
-        targetDate: body.targetDate || null,
-        color: body.color || "#8a5cf5",
-        memberId: body.memberId || null,
-      })
+      .values(await goalValues(req))
       .returning();
 
     return NextResponse.json(created, { status: 201 });

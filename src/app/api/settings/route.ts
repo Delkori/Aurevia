@@ -3,7 +3,8 @@ import { db } from "@/db";
 import { settings } from "@/db/schema";
 import { sql } from "drizzle-orm";
 import { handleApiError } from "@/lib/apiError";
-import { requireSession } from "@/lib/auth";
+import { requireOwner, requireSession } from "@/lib/auth";
+import { ValidationError, jsonBody } from "@/lib/validate";
 
 export async function GET() {
   const unauthorized = await requireSession();
@@ -17,11 +18,23 @@ export async function GET() {
 }
 
 export async function PUT(req: NextRequest) {
-  const unauthorized = await requireSession();
+  const unauthorized = await requireOwner();
   if (unauthorized) return unauthorized;
   try {
-    const body = await req.json() as Record<string, string>;
-    const rows = Object.entries(body).map(([key, value]) => ({ key, value: String(value) }));
+    const body = await jsonBody(req);
+    // Les réglages sont un espace clé-valeur libre : on ne peut pas valider les
+    // clés une par une, mais on borne la taille pour qu'il ne devienne pas un
+    // stockage de données arbitraires.
+    const rows = Object.entries(body).map(([key, value]) => {
+      if (key.length > 60) {
+        throw new ValidationError(`Clé de réglage trop longue : « ${key.slice(0, 30)}… ».`);
+      }
+      const str = value == null ? "" : String(value);
+      if (str.length > 20_000) {
+        throw new ValidationError(`Valeur trop longue pour le réglage « ${key} ».`);
+      }
+      return { key, value: str };
+    });
     if (rows.length === 0) return NextResponse.json({ ok: true });
 
     // Un seul aller-retour au lieu d'un SELECT + un UPDATE par clé, en série :

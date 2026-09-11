@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { AlertTriangle, X } from "lucide-react";
+import { AlertTriangle, X, Eye, Sparkles, Loader2 } from "lucide-react";
 import GalaxyView from "@/components/GalaxyView";
 import { apiFetch, ApiError } from "@/lib/api";
 import { fetchAllQuotes } from "@/lib/allQuotes";
@@ -35,15 +35,20 @@ export default function HomePage() {
   const [rates, setRates] = useState<Rates>({ EUR: 1 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [role, setRole] = useState<"owner" | "demo">("owner");
+  const [canSeedDemo, setCanSeedDemo] = useState(false);
+  const [demoLoaded, setDemoLoaded] = useState(false);
+  const [seeding, setSeeding] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [a, p, g, l, m, f, s, gl, po, fx] = await Promise.allSettled([
+      const [a, p, g, l, m, f, s, gl, po, fx, se, dm] = await Promise.allSettled([
         apiFetch("/api/assets"), apiFetch("/api/portfolios"), apiFetch("/api/goals"),
         apiFetch("/api/loans"), apiFetch("/api/members"), apiFetch("/api/flows"),
         apiFetch("/api/settings"), apiFetch("/api/goal-links"), apiFetch("/api/portfolio-ownerships"),
         apiFetch("/api/exchange-rates"),
+        apiFetch("/api/session"), apiFetch("/api/demo"),
       ]);
       const ad = a.status === "fulfilled" ? (a.value as Asset[]) : [];
       setAssets(ad);
@@ -56,6 +61,12 @@ export default function HomePage() {
       setGoalLinks(gl.status === "fulfilled" ? (gl.value as GoalLink[]) : []);
       setPortfolioOwnerships(po.status === "fulfilled" ? (po.value as PortfolioOwnership[]) : []);
       if (fx.status === "fulfilled") setRates(fx.value as Rates);
+      if (se.status === "fulfilled") setRole((se.value as { role: "owner" | "demo" }).role);
+      if (dm.status === "fulfilled") {
+        const d = dm.value as { loaded: boolean; canSeed: boolean };
+        setCanSeedDemo(d.canSeed);
+        setDemoLoaded(d.loaded);
+      }
       if (a.status === "rejected") throw a.reason;
       try { setQuotes(await fetchAllQuotes(ad) as Record<string, Quote>); } catch {}
       // Non bloquant et indépendant des cours : un échec ici ne doit jamais empêcher
@@ -70,15 +81,28 @@ export default function HomePage() {
 
   // Instantané quotidien silencieux pour construire l'historique du patrimoine.
   useEffect(() => {
+    if (role === "demo") return;
     const today = new Date().toISOString().slice(0, 10);
     const key = "aurevia:lastSnapshotDate";
     if (localStorage.getItem(key) === today) return;
     apiFetch("/api/snapshot", { method: "POST" })
       .then(() => localStorage.setItem(key, today))
       .catch(() => {});
-  }, []);
+  }, [role]);
+
+  const readOnly = role === "demo";
 
   const api = async (url: string, method: string, body?: unknown) => {
+    // `actions` est la seule surface de mutation du tableau de bord : la
+    // bloquer ici suffit à mettre toute l'interface en lecture seule, sans
+    // avoir à désactiver chaque bouton de la galaxie un par un. Le verrou qui
+    // compte reste celui du serveur (`requireOwner`) — celui-ci n'est là que
+    // pour donner une explication plutôt qu'un 403 silencieux.
+    if (readOnly && method !== "GET") {
+      const message = "Version de démonstration : les modifications sont désactivées.";
+      setError(message);
+      throw new ApiError(message);
+    }
     setError(null);
     try {
       const res = await apiFetch(url, { method, headers: { "Content-Type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) });
@@ -110,6 +134,39 @@ export default function HomePage() {
     deleteLoan: (id: number) => api(`/api/loans/${id}`, "DELETE") as Promise<void>,
   };
 
+  const loadDemo = async () => {
+    setSeeding(true);
+    setError(null);
+    try {
+      await apiFetch("/api/demo", { method: "POST" });
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Impossible de charger l'exemple.");
+    } finally {
+      setSeeding(false);
+    }
+  };
+
+  const removeDemo = async () => {
+    setSeeding(true);
+    setError(null);
+    try {
+      await apiFetch("/api/demo", { method: "DELETE" });
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Impossible de retirer l'exemple.");
+    } finally {
+      setSeeding(false);
+    }
+  };
+
+  const isEmpty =
+    assets.length === 0 &&
+    portfolios.length === 0 &&
+    goals.length === 0 &&
+    members.length === 0 &&
+    !Number(settings.monthly_salary);
+
   const updateSalary = async (v: number) => {
     await api("/api/settings", "PUT", { monthly_salary: String(v) });
   };
@@ -122,6 +179,15 @@ export default function HomePage() {
 
   return (
     <div className="h-screen flex flex-col overflow-hidden">
+      {readOnly && (
+        <div className="flex items-center gap-2.5 bg-accent/10 border-b border-accent/30 px-4 py-2 text-accent shrink-0">
+          <Eye size={14} className="shrink-0" />
+          <span className="text-xs">
+            <b className="font-semibold">Version de démonstration.</b> Les données sont
+            fictives et rien ne peut être modifié.
+          </span>
+        </div>
+      )}
       {error && (
         <div className="flex items-center gap-3 bg-negative/10 border-b border-negative/30 px-4 py-2 text-sm text-negative shrink-0">
           <AlertTriangle size={14} />
@@ -129,7 +195,57 @@ export default function HomePage() {
           <button onClick={() => setError(null)} className="text-negative/60 hover:text-negative"><X size={14} /></button>
         </div>
       )}
-      <div className="flex-1 min-h-0">
+      <div className="flex-1 min-h-0 relative">
+        {isEmpty && !readOnly && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center p-6 bg-bg/80">
+            <div className="max-w-md w-full bg-surface border border-border rounded-xl p-7 text-center space-y-4">
+              <div className="w-11 h-11 mx-auto rounded-full bg-accent/15 flex items-center justify-center">
+                <Sparkles size={19} className="text-accent" />
+              </div>
+              <div className="space-y-1.5">
+                <h2 className="text-lg font-semibold font-[family-name:var(--font-heading)]">
+                  Ta galaxie est vide
+                </h2>
+                <p className="text-sm text-text-muted leading-relaxed">
+                  Elle prend tout son sens avec des données dedans. Charge un foyer
+                  d&apos;exemple pour voir à quoi ça ressemble — planètes, quotes-parts,
+                  versements mensuels — puis retire-le en un clic quand tu veux saisir
+                  le tien.
+                </p>
+              </div>
+              <div className="flex flex-col gap-2 pt-1">
+                <button
+                  onClick={loadDemo}
+                  disabled={seeding || !canSeedDemo}
+                  className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-lg bg-accent text-white text-sm font-medium hover:opacity-90 disabled:opacity-50"
+                >
+                  {seeding ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
+                  {seeding ? "Chargement…" : "Charger un patrimoine d'exemple"}
+                </button>
+                <button
+                  onClick={() => setCanSeedDemo(false)}
+                  className="w-full px-4 py-2 rounded-lg border border-border text-sm text-text-muted hover:text-text"
+                >
+                  Je préfère commencer de zéro
+                </button>
+              </div>
+              <p className="text-[11px] text-text-muted pt-1">
+                Les cours des actions et cryptos de l&apos;exemple sont réels.
+              </p>
+            </div>
+          </div>
+        )}
+        {demoLoaded && !readOnly && (
+          <button
+            onClick={removeDemo}
+            disabled={seeding}
+            className="absolute bottom-4 right-4 z-20 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface/90 border border-border text-[11px] text-text-muted hover:text-text backdrop-blur disabled:opacity-50"
+            title="Supprime uniquement les lignes créées par l'exemple"
+          >
+            {seeding ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}
+            Retirer le patrimoine d&apos;exemple
+          </button>
+        )}
         <GalaxyView
           assets={assets} portfolios={portfolios} goals={goals} loans={loans}
           members={members} flows={flows} goalLinks={goalLinks} portfolioOwnerships={portfolioOwnerships} quotes={quotes} dividends={dividends} actions={actions}

@@ -3,23 +3,23 @@ import { db } from "@/db";
 import { portfolios } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { handleApiError } from "@/lib/apiError";
-import { requireSession } from "@/lib/auth";
+import { requireOwner } from "@/lib/auth";
+import { portfolioValues } from "@/lib/payloads";
+import { routeId } from "@/lib/validate";
 
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const unauthorized = await requireSession();
+  const unauthorized = await requireOwner();
   if (unauthorized) return unauthorized;
   try {
     const { id } = await params;
-    const body = await req.json();
 
     const [updated] = await db
       .update(portfolios)
-      .set({ name: body.name,
-        memberId: body.memberId ?? null, color: body.color || "#8a5cf5", skin: body.skin ?? null })
-      .where(eq(portfolios.id, Number(id)))
+      .set(await portfolioValues(req))
+      .where(eq(portfolios.id, routeId(id)))
       .returning();
 
     if (!updated) {
@@ -36,11 +36,11 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const unauthorized = await requireSession();
+  const unauthorized = await requireOwner();
   if (unauthorized) return unauthorized;
   try {
     const { id } = await params;
-    await db.delete(portfolios).where(eq(portfolios.id, Number(id)));
+    await db.delete(portfolios).where(eq(portfolios.id, routeId(id)));
     return NextResponse.json({ ok: true });
   } catch (err) {
     return handleApiError(err);

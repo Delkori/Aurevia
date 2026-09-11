@@ -3,7 +3,8 @@ import { db } from "@/db";
 import { portfolioOwnerships } from "@/db/schema";
 import { and, eq, isNull } from "drizzle-orm";
 import { handleApiError } from "@/lib/apiError";
-import { requireSession } from "@/lib/auth";
+import { requireOwner, requireSession } from "@/lib/auth";
+import { ownershipValues } from "@/lib/payloads";
 
 export async function GET() {
   const unauthorized = await requireSession();
@@ -18,15 +19,10 @@ export async function GET() {
 
 // Upsert : une part pour (portfolioId, memberId) — crée ou met à jour le %.
 export async function POST(req: NextRequest) {
-  const unauthorized = await requireSession();
+  const unauthorized = await requireOwner();
   if (unauthorized) return unauthorized;
   try {
-    const body = await req.json();
-    if (!body.portfolioId || body.sharePercent == null) {
-      return NextResponse.json({ error: "portfolioId et sharePercent requis." }, { status: 400 });
-    }
-    const portfolioId = Number(body.portfolioId);
-    const memberId = body.memberId != null ? Number(body.memberId) : null;
+    const { portfolioId, memberId, sharePercent } = await ownershipValues(req);
 
     const [existing] = await db
       .select()
@@ -39,7 +35,7 @@ export async function POST(req: NextRequest) {
     if (existing) {
       const [updated] = await db
         .update(portfolioOwnerships)
-        .set({ sharePercent: String(body.sharePercent) })
+        .set({ sharePercent })
         .where(eq(portfolioOwnerships.id, existing.id))
         .returning();
       return NextResponse.json(updated);
@@ -47,7 +43,7 @@ export async function POST(req: NextRequest) {
 
     const [created] = await db
       .insert(portfolioOwnerships)
-      .values({ portfolioId, memberId, sharePercent: String(body.sharePercent) })
+      .values({ portfolioId, memberId, sharePercent })
       .returning();
     return NextResponse.json(created, { status: 201 });
   } catch (err) {

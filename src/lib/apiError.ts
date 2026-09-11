@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ValidationError } from "@/lib/validate";
 
 /**
  * Journalise l'erreur réelle côté serveur et renvoie un message au client.
@@ -10,6 +11,12 @@ import { NextResponse } from "next/server";
  * la structure du schéma et le contenu des contraintes violées.
  */
 export function handleApiError(err: unknown) {
+  // Une saisie invalide n'est pas une panne : elle mérite un 400 et un message
+  // qui dit quoi corriger, en production comme en développement.
+  if (err instanceof ValidationError) {
+    return NextResponse.json({ error: err.message }, { status: 400 });
+  }
+
   let real: unknown = err;
   const seen = new Set<unknown>();
   while (

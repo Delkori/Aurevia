@@ -3,7 +3,8 @@ import { db } from "@/db";
 import { portfolios } from "@/db/schema";
 import { desc } from "drizzle-orm";
 import { handleApiError } from "@/lib/apiError";
-import { requireSession } from "@/lib/auth";
+import { requireOwner, requireSession } from "@/lib/auth";
+import { portfolioValues } from "@/lib/payloads";
 
 export async function GET() {
   const unauthorized = await requireSession();
@@ -20,23 +21,13 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const unauthorized = await requireSession();
+  const unauthorized = await requireOwner();
   if (unauthorized) return unauthorized;
   try {
-    const body = await req.json();
-
-    if (!body.name) {
-      return NextResponse.json({ error: "Le nom est obligatoire." }, { status: 400 });
-    }
 
     const [created] = await db
       .insert(portfolios)
-      .values({
-        name: body.name,
-        color: body.color || "#8a5cf5",
-        skin: body.skin || null,
-        memberId: body.memberId || null,
-      })
+      .values(await portfolioValues(req))
       .returning();
 
     return NextResponse.json(created, { status: 201 });

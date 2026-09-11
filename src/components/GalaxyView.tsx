@@ -303,7 +303,10 @@ export default function GalaxyView({
     const linkedIds = goalLinks.filter(gl => gl.goalId === goal.id).map(gl => gl.portfolioId);
     if (linkedIds.length === 0) return 0;
     const linkedTotal = linkedIds.reduce((s, pid) => s + (groups.find(g => g.key === pid)?.total ?? 0), 0);
-    return Math.min(1, linkedTotal / Number(goal.targetAmount));
+    // Un objectif à 0 € donnait une division par zéro affichée « 100 % ».
+    const target = Number(goal.targetAmount);
+    if (!Number.isFinite(target) || target <= 0) return 0;
+    return Math.min(1, linkedTotal / target);
   }, [goalLinks, groups]);
 
   // Build graph

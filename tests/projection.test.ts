@@ -85,3 +85,37 @@ describe("daysUntilNextOccurrence", () => {
     }
   });
 });
+
+describe("échéances anciennes", () => {
+  // Régression : la boucle plafonnée à 1000 itérations rendait la main avec une
+  // date encore passée pour un flux quotidien vieux de plus de ~3 ans, affiché
+  // « aujourd'hui » à tort.
+  const TROIS_ANS = 3 * 365 * 86400000;
+
+  test("un flux quotidien vieux de 3 ans reste à moins de 2 jours", () => {
+    const vieux = new Date(Date.now() - TROIS_ANS).toISOString();
+    const d = daysUntilNextOccurrence(vieux, "daily");
+    assert.ok(d >= 0 && d <= 2, `attendu 0..2, reçu ${d}`);
+  });
+
+  test("un flux quotidien vieux de 10 ans tombe toujours dans le futur", () => {
+    const tresVieux = new Date(Date.now() - 10 * 365 * 86400000).toISOString();
+    const next = nextOccurrenceDate(tresVieux, "daily")!;
+    assert.ok(next.getTime() > Date.now());
+    assert.ok(next.getTime() - Date.now() <= 2 * 86400000);
+  });
+
+  test("une date de création future est renvoyée telle quelle", () => {
+    const futur = new Date(Date.now() + 10 * 86400000);
+    assert.equal(
+      nextOccurrenceDate(futur.toISOString(), "monthly")!.getTime(),
+      futur.getTime()
+    );
+  });
+
+  test("un flux du 31 ne se perd pas dans les mois courts", () => {
+    const le31 = new Date(2024, 0, 31).toISOString();
+    const next = nextOccurrenceDate(le31, "monthly")!;
+    assert.ok(next.getTime() > Date.now());
+  });
+});

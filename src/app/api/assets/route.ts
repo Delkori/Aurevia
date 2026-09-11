@@ -3,11 +3,13 @@ import { db } from "@/db";
 import { assets } from "@/db/schema";
 import { desc } from "drizzle-orm";
 import { handleApiError } from "@/lib/apiError";
-import { requireSession } from "@/lib/auth";
+import { requireOwner, requireSession } from "@/lib/auth";
+import { assetValues } from "@/lib/payloads";
 
 export async function GET() {
   const unauthorized = await requireSession();
   if (unauthorized) return unauthorized;
+
   try {
     const rows = await db.select().from(assets).orderBy(desc(assets.createdAt));
     return NextResponse.json(rows);
@@ -17,33 +19,11 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const unauthorized = await requireSession();
+  const unauthorized = await requireOwner();
   if (unauthorized) return unauthorized;
+
   try {
-    const body = await req.json();
-
-    if (!body.name || !body.type) {
-      return NextResponse.json(
-        { error: "Le nom et le type sont obligatoires." },
-        { status: 400 }
-      );
-    }
-
-    const [created] = await db
-      .insert(assets)
-      .values({
-        name: body.name,
-        type: body.type,
-        ticker: body.ticker || null,
-        quantity: body.quantity || null,
-        avgBuyPrice: body.avgBuyPrice || null,
-        manualValue: body.manualValue || null,
-        yieldRate: body.yieldRate || null,
-        currency: body.currency || "EUR",
-        portfolioId: body.portfolioId ?? null,
-      })
-      .returning();
-
+    const [created] = await db.insert(assets).values(await assetValues(req)).returning();
     return NextResponse.json(created, { status: 201 });
   } catch (err) {
     return handleApiError(err);

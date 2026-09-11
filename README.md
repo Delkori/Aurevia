@@ -77,6 +77,29 @@ UTC pour enregistrer le patrimoine du jour. C'est ce qui rend la courbe
 d'historique indépendante de l'ouverture de l'app. Vercel génère et injecte
 `CRON_SECRET` automatiquement ; la route refuse tout appel sans ce jeton.
 
+## Version de démonstration
+
+Définis `DEMO_PASSWORD` (en plus de `APP_PASSWORD`) et l'app accepte un second
+mot de passe qui ouvre une session **en lecture seule** : la galaxie se visite,
+mais toutes les routes d'écriture répondent 403 et la session expire au bout de
+24 h. Un bandeau l'annonce dans l'interface.
+
+C'est fait pour montrer l'app à quelqu'un — un proche, un conseiller — sans lui
+donner la main sur tes données. La restriction est appliquée côté serveur
+(`requireOwner` dans `src/lib/auth.ts`), pas seulement en masquant des boutons.
+
+Pour une démonstration sur des données fictives plutôt que les tiennes : déploie
+une seconde instance avec sa propre base, connecte-toi en propriétaire, clique
+**Charger un patrimoine d'exemple** sur la galaxie vide, puis partage le mot de
+passe de démonstration. Le jeu d'exemple (`src/lib/demoData.ts`) contient un
+foyer de deux personnes, six planètes, un crédit, trois objectifs et un bien en
+indivision — avec de vrais tickers, donc de vrais cours.
+
+Sur ta propre instance, le bouton **Retirer le patrimoine d'exemple** ne
+supprime que les lignes créées par l'exemple : leurs identifiants sont mémorisés
+à la création, donc une ligne que tu aurais saisie toi-même ne peut pas partir
+avec.
+
 ## Développement
 
 ```bash

@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { authThrottle } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { setAuthCookie } from "@/lib/auth";
-import { timingSafeEqual } from "@/lib/session";
+import { timingSafeEqual, type SessionRole } from "@/lib/session";
 
 // Après 5 échecs, chaque nouvel échec verrouille l'IP de plus en plus longtemps :
 // 1 min, 2, 4, 8… plafonné à 1 h. Un attaquant passe de plusieurs milliers
@@ -60,10 +60,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Requête invalide." }, { status: 400 });
   }
 
-  const ok =
+  // Deux mots de passe possibles. DEMO_PASSWORD est optionnel : s'il n'est pas
+  // défini, la version de démonstration n'existe simplement pas. Les deux
+  // comparaisons sont toujours évaluées pour ne pas révéler par le temps de
+  // réponse lequel des deux a été tenté.
+  const demoPassword = process.env.DEMO_PASSWORD;
+  const isOwner =
     typeof password === "string" && timingSafeEqual(password, process.env.APP_PASSWORD);
+  const isDemo =
+    typeof password === "string" &&
+    Boolean(demoPassword) &&
+    timingSafeEqual(password, demoPassword as string);
 
-  if (!ok) {
+  const role: SessionRole | null = isOwner ? "owner" : isDemo ? "demo" : null;
+
+  if (!role) {
     const failures = (existing?.failures ?? 0) + 1;
     const lock = lockDuration(failures);
     try {
@@ -95,6 +106,6 @@ export async function POST(req: NextRequest) {
     // Le compteur expirera de lui-même ; ne pas bloquer une connexion valide.
   }
 
-  await setAuthCookie();
-  return NextResponse.json({ ok: true });
+  await setAuthCookie(role);
+  return NextResponse.json({ ok: true, role });
 }

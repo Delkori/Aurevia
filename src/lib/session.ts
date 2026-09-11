@@ -2,13 +2,20 @@
 // (runtime Edge) que dans les route handlers (runtime Node) — on n'utilise donc
 // que la Web Crypto API, disponible dans les deux.
 //
-// Format : "<expiration en ms>.<signature base64url>". La signature couvre
-// l'expiration, donc un visiteur ne peut ni fabriquer un jeton ni en prolonger
-// un. C'est ce qui remplace l'ancien cookie sentinelle dont la valeur constante
-// ("ok") suffisait à se faire passer pour authentifié.
+// Format : "<expiration en ms>[~<rôle>].<signature base64url>". La signature
+// couvre l'expiration ET le rôle, donc un visiteur ne peut ni fabriquer un
+// jeton, ni en prolonger un, ni promouvoir une session de démonstration en
+// session propriétaire. C'est ce qui remplace l'ancien cookie sentinelle dont
+// la valeur constante ("ok") suffisait à se faire passer pour authentifié.
 
 export const SESSION_COOKIE = "aurevia_session";
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 jours
+// Une session de démonstration est plus courte : elle sert à faire visiter
+// l'app, pas à s'y installer.
+export const DEMO_TTL_MS = 24 * 60 * 60 * 1000; // 24 h
+
+/** `owner` peut tout faire ; `demo` est en lecture seule. */
+export type SessionRole = "owner" | "demo";
 
 const encoder = new TextEncoder();
 
@@ -57,18 +64,27 @@ export function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-export async function createSessionToken(now = Date.now()): Promise<string> {
-  const expiresAt = String(now + SESSION_TTL_MS);
-  return `${expiresAt}.${await sign(expiresAt, signingKey())}`;
+export async function createSessionToken(
+  role: SessionRole = "owner",
+  now = Date.now()
+): Promise<string> {
+  const ttl = role === "demo" ? DEMO_TTL_MS : SESSION_TTL_MS;
+  const payload = `${now + ttl}~${role}`;
+  return `${payload}.${await sign(payload, signingKey())}`;
 }
 
-export async function verifySessionToken(
+/**
+ * Renvoie le rôle porté par le jeton, ou `null` si le jeton est absent,
+ * falsifié ou expiré. Un jeton émis avant l'introduction des rôles (charge
+ * utile réduite à l'expiration) reste valide et vaut `owner`.
+ */
+export async function readSession(
   token: string | undefined,
   now = Date.now()
-): Promise<boolean> {
-  if (!token) return false;
-  const separator = token.indexOf(".");
-  if (separator <= 0) return false;
+): Promise<SessionRole | null> {
+  if (!token) return null;
+  const separator = token.lastIndexOf(".");
+  if (separator <= 0) return null;
 
   const payload = token.slice(0, separator);
   const signature = token.slice(separator + 1);
@@ -78,10 +94,20 @@ export async function verifySessionToken(
     expected = await sign(payload, signingKey());
   } catch {
     // Secret absent côté serveur : on refuse plutôt que de laisser passer.
-    return false;
+    return null;
   }
-  if (!timingSafeEqual(signature, expected)) return false;
+  if (!timingSafeEqual(signature, expected)) return null;
 
-  const expiresAt = Number(payload);
-  return Number.isFinite(expiresAt) && expiresAt > now;
+  const [rawExpiry, rawRole = "owner"] = payload.split("~");
+  const expiresAt = Number(rawExpiry);
+  if (!Number.isFinite(expiresAt) || expiresAt <= now) return null;
+
+  return rawRole === "demo" ? "demo" : "owner";
+}
+
+export async function verifySessionToken(
+  token: string | undefined,
+  now = Date.now()
+): Promise<boolean> {
+  return (await readSession(token, now)) !== null;
 }
