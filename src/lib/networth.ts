@@ -155,6 +155,34 @@ export function ownedShare(
   return share / 100;
 }
 
+// ── Progression d'un objectif ────────────────────────────────────────────────
+
+export type GoalLinkLike = { goalId: number; portfolioId: number };
+
+/**
+ * Progression d'un objectif, de 0 à 1 : somme des planètes qui lui sont reliées,
+ * rapportée à son montant cible.
+ *
+ * Implémentation unique et partagée, parce qu'il y en avait deux : la galaxie
+ * sommait bien les planètes liées, tandis que le panneau « Vue d'ensemble »
+ * comparait chaque objectif au patrimoine net entier — ce qui affichait 100 %
+ * sur tous les objectifs dès que le patrimoine dépassait leur cible.
+ */
+export function goalProgress(
+  goal: { id: number; targetAmount: string },
+  goalLinks: GoalLinkLike[],
+  portfolioTotal: (portfolioId: number) => number
+): number {
+  const target = Number(goal.targetAmount);
+  if (!Number.isFinite(target) || target <= 0) return 0;
+
+  const linked = goalLinks.filter((gl) => gl.goalId === goal.id);
+  if (linked.length === 0) return 0;
+
+  const total = linked.reduce((sum, gl) => sum + portfolioTotal(gl.portfolioId), 0);
+  return Math.min(1, total / target);
+}
+
 export const ASSET_TYPE_LABELS: Record<string, string> = {
   stock: "Action",
   etf: "ETF",

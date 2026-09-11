@@ -6,6 +6,7 @@ import {
   currentValue,
   gain,
   gainPercent,
+  goalProgress,
   isStale,
   normalizeQuoteCurrency,
   ownedShare,
@@ -199,5 +200,44 @@ describe("ownedShare", () => {
   test("une répartition partielle reste partielle — aucun rattrapage implicite", () => {
     const rows = [{ portfolioId: P, memberId: null, sharePercent: "30" }];
     assert.equal(ownedShare(P, null, null, rows), 0.3);
+  });
+});
+
+describe("goalProgress", () => {
+  const goal = { id: 1, targetAmount: "100000" };
+  const totals: Record<number, number> = { 10: 30000, 11: 25000, 12: 900000 };
+  const totalOf = (id: number) => totals[id] ?? 0;
+
+  test("somme uniquement les planètes reliées à cet objectif", () => {
+    const links = [
+      { goalId: 1, portfolioId: 10 },
+      { goalId: 1, portfolioId: 11 },
+      { goalId: 2, portfolioId: 12 }, // un autre objectif : ne doit pas compter
+    ];
+    assert.equal(goalProgress(goal, links, totalOf), 0.55);
+  });
+
+  test("régression : un objectif n'est pas mesuré contre le patrimoine entier", () => {
+    // Le panneau « Vue d'ensemble » comparait chaque objectif au patrimoine net,
+    // donc affichait 100 % partout dès que le patrimoine dépassait la cible.
+    const links = [{ goalId: 1, portfolioId: 10 }];
+    assert.equal(goalProgress(goal, links, totalOf), 0.3);
+  });
+
+  test("sans planète reliée, la progression est nulle", () => {
+    assert.equal(goalProgress(goal, [], totalOf), 0);
+    assert.equal(goalProgress(goal, [{ goalId: 2, portfolioId: 10 }], totalOf), 0);
+  });
+
+  test("plafonne à 100 %", () => {
+    const links = [{ goalId: 1, portfolioId: 12 }];
+    assert.equal(goalProgress(goal, links, totalOf), 1);
+  });
+
+  test("une cible nulle ou absurde ne donne pas 100 %", () => {
+    const links = [{ goalId: 1, portfolioId: 10 }];
+    assert.equal(goalProgress({ id: 1, targetAmount: "0" }, links, totalOf), 0);
+    assert.equal(goalProgress({ id: 1, targetAmount: "" }, links, totalOf), 0);
+    assert.equal(goalProgress({ id: 1, targetAmount: "-5" }, links, totalOf), 0);
   });
 });

@@ -8,7 +8,7 @@ import {
 import { FolderPlus, Plus, PlusCircle, Star, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, AlertTriangle, Bell, Clock } from "lucide-react";
 import { findAccessory } from "@/lib/astronautAccessories";
 import { formatMoney } from "@/lib/format";
-import { currentValue, gain, gainPercent, totalDebt, ownedShare, type Rates, type ValuationContext } from "@/lib/networth";
+import { currentValue, gain, gainPercent, goalProgress, totalDebt, ownedShare, type Rates, type ValuationContext } from "@/lib/networth";
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
 import { getLogoUrl } from "@/lib/logos";
 import { daysUntilNextOccurrence } from "@/lib/dates";
@@ -222,13 +222,13 @@ const STARS = Array.from({ length: 260 }, (_, i) => ({
 }));
 
 export default function GalaxyView({
-  assets, portfolios, goals, loans, members, flows, goalLinks, portfolioOwnerships, quotes, dividends, actions, salary, onUpdateSalary, onUpdateSelf, onRefresh, showCountdown, ownerName, centerColor, ownerAccessory, rates, displayCurrency,
+  assets, portfolios, goals, loans, members, flows, goalLinks, portfolioOwnerships, quotes, dividends, actions, salary, onUpdateSalary, onUpdateSelf, onRefresh, showCountdown, ownerName, centerColor, ownerAccessory, rates, displayCurrency, readOnly = false,
 }: {
   assets: Asset[]; portfolios: Portfolio[]; goals: Goal[]; loans: Loan[];
   members: Member[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; quotes: Record<string, Quote>; dividends: Record<string, DividendInfo | null>;
   actions: Actions; salary: number; onUpdateSalary: (v: number) => Promise<void>; onUpdateSelf: (name: string, color: string, accessory: string | null) => Promise<void>; onRefresh: () => void; showCountdown: boolean;
   ownerName: string; centerColor: string; ownerAccessory: string | null;
-  rates: Rates; displayCurrency: string;
+  rates: Rates; displayCurrency: string; readOnly?: boolean;
 }) {
   const [expanded, setExpanded] = useState<Set<number | "unassigned">>(new Set());
   const [selected, setSelected] = useState<Selection>(null);
@@ -299,15 +299,11 @@ export default function GalaxyView({
   const currentYearForScrub = new Date().getFullYear();
   const scrubYear = currentYearForScrub + scrubYears;
 
-  const goalProgress = useCallback((goal: Goal) => {
-    const linkedIds = goalLinks.filter(gl => gl.goalId === goal.id).map(gl => gl.portfolioId);
-    if (linkedIds.length === 0) return 0;
-    const linkedTotal = linkedIds.reduce((s, pid) => s + (groups.find(g => g.key === pid)?.total ?? 0), 0);
-    // Un objectif à 0 € donnait une division par zéro affichée « 100 % ».
-    const target = Number(goal.targetAmount);
-    if (!Number.isFinite(target) || target <= 0) return 0;
-    return Math.min(1, linkedTotal / target);
-  }, [goalLinks, groups]);
+  const progressOf = useCallback(
+    (goal: Goal) =>
+      goalProgress(goal, goalLinks, pid => groups.find(g => g.key === pid)?.total ?? 0),
+    [goalLinks, groups]
+  );
 
   // Build graph
   const { targetNodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows, totalRevenue, totalInvest } = useMemo(() => {
@@ -452,7 +448,7 @@ export default function GalaxyView({
     for (const goal of goals) {
       const memberNode = goal.memberId ? `m-${goal.memberId}` : null;
       const linkedPortfolioIds = goalLinks.filter(gl => gl.goalId === goal.id).map(gl => gl.portfolioId);
-      const prog = goalProgress(goal);
+      const prog = progressOf(goal);
       nodes.push({ id: `g-${goal.id}`, kind: "goal", label: goal.name, r: 16 + Math.min(1, prog) * 44, color: goal.color, goalId: goal.id, sub: `${Math.round(prog * 100)}%` });
       links.push({ source: memberNode ?? "self", target: `g-${goal.id}` });
       linkedPortfolioIds.forEach(pid => { if (nodes.find(n => n.id === `p-${pid}`)) goalLinkEdges.push({ source: `g-${goal.id}`, target: `p-${pid}` }); });
@@ -467,7 +463,7 @@ export default function GalaxyView({
     });
 
     return { targetNodes: nodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows, totalRevenue, totalInvest };
-  }, [groups, expanded, goals, members, flows, quotes, salary, goalLinks, goalProgress, scrubYears, scrubGrowth, ownerName, centerColor, ownerAccessory, ctx, portfolioOwnerships, fmt]);
+  }, [groups, expanded, goals, members, flows, quotes, salary, goalLinks, progressOf, scrubYears, scrubGrowth, ownerName, centerColor, ownerAccessory, ctx, portfolioOwnerships, fmt]);
   linksRef.current = links;
 
   // Simulation
@@ -752,7 +748,7 @@ export default function GalaxyView({
     }
     else if (n.kind === "goal" && n.goalId != null) {
       const goal = goals.find(g => g.id === n.goalId)!;
-      setSelected({ kind: "goal", goal, progress: goalProgress(goal), linkedPortfolioIds: goalLinks.filter(gl => gl.goalId === goal.id).map(gl => gl.portfolioId) });
+      setSelected({ kind: "goal", goal, progress: progressOf(goal), linkedPortfolioIds: goalLinks.filter(gl => gl.goalId === goal.id).map(gl => gl.portfolioId) });
     }
     else if (n.id === "self") setSelected({ kind: "self", name: ownerName, color: centerColor, accessory: ownerAccessory });
     else if (n.kind === "member" && n.memberId != null) {
@@ -828,7 +824,7 @@ export default function GalaxyView({
       pdf.text("Objectifs", 40, y); y += 22;
       pdf.setFont("helvetica", "normal"); pdf.setFontSize(11);
       for (const g of goals) {
-        const prog = Math.round(goalProgress(g) * 100);
+        const prog = Math.round(progressOf(g) * 100);
         pdf.setTextColor(200, 200, 208);
         pdf.text(String(g.name), 50, y);
         pdf.setTextColor(150, 150, 160);
@@ -927,8 +923,9 @@ export default function GalaxyView({
           )}
         </div>
 
-        {/* Create actions */}
-        <div className="px-3 py-3 space-y-0.5">
+        {/* Create actions — masquées en lecture seule : un bouton qui ne peut
+            qu'échouer n'a pas sa place dans une démonstration. */}
+        {!readOnly && <div className="px-3 py-3 space-y-0.5">
           <p className="text-[9px] text-text-muted uppercase tracking-wider px-1 mb-1.5">Créer</p>
           {[
             { icon: FolderPlus, label: "Planète", mode: "portfolio" },
@@ -949,10 +946,10 @@ export default function GalaxyView({
           {linkMode && <p className="text-[10px] text-accent px-2 pt-1">
             {linkSourceNode ? `Clique la destination (depuis "${linkSourceNode.label}")…` : "Clique la planète source…"}
           </p>}
-        </div>
+        </div>}
 
         {/* Salary */}
-        <div className="px-3 py-2 border-t border-border">
+        {!readOnly && <div className="px-3 py-2 border-t border-border">
           <p className="text-[9px] text-text-muted uppercase tracking-wider px-1 mb-1.5">Revenus</p>
           <button onClick={() => { setSelected(null); setCreateMode("salary"); }}
             className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs ${createMode === "salary" ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text hover:bg-surface-hover"}`}>
@@ -965,7 +962,7 @@ export default function GalaxyView({
             <PlusCircle size={13} className="shrink-0" />
             Source de revenus
           </button>
-        </div>
+        </div>}
 
 
         <div className="flex-1" />
@@ -1191,7 +1188,7 @@ export default function GalaxyView({
             {nodes.map(n => {
               if (n.x == null || n.y == null) return null;
               const isExp = n.kind === "portfolio" && n.portfolioKey !== undefined && expanded.has(n.portfolioKey);
-              const gp = n.kind === "goal" && n.goalId != null ? (() => { const goal = goals.find(g => g.id === n.goalId); return goal ? goalProgress(goal) : null; })() : null;
+              const gp = n.kind === "goal" && n.goalId != null ? (() => { const goal = goals.find(g => g.id === n.goalId); return goal ? progressOf(goal) : null; })() : null;
               const ts = { textShadow: "0 1px 3px rgba(0,0,0,0.95), 0 0 8px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,1)" } as const;
               const isHoveredNode = hoveredId === n.id;
 
@@ -1359,7 +1356,7 @@ export default function GalaxyView({
                       if (linkedGoals.length === 0) return null;
                       return <g pointerEvents="none">
                         {linkedGoals.map((goal, gi) => {
-                          const prog = goalProgress(goal);
+                          const prog = progressOf(goal);
                           const done = prog >= 1;
                           const ringR = n.r + 9 + gi * 6, circ = 2 * Math.PI * ringR;
                           return <g key={goal.id}>
@@ -1435,7 +1432,7 @@ export default function GalaxyView({
                       const baseY = n.isProjected ? 32 : (n.gainVal ?? 0) !== 0 ? 34 : 22;
                       return <>
                         {linkedGoals.slice(0, 2).map((goal, gi) => {
-                          const prog = goalProgress(goal);
+                          const prog = progressOf(goal);
                           const done = prog >= 1;
                           return <text key={goal.id} y={baseY + gi * 11} textAnchor="middle" fontSize={8} fontWeight={600} fill={goal.color} style={ts}>
                             {done ? "✓ " : "🎯 "}{goal.name.length > 14 ? goal.name.slice(0, 13) + "…" : goal.name} · {Math.round(prog * 100)}%

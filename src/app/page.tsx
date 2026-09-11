@@ -1,8 +1,11 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { AlertTriangle, X, Eye, Sparkles, Loader2 } from "lucide-react";
 import GalaxyView from "@/components/GalaxyView";
+import SinceLastVisit from "@/components/SinceLastVisit";
+import { currentValue, goalProgress, isStale, totalDebt, type ValuationContext } from "@/lib/networth";
+import { formatMoney } from "@/lib/format";
 import { apiFetch, ApiError } from "@/lib/api";
 import { fetchAllQuotes } from "@/lib/allQuotes";
 import { fetchAllDividends, type DividendInfo } from "@/lib/allDividends";
@@ -35,7 +38,10 @@ export default function HomePage() {
   const [rates, setRates] = useState<Rates>({ EUR: 1 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [role, setRole] = useState<"owner" | "demo">("owner");
+  // `null` tant que /api/session n'a pas répondu : partir du principe qu'on est
+  // propriétaire déclenchait l'instantané quotidien avant de savoir, et le
+  // serveur répondait 403 en session de démonstration.
+  const [role, setRole] = useState<"owner" | "demo" | null>(null);
   const [canSeedDemo, setCanSeedDemo] = useState(false);
   const [demoLoaded, setDemoLoaded] = useState(false);
   const [seeding, setSeeding] = useState(false);
@@ -61,7 +67,7 @@ export default function HomePage() {
       setGoalLinks(gl.status === "fulfilled" ? (gl.value as GoalLink[]) : []);
       setPortfolioOwnerships(po.status === "fulfilled" ? (po.value as PortfolioOwnership[]) : []);
       if (fx.status === "fulfilled") setRates(fx.value as Rates);
-      if (se.status === "fulfilled") setRole((se.value as { role: "owner" | "demo" }).role);
+      setRole(se.status === "fulfilled" ? (se.value as { role: "owner" | "demo" }).role : "owner");
       if (dm.status === "fulfilled") {
         const d = dm.value as { loaded: boolean; canSeed: boolean };
         setCanSeedDemo(d.canSeed);
@@ -81,7 +87,7 @@ export default function HomePage() {
 
   // Instantané quotidien silencieux pour construire l'historique du patrimoine.
   useEffect(() => {
-    if (role === "demo") return;
+    if (role !== "owner") return;
     const today = new Date().toISOString().slice(0, 10);
     const key = "aurevia:lastSnapshotDate";
     if (localStorage.getItem(key) === today) return;
@@ -159,6 +165,69 @@ export default function HomePage() {
       setSeeding(false);
     }
   };
+
+  // Données du résumé « depuis ta dernière visite ». Les mêmes fonctions de
+  // valorisation que la galaxie, pour que les deux ne puissent pas diverger.
+  const visitData = useMemo(() => {
+    const displayCurrency = settings.display_currency || "EUR";
+    const ctx: ValuationContext = { rates, displayCurrency };
+
+    const valueOf = (a: Asset) => currentValue(a, a.ticker ? quotes[a.ticker] : null, ctx);
+    const portfolioTotal = (id: number) =>
+      assets.filter((a) => a.portfolioId === id).reduce((s, a) => s + valueOf(a), 0);
+
+    const netWorth = assets.reduce((s, a) => s + valueOf(a), 0) - totalDebt(loans, ctx);
+
+    const goalRows = goals.map((g) => ({
+      id: g.id,
+      name: g.name,
+      progress: goalProgress(g, goalLinks, portfolioTotal),
+    }));
+
+    const labelFor = (f: Flow) =>
+      f.targetType === "portfolio"
+        ? portfolios.find((p) => p.id === f.targetId)?.name ?? "une planète"
+        : f.targetType === "goal"
+          ? goals.find((g) => g.id === f.targetId)?.name ?? "un objectif"
+          : f.name || "une dépense";
+
+    const flowRows = flows
+      .filter((f) => f.targetType === "portfolio" || f.targetType === "goal")
+      .map((f) => ({
+        id: f.id,
+        name: f.name,
+        amount: Number(f.amount),
+        frequency: f.frequency,
+        createdAt: f.createdAt,
+        targetLabel: labelFor(f),
+      }));
+
+    // Le calendrier donne un montant par action : on le multiplie par la
+    // quantité détenue, sinon le chiffre annoncé n'a aucun rapport avec ce qui
+    // sera réellement versé.
+    const dividendRows = assets.flatMap((a) => {
+      const info = a.ticker ? dividends[a.ticker] : null;
+      if (!info) return [];
+      const qty = Number(a.quantity ?? 0);
+      return info.projected.map((d) => ({
+        ticker: info.ticker,
+        assetName: a.name,
+        date: d.date,
+        amount: d.amount * qty,
+      }));
+    });
+
+    const staleCount = assets.filter((a) => isStale(a, a.ticker ? quotes[a.ticker] : null)).length;
+
+    return {
+      netWorth,
+      goals: goalRows,
+      flows: flowRows,
+      dividends: dividendRows,
+      staleCount,
+      formatMoney: (v: number) => formatMoney(v, displayCurrency),
+    };
+  }, [assets, loans, goals, goalLinks, flows, portfolios, quotes, dividends, rates, settings.display_currency]);
 
   const isEmpty =
     assets.length === 0 &&
@@ -246,6 +315,7 @@ export default function HomePage() {
             Retirer le patrimoine d&apos;exemple
           </button>
         )}
+        {!isEmpty && <SinceLastVisit data={visitData} disabled={readOnly} />}
         <GalaxyView
           assets={assets} portfolios={portfolios} goals={goals} loans={loans}
           members={members} flows={flows} goalLinks={goalLinks} portfolioOwnerships={portfolioOwnerships} quotes={quotes} dividends={dividends} actions={actions}
@@ -256,6 +326,7 @@ export default function HomePage() {
           ownerAccessory={settings.owner_accessory || null}
           rates={rates}
           displayCurrency={settings.display_currency || "EUR"}
+          readOnly={readOnly}
           onUpdateSalary={updateSalary}
           onUpdateSelf={updateSelf}
           onRefresh={load}

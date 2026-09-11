@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Trash2, Pencil } from "lucide-react";
 import { formatMoney } from "@/lib/format";
-import { ASSET_TYPE_LABELS, convert, type ValuationContext } from "@/lib/networth";
+import { ASSET_TYPE_LABELS, convert, goalProgress, type ValuationContext } from "@/lib/networth";
 import { ASTRONAUT_ACCESSORIES } from "@/lib/astronautAccessories";
 import { monthsToReach } from "@/lib/projection";
 
@@ -509,6 +509,7 @@ function SelfForm({ name: initialName, color: initialColor, accessory: initialAc
 export default function NodePanel({ selected, loans, portfolios, members, goals, flows, goalLinks, portfolioOwnerships, actions, onClear, createMode, setCreateMode, salary, onUpdateSalary, onUpdateSelf, groups, grossTotal, debt, onPortfolioCreated, ownerName, expenseMemberId, dividends, displayCurrency, ctx }:
   { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; onUpdateSelf: (name: string, color: string, accessory: string | null) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number; onPortfolioCreated?: (p: Portfolio) => void; ownerName: string; expenseMemberId?: number | null; dividends: Record<string, DividendInfo | null>; displayCurrency: string; ctx: ValuationContext }) {
   const fmt = (v: number) => formatMoney(v, displayCurrency);
+  const portfolioTotal = (id: number) => groups.find(g => g.key === id)?.total ?? 0;
   // Un dividende est versé dans la devise du titre : on le ramène à la devise
   // d'affichage pour ne pas mélanger les unités dans un même panneau.
   const fmtFrom = (v: number, from: string) =>
@@ -592,7 +593,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
           {goals.length > 0 && <div className="pt-2 border-t border-border">
             <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Objectifs</p>
             {goals.map(g => {
-              const prog = Math.min(1, (grossTotal - debt) / Number(g.targetAmount));
+              const prog = goalProgress(g, goalLinks, portfolioTotal);
               return <div key={g.id} className="py-1">
                 <div className="flex justify-between text-xs"><span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full shrink-0" style={{ background: g.color }} />{g.name}</span><span className="tabular">{Math.round(prog * 100)}%</span></div>
                 <div className="h-1 rounded bg-border mt-1 overflow-hidden"><div className="h-full rounded" style={{ width: `${Math.min(100, prog * 100)}%`, background: g.color }} /></div>
