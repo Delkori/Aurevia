@@ -8,7 +8,7 @@ import {
 import { FolderPlus, Plus, PlusCircle, Star, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, AlertTriangle, Bell, Clock } from "lucide-react";
 import { findAccessory } from "@/lib/astronautAccessories";
 import { formatMoney } from "@/lib/format";
-import { currentValue, gain, gainPercent, totalDebt } from "@/lib/networth";
+import { currentValue, gain, gainPercent, totalDebt, ownedShare, type Rates, type ValuationContext } from "@/lib/networth";
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
 import { getLogoUrl } from "@/lib/logos";
 import { daysUntilNextOccurrence } from "@/lib/dates";
@@ -71,12 +71,12 @@ function bezierPoint(s: { x: number; y: number }, c: { x: number; y: number }, t
 
 type PlanetSkin = "tech" | "crypto" | "terrain" | "ocean" | "chalet" | "vacances" | "generic" | "empty";
 const SKIN_IMAGE_TIERS: Partial<Record<PlanetSkin, string[]>> = {
-  tech: ["/planet-skins/tech-1.png", "/planet-skins/tech-2.png", "/planet-skins/tech-3.png"],
-  terrain: ["/planet-skins/terrain-1.png", "/planet-skins/terrain-2.png", "/planet-skins/terrain-3.png"],
-  ocean: ["/planet-skins/ocean.png"],
-  crypto: ["/planet-skins/crypto.png"],
-  chalet: ["/planet-skins/chalet.png"],
-  vacances: ["/planet-skins/vacances.png"],
+  tech: ["/planet-skins/tech-1.webp", "/planet-skins/tech-2.webp", "/planet-skins/tech-3.webp"],
+  terrain: ["/planet-skins/terrain-1.webp", "/planet-skins/terrain-2.webp", "/planet-skins/terrain-3.webp"],
+  ocean: ["/planet-skins/ocean.webp"],
+  crypto: ["/planet-skins/crypto.webp"],
+  chalet: ["/planet-skins/chalet.webp"],
+  vacances: ["/planet-skins/vacances.webp"],
 };
 function tierIndex(value: number, max: number, tiers: number) {
   if (max <= 0) return 0;
@@ -88,22 +88,22 @@ function skinImageForValue(skin: PlanetSkin, value: number, max: number): string
   if (!tiers || tiers.length === 0) return undefined;
   return tiers[tierIndex(value, max, tiers.length)];
 }
-const SALARY_IMAGES = ["/planet-skins/salary-1.png", "/planet-skins/salary-2.png", "/planet-skins/salary-3.png"];
+const SALARY_IMAGES = ["/planet-skins/salary-1.webp", "/planet-skins/salary-2.webp", "/planet-skins/salary-3.webp"];
 const SALARY_TIER_THRESHOLDS = [2500, 6000];
 function salaryImage(amount: number) {
   const idx = amount < SALARY_TIER_THRESHOLDS[0] ? 0 : amount < SALARY_TIER_THRESHOLDS[1] ? 1 : 2;
   return SALARY_IMAGES[idx];
 }
-const VACANCES_IMAGE = "/planet-skins/vacances.png";
+const VACANCES_IMAGE = "/planet-skins/vacances.webp";
 const EXPENSES_IMAGES = {
-  warning: "/planet-skins/expenses-warning.png",
-  eruption: "/planet-skins/expenses-eruption.png",
-  critical: "/planet-skins/expenses-critical.png",
+  warning: "/planet-skins/expenses-warning.webp",
+  eruption: "/planet-skins/expenses-eruption.webp",
+  critical: "/planet-skins/expenses-critical.webp",
 };
 const SHIP_IMAGES = {
-  small: "/ship-skins/transport-small.png",
-  medium: "/ship-skins/transport-medium.png",
-  large: "/ship-skins/transport-large.png",
+  small: "/ship-skins/transport-small.webp",
+  medium: "/ship-skins/transport-medium.webp",
+  large: "/ship-skins/transport-large.webp",
 };
 const SHIP_DIMS = {
   small: { w: 16, h: 10 },
@@ -160,15 +160,57 @@ interface GNode extends SimulationNodeDatum {
 }
 interface GLink { source: string; target: string }
 
+// Horloge d'animation de la galaxie. Chaque avance déclenche un rendu complet de
+// GalaxyView, donc sa cadence est directement le coût de l'animation ambiante.
+// Trois garde-fous, pour un résultat visuellement identique :
+//  · 30 images/s au lieu de 60 — les animations les plus rapides tournent à
+//    ~3 rad/s, très loin d'avoir besoin de 60 Hz ;
+//  · arrêt complet quand l'onglet est masqué — inutile de peindre en arrière-plan ;
+//  · arrêt complet si l'utilisateur a demandé « animations réduites », auquel cas
+//    la scène est simplement figée dans son état de repos.
+const FRAME_INTERVAL_MS = 1000 / 30;
+
 function useAnimClock() {
   const [t, setT] = useState(0);
-  const r = useRef<number>(0);
-  const s = useRef<number>(0);
+  const frame = useRef<number>(0);
+  const start = useRef<number>(0);
+  const lastEmit = useRef<number>(0);
+
   useEffect(() => {
-    const tick = (ts: number) => { if (!s.current) s.current = ts; setT((ts - s.current) / 1000); r.current = requestAnimationFrame(tick); };
-    r.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(r.current);
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    let running = false;
+
+    const tick = (ts: number) => {
+      if (!start.current) start.current = ts;
+      if (ts - lastEmit.current >= FRAME_INTERVAL_MS) {
+        lastEmit.current = ts;
+        setT((ts - start.current) / 1000);
+      }
+      frame.current = requestAnimationFrame(tick);
+    };
+
+    const stop = () => {
+      if (!running) return;
+      running = false;
+      cancelAnimationFrame(frame.current);
+    };
+    const play = () => {
+      if (running || document.hidden || reduced?.matches) return;
+      running = true;
+      frame.current = requestAnimationFrame(tick);
+    };
+    const sync = () => (document.hidden || reduced?.matches ? stop() : play());
+
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    reduced?.addEventListener("change", sync);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", sync);
+      reduced?.removeEventListener("change", sync);
+    };
   }, []);
+
   return t;
 }
 
@@ -180,12 +222,13 @@ const STARS = Array.from({ length: 260 }, (_, i) => ({
 }));
 
 export default function GalaxyView({
-  assets, portfolios, goals, loans, members, flows, goalLinks, portfolioOwnerships, quotes, dividends, actions, salary, onUpdateSalary, onUpdateSelf, onRefresh, showCountdown, ownerName, centerColor, ownerAccessory,
+  assets, portfolios, goals, loans, members, flows, goalLinks, portfolioOwnerships, quotes, dividends, actions, salary, onUpdateSalary, onUpdateSelf, onRefresh, showCountdown, ownerName, centerColor, ownerAccessory, rates, displayCurrency,
 }: {
   assets: Asset[]; portfolios: Portfolio[]; goals: Goal[]; loans: Loan[];
   members: Member[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; quotes: Record<string, Quote>; dividends: Record<string, DividendInfo | null>;
   actions: Actions; salary: number; onUpdateSalary: (v: number) => Promise<void>; onUpdateSelf: (name: string, color: string, accessory: string | null) => Promise<void>; onRefresh: () => void; showCountdown: boolean;
   ownerName: string; centerColor: string; ownerAccessory: string | null;
+  rates: Rates; displayCurrency: string;
 }) {
   const [expanded, setExpanded] = useState<Set<number | "unassigned">>(new Set());
   const [selected, setSelected] = useState<Selection>(null);
@@ -221,19 +264,27 @@ export default function GalaxyView({
   const zoomRef = useRef<{ k: number; x: number; y: number }>({ k: 1, x: 0, y: 0 });
   const rootRef = useRef<SVGGElement | null>(null);
 
+  // Toutes les valorisations passent par ce contexte : sans lui, une ligne cotée
+  // en USD était additionnée comme si c'était des euros.
+  const ctx: ValuationContext = useMemo(
+    () => ({ rates, displayCurrency }),
+    [rates, displayCurrency]
+  );
+  const fmt = useCallback((v: number) => formatMoney(v, displayCurrency), [displayCurrency]);
+
   const groups = useMemo(() => {
     const byP = new Map<number | "unassigned", Asset[]>();
     for (const a of assets) { const k = a.portfolioId ?? "unassigned"; if (!byP.has(k)) byP.set(k, []); byP.get(k)!.push(a); }
     for (const p of portfolios) { if (!byP.has(p.id)) byP.set(p.id, []); } // keep empty planets visible
     return [...byP.entries()].map(([key, list]) => {
       const p = key === "unassigned" ? { id: "unassigned" as const, name: "Sans portefeuille", color: "#6b6b72", skin: null, memberId: null } : portfolios.find(p => p.id === key) ?? { id: key, name: "?", color: "#6b6b72", skin: null, memberId: null };
-      const valued = list.map(a => ({ asset: a, value: currentValue(a, a.ticker ? quotes[a.ticker] : null) }));
+      const valued = list.map(a => ({ asset: a, value: currentValue(a, a.ticker ? quotes[a.ticker] : null, ctx) }));
       return { key, portfolio: p, valued, total: valued.reduce((s, v) => s + v.value, 0) };
     }).sort((a, b) => b.total - a.total);
-  }, [assets, portfolios, quotes]);
+  }, [assets, portfolios, quotes, ctx]);
 
   const grossTotal = groups.reduce((s, g) => s + g.total, 0);
-  const debt = totalDebt(loans);
+  const debt = totalDebt(loans, ctx);
   const grandTotal = grossTotal - debt;
   const scrubMonthlyContribution = flows.reduce((s, f) => {
     if (f.targetType !== "portfolio" && f.targetType !== "goal") return s;
@@ -287,7 +338,7 @@ export default function GalaxyView({
     const totalIncomeItems = incomeFlows.reduce((s, f) => s + Number(f.amount), 0);
     const totalRevenue = salary + totalIncomeItems;
 
-    if (totalRevenue > 0) nodes.push({ id: "salary", kind: "salary", label: "Revenus", r: 32, color: "#34d399", sub: formatMoney(totalRevenue), amount: totalRevenue });
+    if (totalRevenue > 0) nodes.push({ id: "salary", kind: "salary", label: "Revenus", r: 32, color: "#34d399", sub: fmt(totalRevenue), amount: totalRevenue });
     // Le Soleil grossit lui aussi avec la projection globale (racine carrée, comme sr(),
     // pour une croissance visuelle proportionnée plutôt que linéaire — un patrimoine x4
     // ne doit pas donner un Soleil x4 en rayon, sinon il avale tout le reste).
@@ -303,16 +354,21 @@ export default function GalaxyView({
     // Chaque planète-personne grossit avec SON patrimoine (portefeuilles qui lui sont
     // directement attribués), sur une échelle commune à Moi + tous les membres, pour que
     // les tailles restent comparables d'une personne à l'autre.
-    const selfTotal = groups.filter(g => !g.portfolio.memberId).reduce((s, g) => s + g.total, 0);
-    const memberTotal = (mid: number) => groups.filter(g => g.portfolio.memberId === mid).reduce((s, g) => s + g.total, 0);
+    // Les quotes-parts font foi quand elles existent : un bien commun réparti
+    // 50/50 compte pour moitié chez chacun, au lieu d'être attribué en entier au
+    // propriétaire déclaré de la planète.
+    const personTotal = (mid: number | null) => groups.reduce(
+      (s, g) => s + g.total * ownedShare(g.key, g.portfolio.memberId, mid, portfolioOwnerships), 0);
+    const selfTotal = personTotal(null);
+    const memberTotal = (mid: number) => personTotal(mid);
     const maxPersonTotal = Math.max(1, selfTotal, ...members.map(m => memberTotal(m.id)));
-    nodes.push({ id: "self", kind: "member", label: ownerName, r: sr(selfTotal, maxPersonTotal, 24, 48), color: centerColor, memberId: null, sub: formatMoney(selfTotal), accessory: ownerAccessory });
+    nodes.push({ id: "self", kind: "member", label: ownerName, r: sr(selfTotal, maxPersonTotal, 24, 48), color: centerColor, memberId: null, sub: fmt(selfTotal), accessory: ownerAccessory });
     links.push({ source: "center", target: "self" });
     if (totalRevenue > 0) links.push({ source: "salary", target: "center" });
 
     incomeFlows.forEach(inf => {
       const iid = `inc-${inf.id}`;
-      nodes.push({ id: iid, kind: "income-item", label: inf.name || "Revenu", r: 10 + Math.min(8, Number(inf.amount) / 200), color: "#34d399", sub: formatMoney(Number(inf.amount)), flowId: inf.id });
+      nodes.push({ id: iid, kind: "income-item", label: inf.name || "Revenu", r: 10 + Math.min(8, Number(inf.amount) / 200), color: "#34d399", sub: fmt(Number(inf.amount)), flowId: inf.id });
       links.push({ source: "salary", target: iid });
     });
 
@@ -331,25 +387,25 @@ export default function GalaxyView({
     if (totalRevenue > 0) {
       nodes.push({ id: "expenses", kind: "expenses", label: "Dépenses", r: 22 + Math.min(18, myExpenseTotal / 80), color: "#f87171", ownerExpenseTotal: myExpenseTotal, ownerRevenue: totalRevenue });
       links.push({ source: "salary", target: "expenses" });
-      if (myExpenseTotal > 0) flowLinks.push({ source: "salary", target: "expenses", label: formatMoney(myExpenseTotal), amount: myExpenseTotal });
+      if (myExpenseTotal > 0) flowLinks.push({ source: "salary", target: "expenses", label: fmt(myExpenseTotal), amount: myExpenseTotal });
       myExpFlows.forEach(ef => {
         const eid = `exp-${ef.id}`;
-        nodes.push({ id: eid, kind: "expense-item", label: ef.name || "Dépense", r: 10 + Math.min(8, Number(ef.amount) / 100), color: "#f87171", sub: formatMoney(Number(ef.amount)), flowId: ef.id });
+        nodes.push({ id: eid, kind: "expense-item", label: ef.name || "Dépense", r: 10 + Math.min(8, Number(ef.amount) / 100), color: "#f87171", sub: fmt(Number(ef.amount)), flowId: ef.id });
         links.push({ source: "expenses", target: eid });
       });
     }
     if (totalRevenue > 0 && resteAInvestir > 0) {
       nodes.push({ id: "reste", kind: "reste", label: "Reste", r: 18, color: "#9585ff" });
       links.push({ source: "salary", target: "reste" });
-      flowLinks.push({ source: "salary", target: "reste", label: formatMoney(resteAInvestir), amount: resteAInvestir });
+      flowLinks.push({ source: "salary", target: "reste", label: fmt(resteAInvestir), amount: resteAInvestir });
     }
 
     members.forEach(m => {
       const mTotal = memberTotal(m.id);
-      nodes.push({ id: `m-${m.id}`, kind: "member", label: m.name, r: sr(mTotal, maxPersonTotal, 20, 44), color: m.color, memberId: m.id, sub: formatMoney(mTotal), accessory: m.accessory });
+      nodes.push({ id: `m-${m.id}`, kind: "member", label: m.name, r: sr(mTotal, maxPersonTotal, 20, 44), color: m.color, memberId: m.id, sub: fmt(mTotal), accessory: m.accessory });
       links.push({ source: "center", target: `m-${m.id}` });
       if (m.salary && Number(m.salary) > 0) {
-        nodes.push({ id: `ms-${m.id}`, kind: "member-salary", label: `Salaire de ${m.name}`, r: 22, color: m.color, memberId: m.id, sub: formatMoney(Number(m.salary)), amount: Number(m.salary) });
+        nodes.push({ id: `ms-${m.id}`, kind: "member-salary", label: `Salaire de ${m.name}`, r: 22, color: m.color, memberId: m.id, sub: fmt(Number(m.salary)), amount: Number(m.salary) });
         links.push({ source: `m-${m.id}`, target: `ms-${m.id}` });
       }
       const memberExpFlows = expFlows.filter(f => f.memberId === m.id);
@@ -360,7 +416,7 @@ export default function GalaxyView({
       links.push({ source: `m-${m.id}`, target: meid });
       memberExpFlows.forEach(ef => {
         const eid = `exp-${ef.id}`;
-        nodes.push({ id: eid, kind: "expense-item", label: ef.name || "Dépense", r: 10 + Math.min(8, Number(ef.amount) / 100), color: "#f87171", sub: formatMoney(Number(ef.amount)), flowId: ef.id });
+        nodes.push({ id: eid, kind: "expense-item", label: ef.name || "Dépense", r: 10 + Math.min(8, Number(ef.amount) / 100), color: "#f87171", sub: fmt(Number(ef.amount)), flowId: ef.id });
         links.push({ source: meid, target: eid });
       });
     });
@@ -368,22 +424,22 @@ export default function GalaxyView({
     for (const g of groups) {
       const pid = `p-${g.key}`;
       const memberNode = g.portfolio.memberId ? `m-${g.portfolio.memberId}` : null;
-      const totalGain = g.valued.reduce((s, v) => { const a = v.asset; return s + ((a.avgBuyPrice && Number(a.avgBuyPrice) > 0) ? gain(a, a.ticker ? quotes[a.ticker] : null) : 0); }, 0);
+      const totalGain = g.valued.reduce((s, v) => { const a = v.asset; return s + ((a.avgBuyPrice && Number(a.avgBuyPrice) > 0) ? gain(a, a.ticker ? quotes[a.ticker] : null, ctx) : 0); }, 0);
       const skin = planetSkin(g.portfolio.name, g.valued, g.portfolio.skin);
       const projTotal = projectedGroupTotal(g);
       // En simulation, le gain affiché (calculé sur les cours réels du jour) perdrait son
       // sens à côté d'une valeur projetée dans le futur — on le masque plutôt que d'afficher
       // un chiffre qui semblerait porter sur la projection alors qu'il ne la concerne pas.
-      nodes.push({ id: pid, kind: "portfolio", label: g.portfolio.name, r: sr(projTotal, maxPV, 20, 78), color: g.portfolio.color, portfolioKey: g.key, gainVal: scrubYears > 0 ? undefined : totalGain, sub: formatMoney(projTotal), skin, isProjected: scrubYears > 0 });
+      nodes.push({ id: pid, kind: "portfolio", label: g.portfolio.name, r: sr(projTotal, maxPV, 20, 78), color: g.portfolio.color, portfolioKey: g.key, gainVal: scrubYears > 0 ? undefined : totalGain, sub: fmt(projTotal), skin, isProjected: scrubYears > 0 });
       links.push({ source: memberNode ?? "self", target: pid });
       if (expanded.has(g.key)) {
         const maxAV = Math.max(1, ...g.valued.map(v => v.value));
         for (const v of g.valued) {
           const a = v.asset, hasG = a.avgBuyPrice && Number(a.avgBuyPrice) > 0;
           const q = a.ticker ? quotes[a.ticker] : null;
-          const gn = hasG ? gain(a, q) : 0;
-          const gp = hasG ? gainPercent(a, q) : undefined;
-          nodes.push({ id: `a-${a.id}`, kind: "asset", label: a.name, r: sr(v.value, maxAV, 10, 28), color: g.portfolio.color, portfolioKey: g.key, assetId: a.id, gainVal: hasG ? gn : undefined, gainPct: gp, sub: formatMoney(v.value), logoUrl: getLogoUrl(a.type, a.ticker) });
+          const gn = hasG ? gain(a, q, ctx) : 0;
+          const gp = hasG ? gainPercent(a, q, ctx) : undefined;
+          nodes.push({ id: `a-${a.id}`, kind: "asset", label: a.name, r: sr(v.value, maxAV, 10, 28), color: g.portfolio.color, portfolioKey: g.key, assetId: a.id, gainVal: hasG ? gn : undefined, gainPct: gp, sub: fmt(v.value), logoUrl: getLogoUrl(a.type, a.ticker) });
           links.push({ source: pid, target: `a-${a.id}` });
         }
       }
@@ -404,11 +460,11 @@ export default function GalaxyView({
       const sId = f.sourceType === "salary" ? "salary" : f.sourceType === "portfolio" ? `p-${f.sourceId}` : f.sourceType === "member_salary" ? `ms-${f.sourceId}` : null;
       const tId = f.targetType === "portfolio" ? `p-${f.targetId}` : f.targetType === "goal" ? `g-${f.targetId}` : null;
       if (sId && tId && nodes.find(n => n.id === sId) && nodes.find(n => n.id === tId))
-        flowLinks.push({ source: sId, target: tId, label: formatMoney(Number(f.amount)), amount: Number(f.amount), days: daysUntilNextOccurrence(f.createdAt, f.frequency), isSalarySource: f.sourceType === "salary" || f.sourceType === "member_salary" });
+        flowLinks.push({ source: sId, target: tId, label: fmt(Number(f.amount)), amount: Number(f.amount), days: daysUntilNextOccurrence(f.createdAt, f.frequency), isSalarySource: f.sourceType === "salary" || f.sourceType === "member_salary" });
     });
 
     return { targetNodes: nodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows, totalRevenue, totalInvest };
-  }, [groups, expanded, goals, members, flows, quotes, salary, goalLinks, goalProgress, scrubYears, scrubGrowth, ownerName, centerColor, ownerAccessory]);
+  }, [groups, expanded, goals, members, flows, quotes, salary, goalLinks, goalProgress, scrubYears, scrubGrowth, ownerName, centerColor, ownerAccessory, ctx, portfolioOwnerships, fmt]);
   linksRef.current = links;
 
   // Simulation
@@ -689,7 +745,7 @@ export default function GalaxyView({
       const g = groups.find(gr => gr.key === n.portfolioKey)!;
       const v = g.valued.find(val => val.asset.id === n.assetId)!;
       const q = v.asset.ticker ? quotes[v.asset.ticker] : null;
-      setSelected({ kind: "asset", asset: v.asset, value: v.value, gain: gain(v.asset, q), gainPct: gainPercent(v.asset, q), portfolioName: g.portfolio.name });
+      setSelected({ kind: "asset", asset: v.asset, value: v.value, gain: gain(v.asset, q, ctx), gainPct: gainPercent(v.asset, q, ctx), portfolioName: g.portfolio.name });
     }
     else if (n.kind === "goal" && n.goalId != null) {
       const goal = goals.find(g => g.id === n.goalId)!;
@@ -730,8 +786,8 @@ export default function GalaxyView({
     const dateStr = new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
     ctx.fillText(dateStr, W - 200, 865);
     ctx.font = "16px sans-serif"; ctx.fillStyle = "#b8b8c2";
-    ctx.fillText(`Net : ${formatMoney(grandTotal)}   ·   Actifs bruts : ${formatMoney(grossTotal)}   ·   Crédits : ${formatMoney(debt)}`, 40, 900);
-    if (totalRevenue > 0) ctx.fillText(`Revenus mensuels : ${formatMoney(totalRevenue)}   ·   Dépenses : ${formatMoney(totalExpenseFlows)}   ·   Épargne : ${tauxEpargne}%`, 40, 930);
+    ctx.fillText(`Net : ${fmt(grandTotal)}   ·   Actifs bruts : ${fmt(grossTotal)}   ·   Crédits : ${fmt(debt)}`, 40, 900);
+    if (totalRevenue > 0) ctx.fillText(`Revenus mensuels : ${fmt(totalRevenue)}   ·   Dépenses : ${fmt(totalExpenseFlows)}   ·   Épargne : ${tauxEpargne}%`, 40, 930);
     if (structureScore !== null) { ctx.fillStyle = structureScore >= 70 ? "#34d399" : structureScore >= 45 ? "#9585ff" : "#f87171"; ctx.font = "bold 16px sans-serif"; ctx.fillText(`Score de structure : ${structureScore}/100`, 40, 965); }
 
     const pdf = new jsPDF({ orientation: "landscape", unit: "px", format: [W, H] });
@@ -754,14 +810,14 @@ export default function GalaxyView({
       pdf.setTextColor(150, 150, 160);
       pdf.text(`${g.valued.length} actif${g.valued.length > 1 ? "s" : ""}`, 320, y);
       pdf.setTextColor(226, 226, 230);
-      pdf.text(formatMoney(g.total), W - 100, y, { align: "right" });
+      pdf.text(fmt(g.total), W - 100, y, { align: "right" });
       y += 18;
       if (y > H - 60) { pdf.addPage([W, H], "landscape"); pdf.setFillColor(10, 10, 14); pdf.rect(0, 0, W, H, "F"); y = 60; }
     }
 
     if (debt > 0) {
       y += 12; pdf.setTextColor(248, 113, 113); pdf.setFont("helvetica", "bold"); pdf.setFontSize(12);
-      pdf.text(`Crédits en cours : ${formatMoney(debt)}`, 50, y); y += 12;
+      pdf.text(`Crédits en cours : ${fmt(debt)}`, 50, y); y += 12;
     }
 
     if (goals.length > 0) {
@@ -773,7 +829,7 @@ export default function GalaxyView({
         pdf.setTextColor(200, 200, 208);
         pdf.text(String(g.name), 50, y);
         pdf.setTextColor(150, 150, 160);
-        pdf.text(`${formatMoney(Number(g.targetAmount))} visé`, 320, y);
+        pdf.text(`${fmt(Number(g.targetAmount))} visé`, 320, y);
         pdf.setTextColor(prog >= 100 ? 52 : 149, prog >= 100 ? 211 : 133, prog >= 100 ? 153 : 255);
         pdf.text(`${prog}%`, W - 100, y, { align: "right" });
         y += 18;
@@ -790,7 +846,7 @@ export default function GalaxyView({
         pdf.text(String(m.name), 50, y);
         pdf.setTextColor(150, 150, 160);
         pdf.text(String(m.role || ""), 320, y);
-        if (m.salary) { pdf.setTextColor(226, 226, 230); pdf.text(formatMoney(Number(m.salary)), W - 100, y, { align: "right" }); }
+        if (m.salary) { pdf.setTextColor(226, 226, 230); pdf.text(fmt(Number(m.salary)), W - 100, y, { align: "right" }); }
         y += 18;
         if (y > H - 60) { pdf.addPage([W, H], "landscape"); pdf.setFillColor(10, 10, 14); pdf.rect(0, 0, W, H, "F"); y = 60; }
       }
@@ -807,7 +863,7 @@ export default function GalaxyView({
 
   // Score de structure /100 — purement organisationnel (diversification, dette,
   // concentration, taux d'épargne), aucune recommandation d'investissement.
-  const structureScore = (() => {
+  const structureScore = useMemo(() => {
     if (grossTotal <= 0) return null;
     const savingsPart = totalRevenue > 0 ? Math.min(25, Math.max(0, tauxEpargne / 40 * 25)) : 12.5;
     const skins = new Set(groups.filter(g => g.total > 0).map(g => planetSkin(g.portfolio.name, g.valued, g.portfolio.skin)));
@@ -817,16 +873,19 @@ export default function GalaxyView({
     const largestShare = grossTotal > 0 ? Math.max(0, ...groups.map(g => g.total)) / grossTotal : 0;
     const concentrationPart = largestShare <= 0.3 ? 25 : Math.max(0, 25 - (largestShare - 0.3) / 0.7 * 25);
     return Math.round(savingsPart + diversificationPart + debtPart + concentrationPart);
-  })();
+  }, [grossTotal, totalRevenue, tauxEpargne, groups, debt]);
 
   // Alertes de trajectoire : purement factuelles (écart en €), aucun conseil d'investissement.
-  const alerts: { id: string; text: string }[] = [];
-  if (totalRevenue > 0 && totalExpenseFlows > totalRevenue) {
-    alerts.push({ id: "exp", text: `Dépenses (${formatMoney(totalExpenseFlows)}) supérieures aux revenus (${formatMoney(totalRevenue)}) : ${formatMoney(totalExpenseFlows - totalRevenue)}/mois de déficit.` });
-  }
-  if (totalRevenue > 0 && totalInvest > totalRevenue) {
-    alerts.push({ id: "inv", text: `Investissements programmés (${formatMoney(totalInvest)}) supérieurs aux revenus (${formatMoney(totalRevenue)}) : ${formatMoney(totalInvest - totalRevenue)}/mois au-delà de ce qui rentre.` });
-  }
+  const alerts = useMemo(() => {
+    const list: { id: string; text: string }[] = [];
+    if (totalRevenue > 0 && totalExpenseFlows > totalRevenue) {
+      list.push({ id: "exp", text: `Dépenses (${fmt(totalExpenseFlows)}) supérieures aux revenus (${fmt(totalRevenue)}) : ${fmt(totalExpenseFlows - totalRevenue)}/mois de déficit.` });
+    }
+    if (totalRevenue > 0 && totalInvest > totalRevenue) {
+      list.push({ id: "inv", text: `Investissements programmés (${fmt(totalInvest)}) supérieurs aux revenus (${fmt(totalRevenue)}) : ${fmt(totalInvest - totalRevenue)}/mois au-delà de ce qui rentre.` });
+    }
+    return list;
+  }, [totalRevenue, totalExpenseFlows, totalInvest, fmt]);
 
   return (
     <div className="grid h-full" style={{ gridTemplateColumns: "160px 1fr 280px" }}>
@@ -835,8 +894,8 @@ export default function GalaxyView({
         {/* Stats header */}
         <div className="px-4 pt-4 pb-3 border-b border-border space-y-1">
           <div>
-            <p className="text-lg font-[family-name:var(--font-mono-num)] tabular font-semibold">{formatMoney(grandTotal)}</p>
-            <p className="text-[10px] text-text-muted mt-0.5">Patrimoine net{debt > 0 && <span className="tabular"> · {formatMoney(grossTotal)} brut</span>}</p>
+            <p className="text-lg font-[family-name:var(--font-mono-num)] tabular font-semibold">{fmt(grandTotal)}</p>
+            <p className="text-[10px] text-text-muted mt-0.5">Patrimoine net{debt > 0 && <span className="tabular"> · {fmt(grossTotal)} brut</span>}</p>
           </div>
           {totalRevenue > 0 && <>
             <div className="flex items-center justify-between text-[10px] pt-1.5">
@@ -896,7 +955,7 @@ export default function GalaxyView({
             className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs ${createMode === "salary" ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text hover:bg-surface-hover"}`}>
             <Wallet size={13} className="shrink-0" />
             Salaire principal
-            {salary > 0 && <span className="ml-auto text-[10px] tabular text-text-muted">{formatMoney(salary)}</span>}
+            {salary > 0 && <span className="ml-auto text-[10px] tabular text-text-muted">{fmt(salary)}</span>}
           </button>
           <button onClick={() => { setSelected(null); setCreateMode("income"); }}
             className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs ${createMode === "income" ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text hover:bg-surface-hover"}`}>
@@ -1168,7 +1227,7 @@ export default function GalaxyView({
                     </g>
 
                     <text y={-3} textAnchor="middle" fontSize={12} fontWeight={600} fill="#fff" style={ts}>{scrubYears > 0 ? `Patrimoine en ${scrubYear}` : "Patrimoine"}</text>
-                    <text y={13} textAnchor="middle" fontSize={10} fill={scrubYears > 0 ? "#9585ff" : "rgba(255,230,160,0.9)"} fontWeight={scrubYears > 0 ? 600 : 400}>{mask(formatMoney(scrubProjectedTotal))}{scrubYears > 0 ? " (projection)" : ""}</text>
+                    <text y={13} textAnchor="middle" fontSize={10} fill={scrubYears > 0 ? "#9585ff" : "rgba(255,230,160,0.9)"} fontWeight={scrubYears > 0 ? 600 : 400}>{mask(fmt(scrubProjectedTotal))}{scrubYears > 0 ? " (projection)" : ""}</text>
                   </>;
                 })()}
 
@@ -1250,7 +1309,7 @@ export default function GalaxyView({
                     {tierImage && <rect x={-R * 0.95} y={-15} width={R * 1.9} height={ownerRevenue > 0 ? 42 : 27} rx={ownerRevenue > 0 ? 21 : 13.5} fill="rgba(6,6,10,0.55)" />}
                     <g transform={isOverBudget ? `translate(${Math.sin(t * 20) * 0.8},0)` : undefined}>
                       <text y={-5} textAnchor="middle" fontSize={10} fontWeight={600} fill="#fff" style={ts}>{n.label}</text>
-                      <text y={9} textAnchor="middle" fontSize={9} fill={isOverBudget ? "#ffaa70" : tier === "warning" ? "#ffd280" : "rgba(255,255,255,0.85)"} style={ts}>{mask(ownerExpenseTotal > 0 ? formatMoney(ownerExpenseTotal) : "0 €")}/m</text>
+                      <text y={9} textAnchor="middle" fontSize={9} fill={isOverBudget ? "#ffaa70" : tier === "warning" ? "#ffd280" : "rgba(255,255,255,0.85)"} style={ts}>{mask(ownerExpenseTotal > 0 ? fmt(ownerExpenseTotal) : "0 €")}/m</text>
                       {ownerRevenue > 0 && <text y={22} textAnchor="middle" fontSize={8} fill={tier === "critical" ? "#ff2200" : tier === "eruption" ? "#ff6b35" : "#ffb84d"} fontWeight={600} style={ts}>{Math.round(ownerBudgetRatio * 100)}% des revenus</text>}
                       {tier === "critical" && <text y={34} textAnchor="middle" fontSize={9} fill="#ff2200" fontWeight={700} opacity={0.7 + Math.sin(t * 8) * 0.3} style={ts}>DÉFICIT CRITIQUE</text>}
                       {tier === "eruption" && <text y={34} textAnchor="middle" fontSize={9} fill="#ff6b35" fontWeight={700} opacity={0.6 + Math.sin(t * 6) * 0.4} style={ts}>DÉFICIT</text>}
@@ -1266,7 +1325,7 @@ export default function GalaxyView({
 
                 {n.kind === "expense-item" && <><circle r={n.r} fill="rgba(248,113,113,0.1)" stroke="rgba(248,113,113,0.2)" strokeWidth={0.5} /><text y={-1} textAnchor="middle" fontSize={8} fill="rgba(255,255,255,0.65)">{n.label.length > 10 ? n.label.slice(0, 9) + "…" : n.label}</text><text y={8} textAnchor="middle" fontSize={7} fill="rgba(248,113,113,0.75)">{n.sub && mask(n.sub)}</text></>}
 
-                {n.kind === "reste" && <><circle r={n.r} fill="url(#sph-reste)" /><circle r={n.r} fill="url(#sph-hl)" /><text y={-4} textAnchor="middle" fontSize={10} fontWeight={500} fill="#e0d8ff">Reste</text><text y={9} textAnchor="middle" fontSize={9} fill="rgba(200,185,255,0.8)">{mask(formatMoney(resteAInvestir))}/m</text></>}
+                {n.kind === "reste" && <><circle r={n.r} fill="url(#sph-reste)" /><circle r={n.r} fill="url(#sph-hl)" /><text y={-4} textAnchor="middle" fontSize={10} fontWeight={500} fill="#e0d8ff">Reste</text><text y={9} textAnchor="middle" fontSize={9} fill="rgba(200,185,255,0.8)">{mask(fmt(resteAInvestir))}/m</text></>}
 
                 {n.kind === "portfolio" && (() => {
                   const skin = n.skin ?? "generic";
@@ -1365,7 +1424,7 @@ export default function GalaxyView({
                     <text y={-6} textAnchor="middle" fontSize={11} fontWeight={600} fill="#fff" style={ts}>{n.label}</text>
                     <text y={9} textAnchor="middle" fontSize={9} fill={n.isProjected ? "#c8bfff" : "rgba(255,255,255,0.85)"} style={ts}>{n.sub && mask(n.sub)}</text>
                     {n.isProjected && <text y={20} textAnchor="middle" fontSize={7} fontWeight={600} fill="#9585ff" style={ts}>projection {scrubYear}</text>}
-                    {!n.isProjected && (n.gainVal ?? 0) !== 0 && <text y={22} textAnchor="middle" fontSize={8} fill={(n.gainVal ?? 0) >= 0 ? "#34d399" : "#fb7185"} style={ts}>{mask(`${(n.gainVal ?? 0) >= 0 ? "+" : ""}${formatMoney(n.gainVal ?? 0)}`)}</text>}
+                    {!n.isProjected && (n.gainVal ?? 0) !== 0 && <text y={22} textAnchor="middle" fontSize={8} fill={(n.gainVal ?? 0) >= 0 ? "#34d399" : "#fb7185"} style={ts}>{mask(`${(n.gainVal ?? 0) >= 0 ? "+" : ""}${fmt(n.gainVal ?? 0)}`)}</text>}
                     {(() => {
                       const linkedGoals = goalLinks.filter(gl => gl.portfolioId === n.portfolioKey)
                         .map(gl => goals.find(g => g.id === gl.goalId)).filter((g): g is Goal => !!g);
@@ -1450,7 +1509,7 @@ export default function GalaxyView({
                       <circle cy={-logoR * 0.2} r={logoR * 0.55} fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth={0.6} />
                     </>}
                     <text y={hasLogo ? n.r * 0.55 : -3} textAnchor="middle" fontSize={hasLogo ? 7.5 : 9} fontWeight={500} fill={isCracked ? "#c8c4d2" : "#d8d8dc"}>{n.label.length > 11 ? n.label.slice(0, 10) + "…" : n.label}</text>
-                    {n.gainVal !== undefined && <text y={hasLogo ? n.r * 0.55 + 10 : 8} textAnchor="middle" fontSize={hasLogo ? 7 : 8} fill={isCracked ? "#fb7185" : n.gainVal >= 0 ? "#34d399" : "#fb7185"} fontWeight={isCracked ? 700 : 400}>{mask(`${n.gainVal >= 0 ? "+" : ""}${formatMoney(n.gainVal)}`)}</text>}
+                    {n.gainVal !== undefined && <text y={hasLogo ? n.r * 0.55 + 10 : 8} textAnchor="middle" fontSize={hasLogo ? 7 : 8} fill={isCracked ? "#fb7185" : n.gainVal >= 0 ? "#34d399" : "#fb7185"} fontWeight={isCracked ? 700 : 400}>{mask(`${n.gainVal >= 0 ? "+" : ""}${fmt(n.gainVal)}`)}</text>}
                     {n.gainVal === undefined && <text y={hasLogo ? n.r * 0.55 + 10 : 8} textAnchor="middle" fontSize={hasLogo ? 7 : 8} fill="rgba(255,255,255,0.5)">{n.sub && mask(n.sub)}</text>}
                     {nearDividend && Array.from({ length: 5 }, (_, i) => {
                       const phase = (t * 0.45 + i * 0.37) % 1;
@@ -1605,7 +1664,7 @@ export default function GalaxyView({
           </div>
         </div>
         <div className="min-h-0">
-          <NodePanel selected={selected} loans={loans} portfolios={portfolios} members={members} goals={goals} flows={flows} goalLinks={goalLinks} portfolioOwnerships={portfolioOwnerships} actions={actions} onClear={() => setSelected(null)} createMode={createMode} setCreateMode={setCreateMode} salary={salary} onUpdateSalary={onUpdateSalary} onUpdateSelf={onUpdateSelf} groups={groups.map(g => ({ key: g.key, total: g.total, valued: g.valued }))} grossTotal={grossTotal} debt={debt} ownerName={ownerName} expenseMemberId={expenseMemberId} dividends={dividends}
+          <NodePanel selected={selected} loans={loans} portfolios={portfolios} members={members} goals={goals} flows={flows} goalLinks={goalLinks} portfolioOwnerships={portfolioOwnerships} actions={actions} onClear={() => setSelected(null)} createMode={createMode} setCreateMode={setCreateMode} salary={salary} onUpdateSalary={onUpdateSalary} onUpdateSelf={onUpdateSelf} groups={groups.map(g => ({ key: g.key, total: g.total, valued: g.valued }))} grossTotal={grossTotal} debt={debt} ownerName={ownerName} expenseMemberId={expenseMemberId} dividends={dividends} displayCurrency={displayCurrency} ctx={ctx}
             onPortfolioCreated={p => setSelected({ kind: "portfolio", id: p.id, name: p.name, color: p.color, skin: p.skin, total: 0, count: 0, memberId: p.memberId })} />
         </div>
       </div>

@@ -50,19 +50,6 @@ export async function getExchangeRates(): Promise<Rates> {
   return cachedRates;
 }
 
-/**
- * Convertit un montant d'une devise vers une autre.
- * Les taux sont exprimés en "1 EUR = X devises" (convention ECB).
- */
-export function convert(
-  amount: number,
-  fromCurrency: string,
-  toCurrency: string,
-  rates: Rates
-): number {
-  if (fromCurrency === toCurrency) return amount;
-  const fromRate = rates[fromCurrency] ?? 1;
-  const toRate = rates[toCurrency] ?? 1;
-  // amount en FROM → EUR → TO
-  return (amount / fromRate) * toRate;
-}
+// `convert()` vit désormais dans lib/networth.ts, aux côtés des valorisations
+// qui l'utilisent — une seule implémentation, testée au même endroit.
+export { convert } from "@/lib/networth";

@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
 
+/**
+ * Journalise l'erreur réelle côté serveur et renvoie un message au client.
+ *
+ * Drizzle enveloppe les erreurs SQL dans un message générique « Failed query: … »
+ * et range la vraie erreur Postgres dans `.cause` — on va la chercher, parce
+ * qu'elle est indispensable dans les logs. En revanche elle ne part au client
+ * qu'en développement : en production, `detail` et `hint` de Postgres décrivent
+ * la structure du schéma et le contenu des contraintes violées.
+ */
 export function handleApiError(err: unknown) {
-  console.error(err);
-
-  // Drizzle enveloppe les erreurs SQL dans un message générique "Failed query: ..."
-  // et range la vraie erreur Postgres dans `.cause`. On va la chercher.
   let real: unknown = err;
   const seen = new Set<unknown>();
   while (
@@ -25,15 +30,23 @@ export function handleApiError(err: unknown) {
     hint?: string;
   };
 
-  const message =
-    pgErr?.message && typeof pgErr.message === "string"
-      ? [pgErr.message, pgErr.detail, pgErr.hint].filter(Boolean).join(" — ")
-      : err instanceof Error
-        ? err.message
-        : "Erreur inconnue côté serveur.";
+  // Identifiant court partagé entre le log serveur et la réponse, pour pouvoir
+  // relier un message utilisateur à sa trace sans rien exposer.
+  const ref = Math.random().toString(36).slice(2, 8);
+  console.error(`[api:${ref}]`, err);
+
+  if (process.env.NODE_ENV !== "production") {
+    const detailed =
+      pgErr?.message && typeof pgErr.message === "string"
+        ? [pgErr.message, pgErr.detail, pgErr.hint].filter(Boolean).join(" — ")
+        : err instanceof Error
+          ? err.message
+          : "Erreur inconnue côté serveur.";
+    return NextResponse.json({ error: detailed, code: pgErr?.code, ref }, { status: 500 });
+  }
 
   return NextResponse.json(
-    { error: message, code: pgErr?.code },
+    { error: `Erreur côté serveur (réf. ${ref}).`, ref },
     { status: 500 }
   );
 }

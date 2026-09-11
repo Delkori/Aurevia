@@ -1,9 +1,9 @@
 "use client";
 
 import { Fragment, useEffect, useState, useCallback } from "react";
-import { Plus, Trash2, AlertTriangle, X } from "lucide-react";
+import { Plus, Trash2, AlertTriangle, X, CloudOff } from "lucide-react";
 import { formatMoney } from "@/lib/format";
-import { currentValue, gain, ASSET_TYPE_LABELS } from "@/lib/networth";
+import { currentValue, gain, isStale, ASSET_TYPE_LABELS, type ValuationContext } from "@/lib/networth";
 import { apiFetch, ApiError } from "@/lib/api";
 import { fetchAllQuotes } from "@/lib/allQuotes";
 import LoansTable from "@/components/LoansTable";
@@ -23,6 +23,7 @@ type Asset = {
 
 type Portfolio = { id: number; name: string; color: string };
 type Quote = { price: number; currency: string } | null;
+type Rates = Record<string, number>;
 
 // Types dont le prix vient de Yahoo Finance (actions/ETF/métaux précieux via tickers/futures)
 const YAHOO_TYPES = new Set(["stock", "etf", "precious_metal"]);
@@ -90,14 +91,25 @@ export default function AssetsPage() {
   const [error, setError] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<number | "draft" | null>(null);
   const [draft, setDraft] = useState<DraftRow>(emptyDraft);
+  const [rates, setRates] = useState<Rates>({ EUR: 1 });
+  const [displayCurrency, setDisplayCurrency] = useState("EUR");
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [assetsResult, portfoliosResult] = await Promise.allSettled([
-        apiFetch("/api/assets"),
-        apiFetch("/api/portfolios"),
-      ]);
+      const [assetsResult, portfoliosResult, ratesResult, settingsResult] =
+        await Promise.allSettled([
+          apiFetch("/api/assets"),
+          apiFetch("/api/portfolios"),
+          apiFetch("/api/exchange-rates"),
+          apiFetch("/api/settings"),
+        ]);
+
+      if (ratesResult.status === "fulfilled") setRates(ratesResult.value as Rates);
+      if (settingsResult.status === "fulfilled") {
+        const st = settingsResult.value as Record<string, string>;
+        setDisplayCurrency(st.display_currency || "EUR");
+      }
 
       if (assetsResult.status === "fulfilled") {
         setAssets(assetsResult.value as Asset[]);
@@ -214,8 +226,13 @@ export default function AssetsPage() {
     return list;
   })();
 
+  // Même contexte de valorisation que la galaxie : les montants du tableau et
+  // ceux des planètes ne peuvent pas diverger.
+  const ctx: ValuationContext = { rates, displayCurrency };
+  const fmt = (v: number) => formatMoney(v, displayCurrency);
+
   const groupTotal = (items: Asset[]) =>
-    items.reduce((s, a) => s + currentValue(a, a.ticker ? quotes[a.ticker] : null), 0);
+    items.reduce((s, a) => s + currentValue(a, a.ticker ? quotes[a.ticker] : null, ctx), 0);
 
   return (
     <div className="p-8 md:p-10 max-w-6xl mx-auto space-y-6">
@@ -263,15 +280,16 @@ export default function AssetsPage() {
                     <span className="inline-flex items-center gap-2">
                       {portfolio && <span className="w-2 h-2 rounded-full shrink-0" style={{ background: portfolio.color }} />}
                       {portfolio ? portfolio.name : "Sans planète"}
-                      <span className="text-text-muted font-normal normal-case ml-2 tabular">{formatMoney(groupTotal(items))}</span>
+                      <span className="text-text-muted font-normal normal-case ml-2 tabular">{fmt(groupTotal(items))}</span>
                     </span>
                   </td>
                 </tr>
                 {items.map((a) => {
               const needsTicker = TYPES_WITH_TICKER.has(a.type);
               const quote = a.ticker ? quotes[a.ticker] : null;
-              const value = currentValue(a, quote);
-              const g = gain(a, quote);
+              const value = currentValue(a, quote, ctx);
+              const g = gain(a, quote, ctx);
+              const stale = isStale(a, quote);
               const isSaving = savingId === a.id;
               return (
                 <tr key={a.id} className="border-b border-border/60 last:border-0 align-middle">
@@ -408,14 +426,23 @@ export default function AssetsPage() {
                     </select>
                   </td>
                   <td className="px-3 py-2 text-right tabular font-medium">
-                    {formatMoney(value, a.currency)}
+                    <span className="inline-flex items-center gap-1.5 justify-end">
+                      {stale && (
+                        <CloudOff
+                          size={12}
+                          className="text-text-muted shrink-0"
+                          aria-label="Cours indisponible"
+                        />
+                      )}
+                      <span className={stale ? "text-text-muted" : undefined}>{fmt(value)}</span>
+                    </span>
                   </td>
                   <td
                     className={`px-3 py-2 text-right tabular ${
                       g >= 0 ? "text-positive" : "text-negative"
                     }`}
                   >
-                    {(a.ticker || Number(a.avgBuyPrice) > 0) ? formatMoney(g, a.currency) : "—"}
+                    {(a.ticker || Number(a.avgBuyPrice) > 0) ? fmt(g) : "—"}
                   </td>
                   <td className="px-3 py-2 text-right">
                     <button
@@ -584,6 +611,8 @@ export default function AssetsPage() {
       <div className="pt-4 border-t border-border">
         <LoansTable
           realEstateAssets={assets.filter((a) => a.type === "real_estate").map((a) => ({ id: a.id, name: a.name }))}
+          ctx={ctx}
+          displayCurrency={displayCurrency}
         />
       </div>
     </div>

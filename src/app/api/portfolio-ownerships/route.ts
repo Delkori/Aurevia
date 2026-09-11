@@ -3,8 +3,11 @@ import { db } from "@/db";
 import { portfolioOwnerships } from "@/db/schema";
 import { and, eq, isNull } from "drizzle-orm";
 import { handleApiError } from "@/lib/apiError";
+import { requireSession } from "@/lib/auth";
 
 export async function GET() {
+  const unauthorized = await requireSession();
+  if (unauthorized) return unauthorized;
   try {
     const rows = await db.select().from(portfolioOwnerships);
     return NextResponse.json(rows);
@@ -15,6 +18,8 @@ export async function GET() {
 
 // Upsert : une part pour (portfolioId, memberId) — crée ou met à jour le %.
 export async function POST(req: NextRequest) {
+  const unauthorized = await requireSession();
+  if (unauthorized) return unauthorized;
   try {
     const body = await req.json();
     if (!body.portfolioId || body.sharePercent == null) {

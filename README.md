@@ -33,7 +33,12 @@ Ouvre `.env.local` et remplis :
 ```
 DATABASE_NEON_URL=postgresql://... (ta connection string Neon)
 APP_PASSWORD=choisis-un-mot-de-passe
+SESSION_SECRET=          # openssl rand -base64 32
 ```
+
+`SESSION_SECRET` signe le cookie de session. S'il est absent, `APP_PASSWORD`
+sert de clé — ça marche, mais changer le mot de passe déconnecte alors toutes
+les sessions ouvertes.
 
 ## 3. Créer les tables dans la base
 
@@ -59,11 +64,35 @@ Ouvre http://localhost:3000, entre le mot de passe défini dans
 1. Pousse le projet sur un repo GitHub (`git init`, `git add .`,
    `git commit -m "init"`, crée un repo sur GitHub, `git push`).
 2. Sur vercel.com, clique **Add New → Project**, choisis ton repo.
-3. Dans **Environment Variables**, ajoute `DATABASE_NEON_URL` et `APP_PASSWORD`
-   (les mêmes valeurs que dans `.env.local`).
+3. Dans **Environment Variables**, ajoute `DATABASE_NEON_URL`, `APP_PASSWORD` et
+   `SESSION_SECRET` (les mêmes valeurs que dans `.env.local`).
 4. Clique **Deploy**. C'est tout — Vercel détecte Next.js automatiquement.
 
 À chaque `git push`, Vercel redéploie automatiquement.
+
+### Instantané quotidien
+
+`vercel.json` déclare un cron qui appelle `/api/cron/snapshot` chaque nuit à 2 h
+UTC pour enregistrer le patrimoine du jour. C'est ce qui rend la courbe
+d'historique indépendante de l'ouverture de l'app. Vercel génère et injecte
+`CRON_SECRET` automatiquement ; la route refuse tout appel sans ce jeton.
+
+## Développement
+
+```bash
+npm run check      # lint + typecheck + tests
+npm test           # tests unitaires seuls (node --test)
+npm run typecheck  # tsc --noEmit
+```
+
+Les tests couvrent les fonctions qui produisent les chiffres : valorisation et
+conversion de devises, quotes-parts, projection, échéances, signature de
+session. Le build ne nécessite aucune base de données — la CI GitHub Actions
+(`.github/workflows/ci.yml`) le vérifie à chaque push.
+
+`npm run lint` remonte des avertissements connus sur `GalaxyView` (lecture de
+refs pendant le rendu) : c'est de la dette identifiée, documentée dans
+`eslint.config.mjs`, pas un oubli.
 
 ## Ajouter un actif : comment trouver le bon ticker
 
@@ -94,8 +123,7 @@ src/
 
 - Ajouter un vrai système multi-utilisateurs (NextAuth) si tu veux le
   partager avec quelqu'un d'autre
-- Automatiser une capture quotidienne du patrimoine (cron Vercel qui appelle
-  `POST /api/snapshot`) pour une courbe d'évolution plus fine
 - Ajouter l'import CSV de relevés bancaires pour le budget
-- Ajouter la conversion multi-devises en temps réel (actuellement chaque
-  actif garde sa devise d'origine)
+- Découper `GalaxyView` (1 600 lignes) et activer `reactCompiler: true`
+- Mettre le cache des cours en base, pour qu'il survive aux démarrages à froid
+  et serve de dernier prix connu quand Yahoo est indisponible

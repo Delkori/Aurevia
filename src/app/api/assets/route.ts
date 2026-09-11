@@ -3,8 +3,11 @@ import { db } from "@/db";
 import { assets } from "@/db/schema";
 import { desc } from "drizzle-orm";
 import { handleApiError } from "@/lib/apiError";
+import { requireSession } from "@/lib/auth";
 
 export async function GET() {
+  const unauthorized = await requireSession();
+  if (unauthorized) return unauthorized;
   try {
     const rows = await db.select().from(assets).orderBy(desc(assets.createdAt));
     return NextResponse.json(rows);
@@ -14,6 +17,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const unauthorized = await requireSession();
+  if (unauthorized) return unauthorized;
   try {
     const body = await req.json();
 

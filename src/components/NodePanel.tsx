@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Trash2, Pencil } from "lucide-react";
 import { formatMoney } from "@/lib/format";
-import { ASSET_TYPE_LABELS } from "@/lib/networth";
+import { ASSET_TYPE_LABELS, convert, type ValuationContext } from "@/lib/networth";
 import { ASTRONAUT_ACCESSORIES } from "@/lib/astronautAccessories";
 import { monthsToReach } from "@/lib/projection";
 
@@ -99,12 +99,12 @@ function AccessoryPick({ value, onChange }: { value: string | null; onChange: (a
 // ── Portfolio Form ───────────────────────────────────────────────────────────
 const SKIN_OPTIONS: { value: string; label: string; preview?: string }[] = [
   { value: "", label: "Automatique (déduit du nom / des actifs)" },
-  { value: "tech", label: "Tech", preview: "/planet-skins/tech-3.png" },
-  { value: "ocean", label: "Banque", preview: "/planet-skins/ocean.png" },
-  { value: "terrain", label: "Immobilier", preview: "/planet-skins/terrain-3.png" },
-  { value: "crypto", label: "Crypto", preview: "/planet-skins/crypto.png" },
-  { value: "chalet", label: "Vacances (chalet)", preview: "/planet-skins/chalet.png" },
-  { value: "vacances", label: "Vacances (plage)", preview: "/planet-skins/vacances.png" },
+  { value: "tech", label: "Tech", preview: "/planet-skins/tech-3.webp" },
+  { value: "ocean", label: "Banque", preview: "/planet-skins/ocean.webp" },
+  { value: "terrain", label: "Immobilier", preview: "/planet-skins/terrain-3.webp" },
+  { value: "crypto", label: "Crypto", preview: "/planet-skins/crypto.webp" },
+  { value: "chalet", label: "Vacances (chalet)", preview: "/planet-skins/chalet.webp" },
+  { value: "vacances", label: "Vacances (plage)", preview: "/planet-skins/vacances.webp" },
   { value: "generic", label: "Autre (couleur unie)" },
 ];
 
@@ -247,26 +247,31 @@ function TickerAutocomplete({ value, onChange, onPick, placeholder }:
   const [results, setResults] = useState<TickerResult[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const query = value.trim();
+  const tooShort = query.length < 2;
   useEffect(() => {
-    if (value.trim().length < 2) { setResults([]); return; }
+    // Pas de setResults([]) synchrone ici : quand la saisie est trop courte, le
+    // rendu ignore simplement `results` (voir `tooShort` plus bas). Écrire dans
+    // l'état pendant l'effet provoquait un rendu en cascade à chaque frappe.
+    if (tooShort) return;
     let cancelled = false;
     setLoading(true);
     const t = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/ticker-search?q=${encodeURIComponent(value)}`);
+        const res = await fetch(`/api/ticker-search?q=${encodeURIComponent(query)}`);
         const data = await res.json();
         if (!cancelled) setResults(Array.isArray(data) ? data : []);
       } catch { if (!cancelled) setResults([]); }
       finally { if (!cancelled) setLoading(false); }
     }, 300);
     return () => { cancelled = true; clearTimeout(t); };
-  }, [value]);
+  }, [query, tooShort]);
   return (
     <div className="relative">
       <Inp value={value} onChange={e => { onChange(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}
         placeholder={placeholder} />
-      {open && value.trim().length >= 2 && (results.length > 0 || loading) && (
+      {open && !tooShort && (results.length > 0 || loading) && (
         <div className="absolute z-20 left-0 right-0 mt-1 bg-surface border border-border rounded-md shadow-lg max-h-52 overflow-y-auto">
           {loading && results.length === 0 && <p className="text-[10px] text-text-muted px-2 py-1.5">Recherche…</p>}
           {results.map(r => (
@@ -501,8 +506,13 @@ function SelfForm({ name: initialName, color: initialColor, accessory: initialAc
 }
 
 // ── Main Panel ───────────────────────────────────────────────────────────────
-export default function NodePanel({ selected, loans, portfolios, members, goals, flows, goalLinks, portfolioOwnerships, actions, onClear, createMode, setCreateMode, salary, onUpdateSalary, onUpdateSelf, groups, grossTotal, debt, onPortfolioCreated, ownerName, expenseMemberId, dividends }:
-  { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; onUpdateSelf: (name: string, color: string, accessory: string | null) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number; onPortfolioCreated?: (p: Portfolio) => void; ownerName: string; expenseMemberId?: number | null; dividends: Record<string, DividendInfo | null> }) {
+export default function NodePanel({ selected, loans, portfolios, members, goals, flows, goalLinks, portfolioOwnerships, actions, onClear, createMode, setCreateMode, salary, onUpdateSalary, onUpdateSelf, groups, grossTotal, debt, onPortfolioCreated, ownerName, expenseMemberId, dividends, displayCurrency, ctx }:
+  { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; onUpdateSelf: (name: string, color: string, accessory: string | null) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number; onPortfolioCreated?: (p: Portfolio) => void; ownerName: string; expenseMemberId?: number | null; dividends: Record<string, DividendInfo | null>; displayCurrency: string; ctx: ValuationContext }) {
+  const fmt = (v: number) => formatMoney(v, displayCurrency);
+  // Un dividende est versé dans la devise du titre : on le ramène à la devise
+  // d'affichage pour ne pas mélanger les unités dans un même panneau.
+  const fmtFrom = (v: number, from: string) =>
+    fmt(ctx ? convert(v, from, ctx.displayCurrency, ctx.rates) : v);
 
   useEffect(() => { setCreateMode(null); }, [selected]); // eslint-disable-line
 
@@ -524,10 +534,10 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
       {!createMode && !selected && (
         <div className="space-y-3">
           <h3 className="font-medium font-[family-name:var(--font-heading)] text-sm">Vue d&apos;ensemble</h3>
-          <p className="text-2xl font-[family-name:var(--font-mono-num)] tabular">{formatMoney(grossTotal - debt)}</p>
+          <p className="text-2xl font-[family-name:var(--font-mono-num)] tabular">{fmt(grossTotal - debt)}</p>
           {debt > 0 && <div className="text-xs text-text-muted space-y-0.5">
-            <p className="tabular">{formatMoney(grossTotal)} d&apos;actifs</p>
-            <p className="tabular text-negative">− {formatMoney(debt)} de crédits</p>
+            <p className="tabular">{fmt(grossTotal)} d&apos;actifs</p>
+            <p className="tabular text-negative">− {fmt(debt)} de crédits</p>
           </div>}
           {(() => {
             // Revenus passifs projetés (12 prochains mois) : somme, pour chaque action/ETF
@@ -550,7 +560,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
             return (
               <div className="pt-2 border-t border-border">
                 <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Revenus passifs estimés (12 mois)</p>
-                <p className="text-lg font-[family-name:var(--font-mono-num)] tabular text-positive">{formatMoney(totalProjected)}</p>
+                <p className="text-lg font-[family-name:var(--font-mono-num)] tabular text-positive">{fmt(totalProjected)}</p>
                 <p className="text-[10px] text-text-muted mt-0.5">
                   Sur {upcomingByTicker.size} ligne{upcomingByTicker.size > 1 ? "s" : ""} — estimation à partir de l&apos;historique de versement, pas une annonce officielle.
                 </p>
@@ -562,7 +572,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
             {loans.map(l => <div key={l.id} className="flex justify-between items-center gap-2 text-xs py-0.5 group">
               <span className="text-text-muted truncate">{l.name}{l.assetId == null && <span className="opacity-60"> (non rattaché)</span>}</span>
               <span className="flex items-center gap-1.5 shrink-0">
-                <span className="tabular text-negative">{formatMoney(Number(l.remainingBalance))}</span>
+                <span className="tabular text-negative">{fmt(Number(l.remainingBalance))}</span>
                 <button onClick={async () => { if (confirm(`Supprimer le crédit "${l.name}" ?`)) await actions.deleteLoan(l.id); }} className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-negative transition-opacity">
                   <Trash2 size={11} />
                 </button>
@@ -575,7 +585,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
               const g = groups.find(gr => gr.key === p.id);
               return <div key={p.id} className="flex items-center justify-between text-xs py-1">
                 <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />{p.name}</span>
-                <span className="tabular">{formatMoney(g?.total ?? 0)}</span>
+                <span className="tabular">{fmt(g?.total ?? 0)}</span>
               </div>;
             })}
           </div>}
@@ -603,7 +613,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
                 : f.targetType === "income" ? "Revenus" : "?";
               return <div key={f.id} className="flex justify-between text-xs py-0.5">
                 <span className="text-text-muted">{sName} → {tName}</span>
-                <span className="tabular text-accent">{formatMoney(Number(f.amount))}</span>
+                <span className="tabular text-accent">{fmt(Number(f.amount))}</span>
               </div>;
             })}
           </div>}
@@ -613,9 +623,9 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
       {!createMode && selected?.kind === "total" && (
         <div className="space-y-2">
           <h3 className="font-medium font-[family-name:var(--font-heading)] text-sm">Patrimoine net</h3>
-          <p className="text-2xl font-[family-name:var(--font-mono-num)] tabular">{formatMoney(selected.total)}</p>
-          {debt > 0 && <div className="text-xs text-text-muted space-y-0.5"><p className="tabular">{formatMoney(selected.grossTotal)} d&apos;actifs</p><p className="tabular text-negative">− {formatMoney(debt)} de crédits</p></div>}
-          {loans.length > 0 && <div className="pt-2 border-t border-border">{loans.map(l => <div key={l.id} className="flex justify-between text-xs py-1"><span className="text-text-muted">{l.name}</span><span className="tabular text-negative">{formatMoney(Number(l.remainingBalance))}</span></div>)}</div>}
+          <p className="text-2xl font-[family-name:var(--font-mono-num)] tabular">{fmt(selected.total)}</p>
+          {debt > 0 && <div className="text-xs text-text-muted space-y-0.5"><p className="tabular">{fmt(selected.grossTotal)} d&apos;actifs</p><p className="tabular text-negative">− {fmt(debt)} de crédits</p></div>}
+          {loans.length > 0 && <div className="pt-2 border-t border-border">{loans.map(l => <div key={l.id} className="flex justify-between text-xs py-1"><span className="text-text-muted">{l.name}</span><span className="tabular text-negative">{fmt(Number(l.remainingBalance))}</span></div>)}</div>}
           {flows.length > 0 && <div className="pt-2 border-t border-border">
             <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Flux mensuels</p>
             {flows.filter(f => f.sourceType === "salary").map(f => {
@@ -624,7 +634,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
                 : f.targetType === "expense" ? (f.name || "Dépense") : "?";
               return <div key={f.id} className="flex justify-between text-xs py-0.5">
                 <span className="text-text-muted">→ {tName}</span>
-                <span className="tabular">{formatMoney(Number(f.amount))}</span>
+                <span className="tabular">{fmt(Number(f.amount))}</span>
               </div>;
             })}
             {flows.filter(f => f.sourceType === "portfolio").map(f => {
@@ -632,7 +642,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
               const tName = f.targetType === "goal" ? goals.find(g => g.id === f.targetId)?.name : "?";
               return <div key={f.id} className="flex justify-between text-xs py-0.5">
                 <span className="text-text-muted">{sName} → {tName}</span>
-                <span className="tabular">{formatMoney(Number(f.amount))}</span>
+                <span className="tabular">{fmt(Number(f.amount))}</span>
               </div>;
             })}
           </div>}
@@ -646,7 +656,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
             <span className="w-3 h-3 rounded-full shrink-0" style={{ background: selected.color }} />
             <h3 className="font-medium font-[family-name:var(--font-heading)] text-sm">{selected.name}</h3>
           </div>
-          <p className="text-2xl font-[family-name:var(--font-mono-num)] tabular">{formatMoney(selected.total)}</p>
+          <p className="text-2xl font-[family-name:var(--font-mono-num)] tabular">{fmt(selected.total)}</p>
           <p className="text-xs text-text-muted">{selected.count} actif{selected.count > 1 ? "s" : ""} · {grossTotal > 0 ? Math.round(selected.total / grossTotal * 100) : 0}% du patrimoine</p>
 
           {/* Quick actions */}
@@ -669,7 +679,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
               const assetIds = new Set((groups.find(g => g.key === selected.id)?.valued ?? []).map(v => v.asset.id));
               const linkedLoans = loans.filter(l => l.assetId != null && assetIds.has(l.assetId));
               if (linkedLoans.length > 0) {
-                const names = linkedLoans.map(l => `${l.name} (${formatMoney(Number(l.remainingBalance))})`).join(", ");
+                const names = linkedLoans.map(l => `${l.name} (${fmt(Number(l.remainingBalance))})`).join(", ");
                 if (confirm(`Cette planète a un crédit lié : ${names}. Le supprimer aussi ? (Annuler = le garder, non rattaché à une planète)`)) {
                   for (const l of linkedLoans) await actions.deleteLoan(l.id);
                 }
@@ -692,8 +702,8 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
                     <p className="text-[10px] text-text-muted">{ASSET_TYPE_LABELS[v.asset.type]}{v.asset.ticker ? ` · ${v.asset.ticker}` : ""}</p>
                   </div>
                   <div className="text-right">
-                    <p className="tabular">{formatMoney(v.value)}</p>
-                    {gv !== null && gv !== 0 && <p className={`text-[10px] tabular ${gv >= 0 ? "text-positive" : "text-negative"}`}>{gv >= 0 ? "+" : ""}{formatMoney(gv)}</p>}
+                    <p className="tabular">{fmt(v.value)}</p>
+                    {gv !== null && gv !== 0 && <p className={`text-[10px] tabular ${gv >= 0 ? "text-positive" : "text-negative"}`}>{gv >= 0 ? "+" : ""}{fmt(gv)}</p>}
                   </div>
                 </div>;
               })}
@@ -716,7 +726,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
               {incoming.map(f => (
                 <div key={f.id} className="flex items-center justify-between text-xs py-1">
                   <span className="text-text-muted">{f.sourceType === "salary" ? "Salaire" : f.name || "Flux"} →</span>
-                  <span className="tabular text-positive">+{formatMoney(Number(f.amount))}/m</span>
+                  <span className="tabular text-positive">+{fmt(Number(f.amount))}/m</span>
                   <button onClick={async () => { if (confirm("Supprimer ?")) { await actions.deleteFlow(f.id); clear(); } }} className="p-0.5 text-text-muted hover:text-negative"><Trash2 size={10} /></button>
                 </div>
               ))}
@@ -724,7 +734,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
                 const targetName = f.targetType === "goal" ? goals.find(g => g.id === f.targetId)?.name : f.name || "Flux";
                 return <div key={f.id} className="flex items-center justify-between text-xs py-1">
                   <span className="text-text-muted">→ {targetName}</span>
-                  <span className="tabular text-negative">-{formatMoney(Number(f.amount))}/m</span>
+                  <span className="tabular text-negative">-{fmt(Number(f.amount))}/m</span>
                   <button onClick={async () => { if (confirm("Supprimer ?")) { await actions.deleteFlow(f.id); clear(); } }} className="p-0.5 text-text-muted hover:text-negative"><Trash2 size={10} /></button>
                 </div>;
               })}
@@ -750,8 +760,8 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
             return (
               <div className="pt-3 mt-3 border-t border-border space-y-1">
                 <p className="text-[10px] text-text-muted uppercase tracking-wide">Dividendes</p>
-                {receivedTotal > 0 && <p className="text-xs">Reçus (12 mois) : <span className="tabular font-medium">{formatMoney(receivedTotal, info.currency)}</span></p>}
-                {next && <p className="text-xs text-text-muted">Prochain versement estimé le <span className="tabular">{next.date}</span> ({formatMoney(next.amount * qty, info.currency)})</p>}
+                {receivedTotal > 0 && <p className="text-xs">Reçus (12 mois) : <span className="tabular font-medium">{fmtFrom(receivedTotal, info.currency)}</span></p>}
+                {next && <p className="text-xs text-text-muted">Prochain versement estimé le <span className="tabular">{next.date}</span> ({fmtFrom(next.amount * qty, info.currency)})</p>}
               </div>
             );
           })()}
@@ -783,7 +793,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
                 }} />
                 <span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />
                 <span className="flex-1">{p.name}</span>
-                <span className="tabular text-text-muted">{formatMoney(g?.total ?? 0)}</span>
+                <span className="tabular text-text-muted">{fmt(g?.total ?? 0)}</span>
               </label>;
             })}
           </div>}
@@ -807,14 +817,14 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
                   return <div key={f.id} className="flex items-center justify-between text-xs py-1">
                     <span>{srcName}</span>
                     <div className="flex items-center gap-2">
-                      <span className="tabular text-accent">{formatMoney(Number(f.amount))}/m</span>
+                      <span className="tabular text-accent">{fmt(Number(f.amount))}/m</span>
                       <span className="text-[10px] text-text-muted">{pct}%</span>
                       <button onClick={async () => { if (confirm("Supprimer ?")) { await actions.deleteFlow(f.id); clear(); } }} className="p-0.5 text-text-muted hover:text-negative"><Trash2 size={10} /></button>
                     </div>
                   </div>;
                 })}
                 <div className="bg-bg rounded-lg px-3 py-2 text-xs">
-                  <div className="flex justify-between pb-2 mb-2 border-b border-border"><span className="text-text-muted">Versement total</span><span className="tabular text-accent">{formatMoney(totalMonthly)}/mois</span></div>
+                  <div className="flex justify-between pb-2 mb-2 border-b border-border"><span className="text-text-muted">Versement total</span><span className="tabular text-accent">{fmt(totalMonthly)}/mois</span></div>
                   {selected.progress < 1 && <GoalTimeEstimate current={current} target={target} totalMonthly={totalMonthly} />}
                   {selected.progress >= 1 && <p className="text-positive font-medium">Objectif atteint</p>}
                 </div>
@@ -842,7 +852,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
               <span className="w-3 h-3 rounded-full" style={{ background: selected.member.color }} />
               <h3 className="font-medium font-[family-name:var(--font-heading)] text-sm">{selected.member.name}</h3>
             </div>
-            <p className="text-2xl font-[family-name:var(--font-mono-num)] tabular">{formatMoney(selected.total)}</p>
+            <p className="text-2xl font-[family-name:var(--font-mono-num)] tabular">{fmt(selected.total)}</p>
             <p className="text-xs text-text-muted">Portefeuilles et objectifs rattachés à ce membre.</p>
             <Btn variant="accent" className="w-full" onClick={() => setCreateMode("edit-member")}>Modifier</Btn>
           </>}
@@ -868,7 +878,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
           </div>
           {flow ? (
             <>
-              <p className={`text-2xl font-[family-name:var(--font-mono-num)] tabular ${selected.isExpense ? "text-negative" : "text-positive"}`}>{formatMoney(Number(flow.amount))}</p>
+              <p className={`text-2xl font-[family-name:var(--font-mono-num)] tabular ${selected.isExpense ? "text-negative" : "text-positive"}`}>{fmt(Number(flow.amount))}</p>
               <p className="text-xs text-text-muted">{flow.frequency === "daily" ? "Journalier" : flow.frequency === "weekly" ? "Hebdo" : flow.frequency === "yearly" ? "Annuel" : "Mensuel"}</p>
             </>
           ) : <p className="text-xs text-text-muted">Flux introuvable.</p>}

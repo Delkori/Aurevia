@@ -2,8 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { goalLinks } from "@/db/schema";
 import { handleApiError } from "@/lib/apiError";
+import { requireSession } from "@/lib/auth";
 
 export async function GET() {
+  const unauthorized = await requireSession();
+  if (unauthorized) return unauthorized;
   try {
     const rows = await db.select().from(goalLinks);
     return NextResponse.json(rows);
@@ -13,6 +16,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const unauthorized = await requireSession();
+  if (unauthorized) return unauthorized;
   try {
     const body = await req.json();
     if (!body.goalId || !body.portfolioId) {

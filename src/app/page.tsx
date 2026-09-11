@@ -16,6 +16,7 @@ type Flow = { id: number; name: string | null; sourceType: string; sourceId: num
 type GoalLink = { id: number; goalId: number; portfolioId: number };
 type PortfolioOwnership = { id: number; portfolioId: number; memberId: number | null; sharePercent: string };
 type Quote = { price: number; currency: string } | null;
+type Rates = Record<string, number>;
 
 export default function HomePage() {
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -29,16 +30,20 @@ export default function HomePage() {
   const [quotes, setQuotes] = useState<Record<string, Quote>>({});
   const [dividends, setDividends] = useState<Record<string, DividendInfo | null>>({});
   const [settings, setSettings] = useState<Record<string, string>>({});
+  // Taux BCE. Tant qu'ils ne sont pas chargés, `convert()` laisse les montants
+  // tels quels — donc jamais de valeur à zéro pendant le chargement.
+  const [rates, setRates] = useState<Rates>({ EUR: 1 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [a, p, g, l, m, f, s, gl, po] = await Promise.allSettled([
+      const [a, p, g, l, m, f, s, gl, po, fx] = await Promise.allSettled([
         apiFetch("/api/assets"), apiFetch("/api/portfolios"), apiFetch("/api/goals"),
         apiFetch("/api/loans"), apiFetch("/api/members"), apiFetch("/api/flows"),
         apiFetch("/api/settings"), apiFetch("/api/goal-links"), apiFetch("/api/portfolio-ownerships"),
+        apiFetch("/api/exchange-rates"),
       ]);
       const ad = a.status === "fulfilled" ? (a.value as Asset[]) : [];
       setAssets(ad);
@@ -50,6 +55,7 @@ export default function HomePage() {
       setSettings(s.status === "fulfilled" ? (s.value as Record<string, string>) : {});
       setGoalLinks(gl.status === "fulfilled" ? (gl.value as GoalLink[]) : []);
       setPortfolioOwnerships(po.status === "fulfilled" ? (po.value as PortfolioOwnership[]) : []);
+      if (fx.status === "fulfilled") setRates(fx.value as Rates);
       if (a.status === "rejected") throw a.reason;
       try { setQuotes(await fetchAllQuotes(ad) as Record<string, Quote>); } catch {}
       // Non bloquant et indépendant des cours : un échec ici ne doit jamais empêcher
@@ -132,6 +138,8 @@ export default function HomePage() {
           ownerName={settings.owner_name || "Moi"}
           centerColor={settings.center_color || "#ffcc55"}
           ownerAccessory={settings.owner_accessory || null}
+          rates={rates}
+          displayCurrency={settings.display_currency || "EUR"}
           onUpdateSalary={updateSalary}
           onUpdateSelf={updateSelf}
           onRefresh={load}
