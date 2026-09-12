@@ -14,6 +14,7 @@ import { getLogoUrl } from "@/lib/logos";
 import { NATURE_COLORS, NATURE_LABELS, NATURE_ORDER, natureOfPortfolio, type Nature } from "@/lib/natures";
 import { flowLayout, LAYOUT_MODES, type LayoutMode } from "@/lib/galaxyLayout";
 import { ClipboardCheck, Loader2 } from "lucide-react";
+import DateDuJour from "@/components/DateDuJour";
 import { daysUntilNextOccurrence } from "@/lib/dates";
 import NodePanel, { PlanetModal, type Selection, type Actions } from "@/components/NodePanel";
 
@@ -1206,6 +1207,7 @@ export default function GalaxyView({
         </button>
         {/* Stats header */}
         <div className="px-4 pt-4 pb-3 border-b border-border space-y-1">
+          <DateDuJour className="mb-1.5" />
           <div>
             <p className="text-lg font-[family-name:var(--font-mono-num)] tabular font-semibold">{fmt(grandTotal)}</p>
             <p className="text-[10px] text-text-muted mt-0.5">Patrimoine net{debt > 0 && <span className="tabular"> · {fmt(grossTotal)} brut</span>}</p>
