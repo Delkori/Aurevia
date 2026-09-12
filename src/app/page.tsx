@@ -339,17 +339,6 @@ export default function HomePage() {
             </div>
           </div>
         )}
-        {demoLoaded && !readOnly && (
-          <button
-            onClick={removeDemo}
-            disabled={seeding}
-            className="absolute bottom-4 right-4 z-20 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface/90 border border-border text-[11px] text-text-muted hover:text-text backdrop-blur disabled:opacity-50"
-            title="Supprime uniquement les lignes créées par l'exemple"
-          >
-            {seeding ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}
-            Retirer le patrimoine d&apos;exemple
-          </button>
-        )}
         {!isEmpty && <SinceLastVisit data={visitData} disabled={readOnly} />}
         <GalaxyView
           assets={assets} portfolios={portfolios} goals={goals} loans={loans}
@@ -364,6 +353,9 @@ export default function HomePage() {
           readOnly={readOnly}
           overdueCount={overdue}
           onOpenReview={() => setReviewOpen(true)}
+          demoLoaded={demoLoaded}
+          demoBusy={seeding}
+          onRemoveDemo={removeDemo}
           layoutMode={(settings.layout_mode as LayoutMode) || "horizontal"}
           onLayoutMode={(m) => {
             // Optimiste : la galaxie se réorganise tout de suite, l'écriture suit.

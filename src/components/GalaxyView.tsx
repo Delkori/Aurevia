@@ -13,7 +13,7 @@ import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodeP
 import { getLogoUrl } from "@/lib/logos";
 import { NATURE_COLORS, NATURE_LABELS, NATURE_ORDER, natureOfPortfolio, type Nature } from "@/lib/natures";
 import { flowLayout, LAYOUT_MODES, type LayoutMode } from "@/lib/galaxyLayout";
-import { ClipboardCheck } from "lucide-react";
+import { ClipboardCheck, Loader2 } from "lucide-react";
 import { daysUntilNextOccurrence } from "@/lib/dates";
 import NodePanel, { PlanetModal, type Selection, type Actions } from "@/components/NodePanel";
 
@@ -293,7 +293,7 @@ function TravelingMarkers({
 }
 
 export default function GalaxyView({
-  assets, portfolios, goals, loans, members, flows, goalLinks, portfolioOwnerships, quotes, dividends, actions, salary, onUpdateSalary, onUpdateSelf, onRefresh, showCountdown, ownerName, centerColor, ownerAccessory, rates, displayCurrency, readOnly = false, layoutMode, onLayoutMode, overdueCount = 0, onOpenReview,
+  assets, portfolios, goals, loans, members, flows, goalLinks, portfolioOwnerships, quotes, dividends, actions, salary, onUpdateSalary, onUpdateSelf, onRefresh, showCountdown, ownerName, centerColor, ownerAccessory, rates, displayCurrency, readOnly = false, layoutMode, onLayoutMode, overdueCount = 0, onOpenReview, demoLoaded = false, onRemoveDemo, demoBusy = false,
 }: {
   assets: Asset[]; portfolios: Portfolio[]; goals: Goal[]; loans: Loan[];
   members: Member[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; quotes: Record<string, Quote>; dividends: Record<string, DividendInfo | null>;
@@ -302,6 +302,8 @@ export default function GalaxyView({
   rates: Rates; displayCurrency: string; readOnly?: boolean;
   layoutMode: LayoutMode; onLayoutMode: (m: LayoutMode) => void;
   overdueCount?: number; onOpenReview: () => void;
+  /** Le foyer d'exemple est chargé : on propose de le retirer. */
+  demoLoaded?: boolean; onRemoveDemo?: () => void; demoBusy?: boolean;
 }) {
   const [expanded, setExpanded] = useState<Set<number | "unassigned">>(new Set());
   const [selected, setSelected] = useState<Selection>(null);
@@ -333,6 +335,8 @@ export default function GalaxyView({
   const dragIdRef = useRef<string | null>(null);
   dragIdRef.current = dragId;
   const linksRef = useRef<GLink[]>([]);
+  /** Cibles de mise en page, lues à chaque tick — voir `snapColumns`. */
+  const targetsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const [snapTarget, setSnapTarget] = useState<string | null>(null);
   const dragStartPos = useRef<{ x: number; y: number } | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -549,22 +553,26 @@ export default function GalaxyView({
     const nodes: GNode[] = targetNodes.map(n => {
       const prev = map.get(n.id);
       if (prev) return { ...prev, ...n, x: prev.x, y: prev.y, vx: prev.vx, vy: prev.vy };
-      const saved = getNodePosition(n.id);
+      const saved = getNodePosition(layoutMode, n.id);
       if (saved) return { ...n, x: saved.x, y: saved.y, fx: saved.x, fy: saved.y };
       return { ...n, x: CX + (Math.random() - 0.5) * 80, y: CY + (Math.random() - 0.5) * 80 };
     });
     nodesMapRef.current = new Map(nodes.map(n => [n.id, n]));
     const nm = nodesMapRef.current;
+
+    // Changement de disposition : tout ce qui n'est pas épinglé *dans cette
+    // lecture-ci* doit être relâché. Les nœuds sont réutilisés d'un rendu à
+    // l'autre pour garder leur élan, ce qui leur faisait traîner le `fx`/`fy`
+    // d'un glissement fait en orbite — la planète restait clouée là où on
+    // l'avait posée, en travers des colonnes.
+    nm.forEach(node => {
+      if (!getNodePosition(layoutMode, node.id)) { node.fx = null; node.fy = null; }
+    });
+
     if (layoutMode === "radial") {
-      const c = nm.get("center"); if (c && !getNodePosition("center")) { c.fx = CX; c.fy = CY; }
-      const s = nm.get("salary"); if (s && !getNodePosition("salary")) { s.fx = CX; s.fy = 80; }
-      const e = nm.get("expenses"); if (e && !getNodePosition("expenses")) { e.fx = CX + 350; e.fy = 180; }
-    } else {
-      // En lecture « flux », ces trois-là se rangent comme les autres.
-      for (const id of ["center", "salary", "expenses"]) {
-        const node = nm.get(id);
-        if (node && !getNodePosition(id)) { node.fx = null; node.fy = null; }
-      }
+      const c = nm.get("center"); if (c && !getNodePosition("radial", "center")) { c.fx = CX; c.fy = CY; }
+      const s = nm.get("salary"); if (s && !getNodePosition("radial", "salary")) { s.fx = CX; s.fy = 80; }
+      const e = nm.get("expenses"); if (e && !getNodePosition("radial", "expenses")) { e.fx = CX + 350; e.fy = 180; }
     }
 
     // Radial layout: instead of leaving members/portfolios/goals to pure spring physics
@@ -621,13 +629,63 @@ export default function GalaxyView({
     } else {
       // Lecture « flux » : les rangées remplacent les anneaux. Le poids sert à
       // ranger les plus grosses planètes au milieu de leur colonne.
+      //
+      // Une planète qui porte des satellites occupe bien plus que son rayon :
+      // ils orbitent à `parent.r + enfant.r + 12`. En ne réservant que le rayon,
+      // la colonne des dépenses se tassait en bas — « Loyer », « Courses » et
+      // « Énergie » se chevauchaient avec la planète voisine. On réserve donc
+      // l'encombrement réel, halo compris.
+      const halo = new Map<string, number>();
+      for (const l of links) {
+        const enfant = nm.get(l.target);
+        if (!enfant || (enfant.kind !== "asset" && enfant.kind !== "expense-item" && enfant.kind !== "income-item")) continue;
+        const parent = nm.get(l.source);
+        if (!parent) continue;
+        halo.set(l.source, Math.max(halo.get(l.source) ?? 0, parent.r + enfant.r * 2 + 12));
+      }
       const cibles = flowLayout(
-        [...nm.values()].map(node => ({ id: node.id, kind: node.kind, r: node.r, weight: node.r })),
+        [...nm.values()].map(node => ({
+          id: node.id,
+          kind: node.kind,
+          r: Math.max(node.r, halo.get(node.id) ?? 0),
+          // Le poids reste le vrai rayon : on ordonne par taille de planète, pas
+          // par nombre de satellites.
+          weight: node.r,
+        })),
         layoutMode,
         { width: W, height: H }
       );
       cibles.forEach((p, id) => radialTargets.set(id, p));
     }
+    targetsRef.current = radialTargets;
+
+    /**
+     * Fixe l'axe principal des rangées, à chaque tick.
+     *
+     * `forceCollide` de d3 n'est pas pondérée par `alpha`, contrairement à
+     * `forceX`/`forceY`. À mesure que la simulation refroidit, l'aimant de la
+     * mise en page s'éteint pendant que la collision, elle, continue de
+     * pousser : ce sont donc les collisions qui décidaient des positions
+     * finales, et la colonne du milieu s'étalait sur 338 px.
+     *
+     * L'axe principal *est* la colonne — il dit « ceci est un revenu, cela une
+     * destination » — donc il ne se négocie pas. L'axe transverse reste libre :
+     * c'est là que la collision fait son travail, en écartant les planètes sans
+     * rien casser de la lecture.
+     */
+    const snapColumns = () => {
+      if (layoutModeRef.current === "radial") return;
+      const horizontal = layoutModeRef.current === "horizontal";
+      nodesMapRef.current.forEach(node => {
+        if (node.id === dragIdRef.current) return;
+        const cible = targetsRef.current.get(node.id);
+        if (!cible) return;
+        // Un nœud volontairement posé par l'utilisateur garde sa place.
+        if (getNodePosition(layoutModeRef.current, node.id)) return;
+        if (horizontal) { node.x = cible.x; node.vx = 0; }
+        else { node.y = cible.y; node.vy = 0; }
+      });
+    };
 
     // Locks satellites (assets, expense/income items) to an evenly-spaced ring around
     // their parent planet every tick, instead of letting them drift semi-independently
@@ -700,11 +758,11 @@ export default function GalaxyView({
           // que ce qui se superpose vraiment.
           return layoutModeRef.current === "radial" ? -180 : -40;
         }))
-        .force("collide", forceCollide<GNode>().radius(d => d.r + 26).strength(0.9))
         .force("x", forceX<GNode>(CX).strength(() => layoutModeRef.current === "radial" ? 0.02 : 0))
         .force("y", forceY<GNode>(CY).strength(() => layoutModeRef.current === "radial" ? 0.02 : 0))
-        .alphaDecay(0.018).on("tick", () => { contain(); snapSatellites(); setTick(n => n + 1); });
+        .alphaDecay(0.018).on("tick", () => { snapColumns(); contain(); snapSatellites(); setTick(n => n + 1); });
     } else simRef.current.nodes(nodes);
+    snapColumns();
     contain();
     snapSatellites();
 
@@ -716,16 +774,36 @@ export default function GalaxyView({
     // disappear the instant the simulation ticked and mutated them. Pass shallow clones so
     // d3 mutates its own copies and our render-time arrays keep their string ids forever.
     const enFlux = layoutMode !== "radial";
+
+    // En orbite, la collision est la seule chose qui empêche les planètes de se
+    // superposer, d'où la marge généreuse. En colonnes, la mise en page réserve
+    // déjà la place de chaque nœud — halo de satellites compris — et cette même
+    // marge ne faisait plus que désordonner la rangée : `forceCollide` n'étant
+    // pas pondérée par `alpha`, elle continue de pousser après extinction de
+    // l'aimant et c'est elle qui fixait l'ordre final.
+    simRef.current.force("collide", forceCollide<GNode>()
+      .radius(d => d.r + (enFlux ? 6 : 26)).strength(0.9));
+
     simRef.current.force("link", forceLink<GNode, GLink>(links.map(l => ({ ...l }))).id(d => d.id).distance(l => {
       const tgt = typeof l.target === "object" ? l.target : nm.get(l.target as unknown as string);
       return tgt?.kind === "expense-item" || tgt?.kind === "income-item" ? 45 : tgt?.kind === "asset" ? 65 : tgt?.kind === "member" ? 130 : 180;
     }).strength(enFlux ? 0.04 : 0.3));
     simRef.current.force("goalLink", forceLink<GNode, GLink>(goalLinkEdges.map(l => ({ ...l }))).id(d => d.id).distance(160).strength(0.08));
+    // Les deux axes ne jouent pas le même rôle en lecture « flux ». L'axe
+    // principal *est* la colonne : c'est lui qui dit « ceci est un revenu, cela
+    // une destination », et une planète qui en dérive de 100 px change de sens.
+    // L'axe transverse n'est qu'un rangement : la force de collision doit
+    // pouvoir y écarter deux planètes sans se battre contre l'aimant.
+    // À force égale sur les deux axes, la charge et les liens étalaient la
+    // colonne du milieu sur 253 px — les rangées ne se lisaient plus.
     const aimant = layoutMode === "radial" ? 0.22 : 0.8;
+    const principal = layoutMode === "radial" ? aimant : 0.96;
+    const transverse = layoutMode === "radial" ? aimant : 0.75;
+    const tenu = (d: GNode) => radialTargets.has(d.id) && !getNodePosition(layoutMode, d.id);
     simRef.current.force("radialX", forceX<GNode>(d => radialTargets.get(d.id)?.x ?? d.x ?? CX)
-      .strength(d => radialTargets.has(d.id) && !getNodePosition(d.id) ? aimant : 0));
+      .strength(d => tenu(d) ? (layoutMode === "vertical" ? transverse : principal) : 0));
     simRef.current.force("radialY", forceY<GNode>(d => radialTargets.get(d.id)?.y ?? d.y ?? CY)
-      .strength(d => radialTargets.has(d.id) && !getNodePosition(d.id) ? aimant : 0));
+      .strength(d => tenu(d) ? (layoutMode === "vertical" ? principal : transverse) : 0));
     simRef.current.alpha(0.7).restart();
   }, [targetNodes, links, goalLinkEdges, layoutMode]);
 
@@ -792,7 +870,7 @@ export default function GalaxyView({
           node.fx = null; node.fy = null; // release so it snaps to new parent
         }
       } else if (node && node.x != null && node.y != null) {
-        setNodePosition(dragId, { x: node.x, y: node.y });
+        setNodePosition(layoutModeRef.current, dragId, { x: node.x, y: node.y });
       }
       simRef.current?.alphaTarget(0);
       setDragId(null); setSnapTarget(null);
@@ -901,7 +979,7 @@ export default function GalaxyView({
     }
   };
 
-  const autoLayout = () => { clearAllPositions(); nodesMapRef.current.forEach(n => { if (n.id !== "center") { n.fx = null; n.fy = null; } }); zoomRef.current = { k: 1, x: 0, y: 0 }; rootRef.current?.setAttribute("transform", ""); simRef.current?.alpha(1).restart(); };
+  const autoLayout = () => { clearAllPositions(layoutModeRef.current); nodesMapRef.current.forEach(n => { if (n.id !== "center") { n.fx = null; n.fy = null; } }); zoomRef.current = { k: 1, x: 0, y: 0 }; rootRef.current?.setAttribute("transform", ""); simRef.current?.alpha(1).restart(); };
 
   const exportPdf = async () => {
     const svg = svgRef.current; if (!svg) return;
@@ -1235,6 +1313,17 @@ export default function GalaxyView({
           <button onClick={exportPdf} className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-muted hover:text-text hover:bg-surface-hover">
             <Download size={13} />Export PDF
           </button>
+          {demoLoaded && !readOnly && onRemoveDemo && (
+            <button
+              onClick={onRemoveDemo}
+              disabled={demoBusy}
+              title="Supprime uniquement les lignes créées par l'exemple"
+              className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-muted hover:text-negative hover:bg-surface-hover disabled:opacity-50"
+            >
+              {demoBusy ? <Loader2 size={13} className="animate-spin" /> : <X size={13} />}
+              <span className="min-w-0 truncate">Retirer l&apos;exemple</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -1430,7 +1519,7 @@ export default function GalaxyView({
               const ts = { textShadow: "0 1px 3px rgba(0,0,0,0.95), 0 0 8px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,1)" } as const;
               const isHoveredNode = hoveredId === n.id;
 
-              return <g key={n.id} className="nd" transform={`translate(${n.x},${n.y}) scale(${isHoveredNode ? 1.08 : 1})`} style={{ cursor: "pointer", transition: "transform 0.15s ease-out" }}
+              return <g key={n.id} className="nd" data-node-id={n.id} data-kind={n.kind} transform={`translate(${n.x},${n.y}) scale(${isHoveredNode ? 1.08 : 1})`} style={{ cursor: "pointer", transition: "transform 0.15s ease-out" }}
                 onPointerDown={onNodeDown(n.id)} onClick={e => { e.stopPropagation(); handleClick(n, e as unknown as React.MouseEvent); }}
                 onPointerEnter={() => setHoveredId(n.id)} onPointerLeave={() => setHoveredId(id => id === n.id ? null : id)}>
 
