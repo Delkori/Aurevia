@@ -30,6 +30,18 @@ type DividendInfo = { ticker: string; currency: string; received: DividendEvent[
 type Quote = { price: number; currency: string } | null;
 
 const W = 1200, H = 800, CX = W / 2, CY = H / 2, CENTER_R = 32;
+
+// Bornes et sensibilité du zoom à la molette.
+//
+// `SENSIBILITE_ZOOM` se lit ainsi : un cran de souris (deltaY ≈ 100) donne
+// `exp(100 × 0,0014) ≈ 1,15`, soit 15 % — la valeur qui « tombe juste » au
+// poignet. Un effleurement de pavé tactile (deltaY ≈ 4) donne 1,006 : il en
+// faut une bonne centaine pour doubler l'échelle, ce qui est exactement le
+// geste attendu.
+const ZOOM_MIN = 0.2, ZOOM_MAX = 6;
+const SENSIBILITE_ZOOM = 0.0014;
+/** Amplitude maximale retenue d'un seul événement, pour qu'aucun ne fasse bondir la vue. */
+const PAS_ZOOM_MAX = 180;
 function sr(v: number, mx: number, mn: number, mxx: number) { return mx <= 0 ? mn : mn + (mxx - mn) * Math.sqrt(Math.max(0, Math.min(1, v / mx))); }
 
 // Lightens (positive percent) or darkens (negative) a hex color, for building a
@@ -342,6 +354,8 @@ export default function GalaxyView({
   const svgRef = useRef<SVGSVGElement | null>(null);
   const zoomRef = useRef<{ k: number; x: number; y: number }>({ k: 1, x: 0, y: 0 });
   const rootRef = useRef<SVGGElement | null>(null);
+  /** Cadre du SVG, mesuré aux changements plutôt qu'à chaque événement. */
+  const rectRef = useRef<DOMRect | null>(null);
   const layoutModeRef = useRef(layoutMode);
   layoutModeRef.current = layoutMode;
 
@@ -809,26 +823,83 @@ export default function GalaxyView({
 
   useEffect(() => { const sim = simRef.current; return () => { sim?.stop(); }; }, []);
 
-  // Zoom
+  /**
+   * Zoom à la molette.
+   *
+   * L'ancienne version multipliait l'échelle par un pas fixe de 12 % à *chaque*
+   * événement, sans regarder l'amplitude du geste. Une souris émet un événement
+   * par cran (deltaY ≈ 100) : le pas tombait à peu près juste. Un pavé tactile
+   * en émet des dizaines par seconde, minuscules (deltaY ≈ 4), et chacun valait
+   * aussi 12 % — mesuré : soixante effleurements faisaient passer l'échelle de
+   * 0,89 au plancher de 0,20 en quatre secondes. D'où la sensation de zoom qui
+   * part tout seul et par à-coups.
+   *
+   * Le facteur suit donc maintenant la distance réellement parcourue.
+   */
   useEffect(() => {
     const svg = svgRef.current, root = rootRef.current;
     if (!svg || !root) return;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const z = zoomRef.current, rect = svg.getBoundingClientRect();
-      const mx = (e.clientX - rect.left) / rect.width * W, my = (e.clientY - rect.top) / rect.height * H;
-      const nk = Math.max(0.2, Math.min(6, z.k * (e.deltaY < 0 ? 1.12 : 0.89)));
-      z.x = mx - (mx - z.x) * (nk / z.k); z.y = my - (my - z.y) * (nk / z.k); z.k = nk;
+
+    // `getBoundingClientRect` force un recalcul de mise en page. À plus de cent
+    // événements par seconde, autant ne mesurer qu'aux moments où ça change.
+    const remesurer = () => { rectRef.current = svg.getBoundingClientRect(); };
+    remesurer();
+    const ro = new ResizeObserver(remesurer);
+    ro.observe(svg);
+    window.addEventListener("scroll", remesurer, true);
+    window.addEventListener("resize", remesurer);
+
+    // Une écriture par image : le pavé tactile émet plus vite que l'écran
+    // n'affiche, et chaque écriture invalide la peinture de tout le SVG.
+    let trame = 0;
+    const peindre = () => {
+      trame = 0;
+      const z = zoomRef.current;
       root.setAttribute("transform", `translate(${z.x},${z.y}) scale(${z.k})`);
     };
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+
+      // `deltaMode` varie d'un navigateur à l'autre : Firefox compte en lignes
+      // là où Chrome compte en pixels. Sans conversion, le même geste zoome
+      // plusieurs fois moins vite ici que là.
+      const rect = rectRef.current ?? svg.getBoundingClientRect();
+      let dy = e.deltaY;
+      if (e.deltaMode === 1) dy *= 16;
+      else if (e.deltaMode === 2) dy *= rect.height || 400;
+      // Un événement isolé ne doit jamais faire faire un bond à la vue, même si
+      // le système en agrège plusieurs d'un coup.
+      dy = Math.max(-PAS_ZOOM_MAX, Math.min(PAS_ZOOM_MAX, dy));
+
+      const z = zoomRef.current;
+      const nk = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z.k * Math.exp(-dy * SENSIBILITE_ZOOM)));
+      if (nk === z.k) return; // déjà en butée : rien à redessiner
+
+      // Le point sous le curseur reste sous le curseur.
+      const mx = (e.clientX - rect.left) / rect.width * W;
+      const my = (e.clientY - rect.top) / rect.height * H;
+      z.x = mx - (mx - z.x) * (nk / z.k);
+      z.y = my - (my - z.y) * (nk / z.k);
+      z.k = nk;
+
+      if (!trame) trame = requestAnimationFrame(peindre);
+    };
+
     svg.addEventListener("wheel", onWheel, { passive: false });
-    return () => svg.removeEventListener("wheel", onWheel);
+    return () => {
+      svg.removeEventListener("wheel", onWheel);
+      ro.disconnect();
+      window.removeEventListener("scroll", remesurer, true);
+      window.removeEventListener("resize", remesurer);
+      if (trame) cancelAnimationFrame(trame);
+    };
   }, []);
 
   // Drag + Pan + Snap
   const panState = useRef<{ active: boolean; sx: number; sy: number; ox: number; oy: number } | null>(null);
   const screenToSvg = (cx: number, cy: number) => {
-    const svg = svgRef.current!; const rect = svg.getBoundingClientRect(); const z = zoomRef.current;
+    const svg = svgRef.current!; const rect = rectRef.current ?? svg.getBoundingClientRect(); const z = zoomRef.current;
     return { x: ((cx - rect.left) / rect.width * W - z.x) / z.k, y: ((cy - rect.top) / rect.height * H - z.y) / z.k };
   };
 
@@ -854,7 +925,7 @@ export default function GalaxyView({
       return;
     }
     if (!panState.current?.active) return;
-    const p = panState.current, svg = svgRef.current!, rect = svg.getBoundingClientRect();
+    const p = panState.current, svg = svgRef.current!, rect = rectRef.current ?? svg.getBoundingClientRect();
     zoomRef.current.x = p.ox + (e.clientX - p.sx) / rect.width * W;
     zoomRef.current.y = p.oy + (e.clientY - p.sy) / rect.height * H;
     rootRef.current?.setAttribute("transform", `translate(${zoomRef.current.x},${zoomRef.current.y}) scale(${zoomRef.current.k})`);
