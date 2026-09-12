@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { handleApiError } from "@/lib/apiError";
 import { requireOwner } from "@/lib/auth";
 import { flowValues } from "@/lib/payloads";
+import { assertFlowRefs } from "@/lib/flowRefs";
 import { routeId } from "@/lib/validate";
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -12,7 +13,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   if (unauthorized) return unauthorized;
   try {
     const { id } = await params;
-    const [updated] = await db.update(flows).set(await flowValues(req))
+    const values = await flowValues(req);
+    await assertFlowRefs(values);
+    const [updated] = await db.update(flows).set(values)
       .where(eq(flows.id, routeId(id))).returning();
     if (!updated) return NextResponse.json({ error: "Introuvable." }, { status: 404 });
     return NextResponse.json(updated);

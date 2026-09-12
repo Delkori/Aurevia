@@ -6,6 +6,7 @@ import { handleApiError } from "@/lib/apiError";
 import { requireOwner } from "@/lib/auth";
 import { portfolioValues } from "@/lib/payloads";
 import { routeId } from "@/lib/validate";
+import { deleteFlowsReferencing } from "@/lib/flowRefs";
 
 export async function PUT(
   req: NextRequest,
@@ -40,7 +41,9 @@ export async function DELETE(
   if (unauthorized) return unauthorized;
   try {
     const { id } = await params;
-    await db.delete(portfolios).where(eq(portfolios.id, routeId(id)));
+    const cible = routeId(id);
+    await deleteFlowsReferencing("portfolio", cible);
+    await db.delete(portfolios).where(eq(portfolios.id, cible));
     return NextResponse.json({ ok: true });
   } catch (err) {
     return handleApiError(err);
