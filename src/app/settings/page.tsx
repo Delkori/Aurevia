@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { AlertTriangle, X, Save } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
+import DemoLink from "@/components/DemoLink";
 
 const CURRENCIES = ["EUR", "USD", "GBP", "CHF", "JPY", "CAD", "AUD"];
 
@@ -131,6 +132,8 @@ export default function SettingsPage() {
           <Save size={14} /> {saved ? "Enregistré ✓" : "Sauvegarder"}
         </button>
       </section>
+
+      <DemoLink />
     </div>
   );
 }

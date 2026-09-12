@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { handleApiError } from "@/lib/apiError";
-import { requireOwner, requireSession } from "@/lib/auth";
+import { isDemo, requireOwner, requireSession } from "@/lib/auth";
+import { demoOccurrences, demoOverdue } from "@/lib/demoView";
 import { countOverdue, generateOccurrences, listOccurrences } from "@/lib/occurrences";
 import { optDate } from "@/lib/validate";
 
@@ -22,6 +23,16 @@ export async function GET(req: NextRequest) {
     const maintenant = new Date();
     const debut = from ?? new Date(maintenant.getFullYear(), maintenant.getMonth() - 3, 1).toISOString().slice(0, 10);
     const fin = to ?? new Date(maintenant.getFullYear(), maintenant.getMonth() + 4, 0).toISOString().slice(0, 10);
+
+    // `generateOccurrences` écrit : une session de démonstration, censée être
+    // en lecture seule, déclenchait une écriture dans la base du propriétaire
+    // au simple chargement de la page.
+    if (await isDemo()) {
+      return NextResponse.json({
+        occurrences: demoOccurrences().filter((o) => o.dueDate >= debut && o.dueDate <= fin),
+        overdue: demoOverdue(),
+      });
+    }
 
     await generateOccurrences();
     const [occurrences, overdue] = await Promise.all([

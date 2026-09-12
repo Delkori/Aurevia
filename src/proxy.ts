@@ -3,7 +3,10 @@ import { SESSION_COOKIE, verifySessionToken } from "@/lib/session";
 
 // `/api/cron/*` s'authentifie lui-même avec CRON_SECRET (en-tête Authorization),
 // puisque Vercel Cron appelle la route sans cookie de session.
-const PUBLIC_PATHS = ["/login", "/api/login"];
+// `/demo` ouvre lui-même une session de démonstration : il doit être
+// atteignable sans cookie, sinon le lien envoyé à un prospect renverrait
+// sur l'écran de mot de passe — exactement ce qu'il sert à éviter.
+const PUBLIC_PATHS = ["/login", "/api/login", "/demo"];
 const PUBLIC_PREFIXES = ["/_next", "/favicon", "/api/cron/"];
 
 export async function proxy(req: NextRequest) {

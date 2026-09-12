@@ -4,21 +4,16 @@ import { netWorthSnapshots } from "@/db/schema";
 import { asc } from "drizzle-orm";
 import { handleApiError } from "@/lib/apiError";
 import { requireOwner, requireSession } from "@/lib/auth";
+import { readScoped } from "@/lib/readScope";
+import { demoSnapshots } from "@/lib/demoView";
 import { captureNetWorthSnapshot } from "@/lib/snapshot";
 
 export async function GET() {
   const unauthorized = await requireSession();
   if (unauthorized) return unauthorized;
 
-  try {
-    const rows = await db
-      .select()
-      .from(netWorthSnapshots)
-      .orderBy(asc(netWorthSnapshots.date));
-    return NextResponse.json(rows);
-  } catch (err) {
-    return handleApiError(err);
-  }
+  return readScoped(demoSnapshots, () =>
+    db.select().from(netWorthSnapshots).orderBy(asc(netWorthSnapshots.date)));
 }
 
 export async function POST() {

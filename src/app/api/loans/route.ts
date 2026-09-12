@@ -4,17 +4,15 @@ import { loans } from "@/db/schema";
 import { desc } from "drizzle-orm";
 import { handleApiError } from "@/lib/apiError";
 import { requireOwner, requireSession } from "@/lib/auth";
+import { readScoped } from "@/lib/readScope";
+import { demoLoans } from "@/lib/demoView";
 import { loanValues } from "@/lib/payloads";
 
 export async function GET() {
   const unauthorized = await requireSession();
   if (unauthorized) return unauthorized;
-  try {
-    const rows = await db.select().from(loans).orderBy(desc(loans.createdAt));
-    return NextResponse.json(rows);
-  } catch (err) {
-    return handleApiError(err);
-  }
+
+  return readScoped(demoLoans, () => db.select().from(loans).orderBy(desc(loans.createdAt)));
 }
 
 export async function POST(req: NextRequest) {

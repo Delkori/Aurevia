@@ -4,18 +4,15 @@ import { assets } from "@/db/schema";
 import { desc } from "drizzle-orm";
 import { handleApiError } from "@/lib/apiError";
 import { requireOwner, requireSession } from "@/lib/auth";
+import { readScoped } from "@/lib/readScope";
+import { demoAssets } from "@/lib/demoView";
 import { assetValues } from "@/lib/payloads";
 
 export async function GET() {
   const unauthorized = await requireSession();
   if (unauthorized) return unauthorized;
 
-  try {
-    const rows = await db.select().from(assets).orderBy(desc(assets.createdAt));
-    return NextResponse.json(rows);
-  } catch (err) {
-    return handleApiError(err);
-  }
+  return readScoped(demoAssets, () => db.select().from(assets).orderBy(desc(assets.createdAt)));
 }
 
 export async function POST(req: NextRequest) {

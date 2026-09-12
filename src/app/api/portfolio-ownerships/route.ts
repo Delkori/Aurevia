@@ -4,17 +4,15 @@ import { portfolioOwnerships } from "@/db/schema";
 import { and, eq, isNull } from "drizzle-orm";
 import { handleApiError } from "@/lib/apiError";
 import { requireOwner, requireSession } from "@/lib/auth";
+import { readScoped } from "@/lib/readScope";
+import { demoOwnerships } from "@/lib/demoView";
 import { ownershipValues } from "@/lib/payloads";
 
 export async function GET() {
   const unauthorized = await requireSession();
   if (unauthorized) return unauthorized;
-  try {
-    const rows = await db.select().from(portfolioOwnerships);
-    return NextResponse.json(rows);
-  } catch (err) {
-    return handleApiError(err);
-  }
+
+  return readScoped(demoOwnerships, () => db.select().from(portfolioOwnerships));
 }
 
 // Upsert : une part pour (portfolioId, memberId) — crée ou met à jour le %.

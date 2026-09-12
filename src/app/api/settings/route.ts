@@ -4,17 +4,19 @@ import { settings } from "@/db/schema";
 import { sql } from "drizzle-orm";
 import { handleApiError } from "@/lib/apiError";
 import { requireOwner, requireSession } from "@/lib/auth";
+import { readScoped } from "@/lib/readScope";
+import { demoSettings } from "@/lib/demoView";
 import { ValidationError, jsonBody } from "@/lib/validate";
 
 export async function GET() {
   const unauthorized = await requireSession();
   if (unauthorized) return unauthorized;
-  try {
+  return readScoped(demoSettings, async () => {
     const rows = await db.select().from(settings);
     const map: Record<string, string> = {};
     rows.forEach(r => { map[r.key] = r.value; });
-    return NextResponse.json(map);
-  } catch (err) { return handleApiError(err); }
+    return map;
+  });
 }
 
 export async function PUT(req: NextRequest) {

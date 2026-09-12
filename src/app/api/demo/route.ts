@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { handleApiError } from "@/lib/apiError";
 import { requireOwner, requireSession } from "@/lib/auth";
+import { readScoped } from "@/lib/readScope";
 import { isDatabaseEmpty, isDemoLoaded, removeDemo, seedDemo } from "@/lib/demoSeed";
 
 /** État du jeu d'exemple, lu au chargement pour savoir quoi proposer. */
@@ -8,12 +9,12 @@ export async function GET() {
   const unauthorized = await requireSession();
   if (unauthorized) return unauthorized;
 
-  try {
+  // La session de démonstration ne lit pas la base : ni écran « galaxie vide »,
+  // ni bouton « retirer l'exemple » — son foyer est fictif par construction.
+  return readScoped(() => ({ loaded: false, canSeed: false }), async () => {
     const [loaded, empty] = await Promise.all([isDemoLoaded(), isDatabaseEmpty()]);
-    return NextResponse.json({ loaded, canSeed: empty && !loaded });
-  } catch (err) {
-    return handleApiError(err);
-  }
+    return { loaded, canSeed: empty && !loaded };
+  });
 }
 
 export async function POST() {

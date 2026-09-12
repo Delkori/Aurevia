@@ -66,3 +66,8 @@ export async function requireOwner(): Promise<NextResponse | null> {
   }
   return NextResponse.json({ error: "Non authentifié." }, { status: 401 });
 }
+
+/** Vrai si la session en cours est une démonstration (lecture seule, foyer fictif). */
+export async function isDemo(): Promise<boolean> {
+  return (await currentRole()) === "demo";
+}

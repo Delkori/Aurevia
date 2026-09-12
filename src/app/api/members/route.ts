@@ -4,15 +4,15 @@ import { members } from "@/db/schema";
 import { desc } from "drizzle-orm";
 import { handleApiError } from "@/lib/apiError";
 import { requireOwner, requireSession } from "@/lib/auth";
+import { readScoped } from "@/lib/readScope";
+import { demoMembers } from "@/lib/demoView";
 import { memberValues } from "@/lib/payloads";
 
 export async function GET() {
   const unauthorized = await requireSession();
   if (unauthorized) return unauthorized;
-  try {
-    const rows = await db.select().from(members).orderBy(desc(members.createdAt));
-    return NextResponse.json(rows);
-  } catch (err) { return handleApiError(err); }
+
+  return readScoped(demoMembers, () => db.select().from(members).orderBy(desc(members.createdAt)));
 }
 
 export async function POST(req: NextRequest) {

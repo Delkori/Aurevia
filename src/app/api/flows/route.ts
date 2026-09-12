@@ -4,15 +4,15 @@ import { flows } from "@/db/schema";
 import { desc } from "drizzle-orm";
 import { handleApiError } from "@/lib/apiError";
 import { requireOwner, requireSession } from "@/lib/auth";
+import { readScoped } from "@/lib/readScope";
+import { demoFlows } from "@/lib/demoView";
 import { flowValues } from "@/lib/payloads";
 
 export async function GET() {
   const unauthorized = await requireSession();
   if (unauthorized) return unauthorized;
-  try {
-    const rows = await db.select().from(flows).orderBy(desc(flows.createdAt));
-    return NextResponse.json(rows);
-  } catch (err) { return handleApiError(err); }
+
+  return readScoped(demoFlows, () => db.select().from(flows).orderBy(desc(flows.createdAt)));
 }
 
 export async function POST(req: NextRequest) {
