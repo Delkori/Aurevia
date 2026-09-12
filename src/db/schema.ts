@@ -152,6 +152,32 @@ export const netWorthSnapshots = pgTable("net_worth_snapshots", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [unique("net_worth_snapshots_date_unique").on(t.date)]);
 
+// ── Échéances à valider ──────────────────────────────────────────────────────
+// Un `flow` est une *règle* (« 380 € de crèche, tous les mois »). Cette table
+// en matérialise chaque échéance pour qu'on puisse la confronter au réel :
+// montant attendu d'un côté, montant constaté de l'autre. C'est cet écart que
+// ni un tableur ni un agrégateur ne donne.
+//
+// `(flow_id, due_date)` est unique : la génération des échéances peut être
+// relancée autant de fois qu'on veut sans jamais créer de doublon.
+export const flowOccurrences = pgTable("flow_occurrences", {
+  id: serial("id").primaryKey(),
+  flowId: integer("flow_id").notNull().references(() => flows.id, { onDelete: "cascade" }),
+  dueDate: date("due_date").notNull(),
+  expectedAmount: numeric("expected_amount").notNull(),
+  /** Renseigné à la validation. `null` tant que l'échéance n'a pas été vérifiée. */
+  actualAmount: numeric("actual_amount"),
+  // pending | confirmed | skipped
+  status: text("status").notNull().default("pending"),
+  note: text("note"),
+  confirmedAt: timestamp("confirmed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  unique("flow_occurrences_flow_due_unique").on(t.flowId, t.dueDate),
+  index("flow_occurrences_due_date_idx").on(t.dueDate),
+  index("flow_occurrences_status_idx").on(t.status),
+]);
+
 // ── Dernier cours connu ──────────────────────────────────────────────────────
 // Les caches mémoire de lib/prices.ts et lib/cryptoPrices.ts meurent avec
 // l'instance serverless : après chaque démarrage à froid, l'app re-tape Yahoo et

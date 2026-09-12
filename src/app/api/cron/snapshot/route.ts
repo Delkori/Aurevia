@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { handleApiError } from "@/lib/apiError";
 import { captureNetWorthSnapshot } from "@/lib/snapshot";
+import { countOverdue, generateOccurrences } from "@/lib/occurrences";
 import { timingSafeEqual } from "@/lib/session";
 
 /**
@@ -23,7 +24,11 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    return NextResponse.json(await captureNetWorthSnapshot());
+    // Les échéances sont matérialisées ici aussi : sans ça, la pastille
+    // « à vérifier » n'apparaîtrait qu'au moment où quelqu'un ouvre l'app —
+    // c'est-à-dire trop tard pour servir de rappel.
+    const [snapshot] = await Promise.all([captureNetWorthSnapshot(), generateOccurrences()]);
+    return NextResponse.json({ snapshot, overdue: await countOverdue() });
   } catch (err) {
     return handleApiError(err);
   }

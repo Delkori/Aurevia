@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Trash2, Pencil } from "lucide-react";
 import { formatMoney } from "@/lib/format";
 import { ASSET_TYPE_LABELS, convert, goalProgress, type ValuationContext } from "@/lib/networth";
 import { NATURE_COLORS, NATURE_LABELS, natureOfPortfolio } from "@/lib/natures";
+import { upcomingByMonth, type FlowLike } from "@/lib/calendar";
 import { ASTRONAUT_ACCESSORIES } from "@/lib/astronautAccessories";
 import { monthsToReach } from "@/lib/projection";
 
@@ -511,6 +512,14 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
   { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; onUpdateSelf: (name: string, color: string, accessory: string | null) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number; onPortfolioCreated?: (p: Portfolio) => void; ownerName: string; expenseMemberId?: number | null; dividends: Record<string, DividendInfo | null>; displayCurrency: string; ctx: ValuationContext }) {
   const fmt = (v: number) => formatMoney(v, displayCurrency);
   const portfolioTotal = (id: number) => groups.find(g => g.key === id)?.total ?? 0;
+  const calendrier = useMemo(() => {
+    const nommer = (f: Flow) => f.name
+      || (f.targetType === "portfolio" ? portfolios.find(p => p.id === f.targetId)?.name
+        : f.targetType === "goal" ? goals.find(g => g.id === f.targetId)?.name
+        : f.targetType === "income" ? "Revenu" : null)
+      || "Mouvement";
+    return upcomingByMonth(flows.map(f => ({ ...f, name: nommer(f) })) as unknown as FlowLike[], 4);
+  }, [flows, portfolios, goals]);
   // Un dividende est versé dans la devise du titre : on le ramène à la devise
   // d'affichage pour ne pas mélanger les unités dans un même panneau.
   const fmtFrom = (v: number, from: string) =>
@@ -612,22 +621,38 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
             })}
           </div>}
           {flows.length > 0 && <div className="pt-2 border-t border-border">
-            <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Flux mensuels</p>
-            {flows.map(f => {
-              const sName = f.targetType === "income" ? (f.name || "Revenu")
-                : f.sourceType === "salary" ? "Salaire"
-                : f.sourceType === "member_salary" ? `Salaire de ${members.find(m => m.id === f.sourceId)?.name ?? "?"}`
-                : f.sourceType === "external" ? "Externe"
-                : portfolios.find(p => p.id === f.sourceId)?.name || "?";
-              const tName = f.targetType === "portfolio" ? portfolios.find(p => p.id === f.targetId)?.name
-                : f.targetType === "goal" ? goals.find(g => g.id === f.targetId)?.name
-                : f.targetType === "expense" ? (f.name || "Dépense")
-                : f.targetType === "income" ? "Revenus" : "?";
-              return <div key={f.id} className="flex justify-between text-xs py-0.5">
-                <span className="text-text-muted">{sName} → {tName}</span>
-                <span className="tabular text-accent">{fmt(Number(f.amount))}</span>
-              </div>;
-            })}
+            <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Mouvements</p>
+            {/* Groupés par mois : la liste plate mélangeait un prélèvement
+                quotidien et une prime annuelle comme s'ils pesaient pareil, sans
+                jamais dire quand ils tombent. */}
+            {calendrier.length === 0
+              ? <p className="text-[11px] text-text-muted">Aucun mouvement programmé.</p>
+              : calendrier.map(mois => (
+                <details key={mois.cle} open={mois === calendrier[0]} className="group">
+                  <summary className="flex items-center justify-between gap-2 text-xs py-1 cursor-pointer list-none marker:content-none">
+                    <span className="capitalize text-text">{mois.label}</span>
+                    <span className="flex items-center gap-1.5 shrink-0 tabular text-[11px]">
+                      {mois.sorties > 0 && <span className="text-negative">−{fmt(mois.sorties)}</span>}
+                      {mois.epargne > 0 && <span className="text-accent">{fmt(mois.epargne)}</span>}
+                    </span>
+                  </summary>
+                  <div className="pl-2 pb-1.5 space-y-0.5 border-l border-border ml-1">
+                    {mois.occurrences.map(o => (
+                      <div key={o.key} className="flex justify-between gap-2 text-[11px]">
+                        <span className="text-text-muted truncate">
+                          <span className="tabular mr-1.5">{String(o.date.getDate()).padStart(2, "0")}</span>
+                          {o.label}
+                        </span>
+                        <span className={`tabular shrink-0 ${
+                          o.direction === "entree" ? "text-positive"
+                          : o.direction === "sortie" ? "text-negative" : "text-accent"}`}>
+                          {o.direction === "entree" ? "+" : "−"}{fmt(o.amount)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              ))}
           </div>}
         </div>
       )}

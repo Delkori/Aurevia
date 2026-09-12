@@ -4,6 +4,8 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { AlertTriangle, X, Eye, Sparkles, Loader2 } from "lucide-react";
 import GalaxyView from "@/components/GalaxyView";
 import SinceLastVisit from "@/components/SinceLastVisit";
+import MonthReview, { type Occurrence } from "@/components/MonthReview";
+import type { LayoutMode } from "@/lib/galaxyLayout";
 import { currentValue, goalProgress, isStale, totalDebt, type ValuationContext } from "@/lib/networth";
 import { formatMoney } from "@/lib/format";
 import { apiFetch, ApiError } from "@/lib/api";
@@ -45,16 +47,19 @@ export default function HomePage() {
   const [canSeedDemo, setCanSeedDemo] = useState(false);
   const [demoLoaded, setDemoLoaded] = useState(false);
   const [seeding, setSeeding] = useState(false);
+  const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
+  const [overdue, setOverdue] = useState(0);
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [a, p, g, l, m, f, s, gl, po, fx, se, dm] = await Promise.allSettled([
+      const [a, p, g, l, m, f, s, gl, po, fx, se, dm, oc] = await Promise.allSettled([
         apiFetch("/api/assets"), apiFetch("/api/portfolios"), apiFetch("/api/goals"),
         apiFetch("/api/loans"), apiFetch("/api/members"), apiFetch("/api/flows"),
         apiFetch("/api/settings"), apiFetch("/api/goal-links"), apiFetch("/api/portfolio-ownerships"),
         apiFetch("/api/exchange-rates"),
-        apiFetch("/api/session"), apiFetch("/api/demo"),
+        apiFetch("/api/session"), apiFetch("/api/demo"), apiFetch("/api/occurrences"),
       ]);
       const ad = a.status === "fulfilled" ? (a.value as Asset[]) : [];
       setAssets(ad);
@@ -68,6 +73,11 @@ export default function HomePage() {
       setPortfolioOwnerships(po.status === "fulfilled" ? (po.value as PortfolioOwnership[]) : []);
       if (fx.status === "fulfilled") setRates(fx.value as Rates);
       setRole(se.status === "fulfilled" ? (se.value as { role: "owner" | "demo" }).role : "owner");
+      if (oc.status === "fulfilled") {
+        const d = oc.value as { occurrences: Occurrence[]; overdue: number };
+        setOccurrences(d.occurrences);
+        setOverdue(d.overdue);
+      }
       if (dm.status === "fulfilled") {
         const d = dm.value as { loaded: boolean; canSeed: boolean };
         setCanSeedDemo(d.canSeed);
@@ -229,6 +239,17 @@ export default function HomePage() {
     };
   }, [assets, loans, goals, goalLinks, flows, portfolios, quotes, dividends, rates, settings.display_currency]);
 
+  const updateOccurrence = async (id: number, patch: { status: string; actualAmount?: string | null }) => {
+    await apiFetch(`/api/occurrences/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    const res = await apiFetch("/api/occurrences") as { occurrences: Occurrence[]; overdue: number };
+    setOccurrences(res.occurrences);
+    setOverdue(res.overdue);
+  };
+
   const isEmpty =
     assets.length === 0 &&
     portfolios.length === 0 &&
@@ -256,6 +277,20 @@ export default function HomePage() {
             fictives et rien ne peut être modifié.
           </span>
         </div>
+      )}
+      {reviewOpen && (
+        <MonthReview
+          occurrences={occurrences}
+          flows={flows}
+          destinations={Object.fromEntries([
+            ...portfolios.map(p => [`portfolio:${p.id}`, p.name]),
+            ...goals.map(g => [`goal:${g.id}`, g.name]),
+          ])}
+          displayCurrency={settings.display_currency || "EUR"}
+          onUpdate={updateOccurrence}
+          onClose={() => setReviewOpen(false)}
+          readOnly={readOnly}
+        />
       )}
       {error && (
         <div className="flex items-center gap-3 bg-negative/10 border-b border-negative/30 px-4 py-2 text-sm text-negative shrink-0">
@@ -327,6 +362,14 @@ export default function HomePage() {
           rates={rates}
           displayCurrency={settings.display_currency || "EUR"}
           readOnly={readOnly}
+          overdueCount={overdue}
+          onOpenReview={() => setReviewOpen(true)}
+          layoutMode={(settings.layout_mode as LayoutMode) || "horizontal"}
+          onLayoutMode={(m) => {
+            // Optimiste : la galaxie se réorganise tout de suite, l'écriture suit.
+            setSettings(prev => ({ ...prev, layout_mode: m }));
+            api("/api/settings", "PUT", { layout_mode: m }).catch(() => {});
+          }}
           onUpdateSalary={updateSalary}
           onUpdateSelf={updateSelf}
           onRefresh={load}

@@ -119,3 +119,34 @@ describe("échéances anciennes", () => {
     assert.ok(next.getTime() > Date.now());
   });
 });
+
+describe("échéance de la période en cours", () => {
+  // Régression : la formule ajoutait une période sans regarder si celle de la
+  // période courante était encore devant. Un prélèvement annuel du 20 novembre
+  // consulté en septembre annonçait novembre de l'ANNÉE SUIVANTE ; un
+  // prélèvement mensuel du 25 consulté le 3 annonçait le mois d'après.
+  const dansCombienDeJours = (creation: Date, freq: string) =>
+    Math.ceil((nextOccurrenceDate(creation.toISOString(), freq)!.getTime() - Date.now()) / 86400000);
+
+  test("un flux annuel tombe dans moins d'un an", () => {
+    const il_y_a_10_mois = new Date();
+    il_y_a_10_mois.setMonth(il_y_a_10_mois.getMonth() - 10);
+    const j = dansCombienDeJours(il_y_a_10_mois, "yearly");
+    assert.ok(j > 0 && j <= 366, `attendu 1..366, reçu ${j}`);
+  });
+
+  test("un flux mensuel tombe dans moins de 32 jours", () => {
+    const il_y_a_3_mois = new Date();
+    il_y_a_3_mois.setMonth(il_y_a_3_mois.getMonth() - 3);
+    const j = dansCombienDeJours(il_y_a_3_mois, "monthly");
+    assert.ok(j > 0 && j <= 32, `attendu 1..32, reçu ${j}`);
+  });
+
+  test("une échéance d'hier passe au mois suivant, pas au surlendemain", () => {
+    const hier = new Date();
+    hier.setDate(hier.getDate() - 1);
+    hier.setMonth(hier.getMonth() - 2);
+    const j = dansCombienDeJours(hier, "monthly");
+    assert.ok(j >= 27 && j <= 32, `attendu ~30, reçu ${j}`);
+  });
+});

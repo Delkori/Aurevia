@@ -24,11 +24,14 @@ export function nextOccurrenceDate(createdAt: string, frequency: string): Date |
     const periods = Math.floor(elapsedDays / step) + 1;
     next.setDate(next.getDate() + periods * step);
   } else if (frequency === "yearly") {
-    const years = now.getFullYear() - start.getFullYear() + 1;
-    next.setFullYear(next.getFullYear() + years);
+    // On vise l'anniversaire de l'année en cours, et on n'ajoute une année que
+    // s'il est déjà passé. Ajouter systématiquement une période renvoyait
+    // l'année d'après : un prélèvement du 20 novembre consulté en septembre
+    // annonçait novembre de l'année suivante.
+    next.setFullYear(start.getFullYear() + (now.getFullYear() - start.getFullYear()));
   } else {
-    const months =
-      (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth()) + 1;
+    // Même raisonnement au mois : on vise le jour du mois en cours.
+    const months = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
     next.setMonth(next.getMonth() + months);
   }
 

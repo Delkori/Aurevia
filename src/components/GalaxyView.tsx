@@ -5,13 +5,15 @@ import {
   forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY,
   type Simulation, type SimulationNodeDatum,
 } from "d3-force";
-import { FolderPlus, Plus, PlusCircle, Star, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, AlertTriangle, Bell, Clock, Menu, PanelRight } from "lucide-react";
+import { FolderPlus, Plus, PlusCircle, Star, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, AlertTriangle, Bell, Clock, Menu, PanelRight, LayoutGrid, FlaskConical } from "lucide-react";
 import { findAccessory } from "@/lib/astronautAccessories";
 import { formatMoney } from "@/lib/format";
 import { currentValue, gain, gainPercent, goalProgress, totalDebt, ownedShare, type Rates, type ValuationContext } from "@/lib/networth";
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
 import { getLogoUrl } from "@/lib/logos";
 import { NATURE_COLORS, NATURE_LABELS, NATURE_ORDER, natureOfPortfolio, type Nature } from "@/lib/natures";
+import { flowLayout, LAYOUT_MODES, type LayoutMode } from "@/lib/galaxyLayout";
+import { ClipboardCheck } from "lucide-react";
 import { daysUntilNextOccurrence } from "@/lib/dates";
 import NodePanel, { PlanetModal, type Selection, type Actions } from "@/components/NodePanel";
 
@@ -291,13 +293,15 @@ function TravelingMarkers({
 }
 
 export default function GalaxyView({
-  assets, portfolios, goals, loans, members, flows, goalLinks, portfolioOwnerships, quotes, dividends, actions, salary, onUpdateSalary, onUpdateSelf, onRefresh, showCountdown, ownerName, centerColor, ownerAccessory, rates, displayCurrency, readOnly = false,
+  assets, portfolios, goals, loans, members, flows, goalLinks, portfolioOwnerships, quotes, dividends, actions, salary, onUpdateSalary, onUpdateSelf, onRefresh, showCountdown, ownerName, centerColor, ownerAccessory, rates, displayCurrency, readOnly = false, layoutMode, onLayoutMode, overdueCount = 0, onOpenReview,
 }: {
   assets: Asset[]; portfolios: Portfolio[]; goals: Goal[]; loans: Loan[];
   members: Member[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; quotes: Record<string, Quote>; dividends: Record<string, DividendInfo | null>;
   actions: Actions; salary: number; onUpdateSalary: (v: number) => Promise<void>; onUpdateSelf: (name: string, color: string, accessory: string | null) => Promise<void>; onRefresh: () => void; showCountdown: boolean;
   ownerName: string; centerColor: string; ownerAccessory: string | null;
   rates: Rates; displayCurrency: string; readOnly?: boolean;
+  layoutMode: LayoutMode; onLayoutMode: (m: LayoutMode) => void;
+  overdueCount?: number; onOpenReview: () => void;
 }) {
   const [expanded, setExpanded] = useState<Set<number | "unassigned">>(new Set());
   const [selected, setSelected] = useState<Selection>(null);
@@ -334,6 +338,8 @@ export default function GalaxyView({
   const svgRef = useRef<SVGSVGElement | null>(null);
   const zoomRef = useRef<{ k: number; x: number; y: number }>({ k: 1, x: 0, y: 0 });
   const rootRef = useRef<SVGGElement | null>(null);
+  const layoutModeRef = useRef(layoutMode);
+  layoutModeRef.current = layoutMode;
 
   // Toutes les valorisations passent par ce contexte : sans lui, une ligne cotée
   // en USD était additionnée comme si c'était des euros.
@@ -549,9 +555,17 @@ export default function GalaxyView({
     });
     nodesMapRef.current = new Map(nodes.map(n => [n.id, n]));
     const nm = nodesMapRef.current;
-    const c = nm.get("center"); if (c && !getNodePosition("center")) { c.fx = CX; c.fy = CY; }
-    const s = nm.get("salary"); if (s && !getNodePosition("salary")) { s.fx = CX; s.fy = 80; }
-    const e = nm.get("expenses"); if (e && !getNodePosition("expenses")) { e.fx = CX + 350; e.fy = 180; }
+    if (layoutMode === "radial") {
+      const c = nm.get("center"); if (c && !getNodePosition("center")) { c.fx = CX; c.fy = CY; }
+      const s = nm.get("salary"); if (s && !getNodePosition("salary")) { s.fx = CX; s.fy = 80; }
+      const e = nm.get("expenses"); if (e && !getNodePosition("expenses")) { e.fx = CX + 350; e.fy = 180; }
+    } else {
+      // En lecture « flux », ces trois-là se rangent comme les autres.
+      for (const id of ["center", "salary", "expenses"]) {
+        const node = nm.get(id);
+        if (node && !getNodePosition(id)) { node.fx = null; node.fy = null; }
+      }
+    }
 
     // Radial layout: instead of leaving members/portfolios/goals to pure spring physics
     // (which reads as chaotic clutter with crossing links and overlap once there are more
@@ -576,6 +590,7 @@ export default function GalaxyView({
     const unowned = directChildren.filter(n => n.kind !== "member").sort((a, b) => (a.kind === "goal" ? 1 : 0) - (b.kind === "goal" ? 1 : 0) || a.id.localeCompare(b.id));
     const memberHubs = directChildren.filter(n => n.kind === "member").sort((a, b) => (a.id === "self" ? -1 : b.id === "self" ? 1 : a.id.localeCompare(b.id)));
     const radialTargets = new Map<string, { x: number; y: number }>();
+    if (layoutMode === "radial") {
     if (unowned.length > 0) {
       const r1 = packRadius(unowned, Math.PI * 2, 34, 190);
       unowned.forEach((n, i) => {
@@ -603,6 +618,16 @@ export default function GalaxyView({
         radialTargets.set(child.id, { x: base.x + Math.cos(angle) * r3, y: base.y + Math.sin(angle) * r3 });
       });
     });
+    } else {
+      // Lecture « flux » : les rangées remplacent les anneaux. Le poids sert à
+      // ranger les plus grosses planètes au milieu de leur colonne.
+      const cibles = flowLayout(
+        [...nm.values()].map(node => ({ id: node.id, kind: node.kind, r: node.r, weight: node.r })),
+        layoutMode,
+        { width: W, height: H }
+      );
+      cibles.forEach((p, id) => radialTargets.set(id, p));
+    }
 
     // Locks satellites (assets, expense/income items) to an evenly-spaced ring around
     // their parent planet every tick, instead of letting them drift semi-independently
@@ -666,10 +691,18 @@ export default function GalaxyView({
 
     if (!simRef.current) {
       simRef.current = forceSimulation<GNode>(nodes)
-        .force("charge", forceManyBody().strength(d => { const k = (d as GNode).kind; return k === "expense-item" || k === "income-item" ? -30 : k === "asset" ? -60 : -180; }))
+        .force("charge", forceManyBody().strength(d => {
+          const k = (d as GNode).kind;
+          const satellite = k === "expense-item" || k === "income-item" || k === "asset";
+          if (satellite) return k === "asset" ? -60 : -30;
+          // En colonnes, une forte répulsion entre planètes les éjecte de leur
+          // rangée : la disposition s'en charge, la répulsion n'a plus à écarter
+          // que ce qui se superpose vraiment.
+          return layoutModeRef.current === "radial" ? -180 : -40;
+        }))
         .force("collide", forceCollide<GNode>().radius(d => d.r + 26).strength(0.9))
-        .force("x", forceX<GNode>(CX).strength(0.02))
-        .force("y", forceY<GNode>(CY).strength(0.02))
+        .force("x", forceX<GNode>(CX).strength(() => layoutModeRef.current === "radial" ? 0.02 : 0))
+        .force("y", forceY<GNode>(CY).strength(() => layoutModeRef.current === "radial" ? 0.02 : 0))
         .alphaDecay(0.018).on("tick", () => { contain(); snapSatellites(); setTick(n => n + 1); });
     } else simRef.current.nodes(nodes);
     contain();
@@ -682,17 +715,19 @@ export default function GalaxyView({
     // nodeById.get() lookups), every link would render fine for one frame and then silently
     // disappear the instant the simulation ticked and mutated them. Pass shallow clones so
     // d3 mutates its own copies and our render-time arrays keep their string ids forever.
+    const enFlux = layoutMode !== "radial";
     simRef.current.force("link", forceLink<GNode, GLink>(links.map(l => ({ ...l }))).id(d => d.id).distance(l => {
       const tgt = typeof l.target === "object" ? l.target : nm.get(l.target as unknown as string);
       return tgt?.kind === "expense-item" || tgt?.kind === "income-item" ? 45 : tgt?.kind === "asset" ? 65 : tgt?.kind === "member" ? 130 : 180;
-    }).strength(0.3));
+    }).strength(enFlux ? 0.04 : 0.3));
     simRef.current.force("goalLink", forceLink<GNode, GLink>(goalLinkEdges.map(l => ({ ...l }))).id(d => d.id).distance(160).strength(0.08));
+    const aimant = layoutMode === "radial" ? 0.22 : 0.8;
     simRef.current.force("radialX", forceX<GNode>(d => radialTargets.get(d.id)?.x ?? d.x ?? CX)
-      .strength(d => radialTargets.has(d.id) && !getNodePosition(d.id) ? 0.22 : 0));
+      .strength(d => radialTargets.has(d.id) && !getNodePosition(d.id) ? aimant : 0));
     simRef.current.force("radialY", forceY<GNode>(d => radialTargets.get(d.id)?.y ?? d.y ?? CY)
-      .strength(d => radialTargets.has(d.id) && !getNodePosition(d.id) ? 0.22 : 0));
+      .strength(d => radialTargets.has(d.id) && !getNodePosition(d.id) ? aimant : 0));
     simRef.current.alpha(0.7).restart();
-  }, [targetNodes, links, goalLinkEdges]);
+  }, [targetNodes, links, goalLinkEdges, layoutMode]);
 
   useEffect(() => { const sim = simRef.current; return () => { sim?.stop(); }; }, []);
 
@@ -1010,7 +1045,7 @@ export default function GalaxyView({
         />
       )}
       {/* ── LEFT MENU ── */}
-      <div className={`glass-panel border-r border-border flex-col overflow-y-auto
+      <div className={`glass-panel border-r border-border flex-col overflow-y-auto h-full min-h-0
         max-lg:absolute max-lg:inset-y-0 max-lg:left-0 max-lg:z-30 max-lg:w-52 max-lg:shadow-2xl
         ${drawer === "menu" ? "flex" : "hidden lg:flex"}`}>
         <button
@@ -1068,6 +1103,75 @@ export default function GalaxyView({
               <div className="h-1 rounded bg-bg mt-1 overflow-hidden">
                 <div className="h-full rounded" style={{ width: `${structureScore}%`, background: structureScore >= 70 ? "#34d399" : structureScore >= 45 ? "#7c6af5" : "#f87171" }} />
               </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Lecture : disposition et simulateur ── */}
+        <div className="px-3 py-3 border-b border-border space-y-2">
+          <p className="text-[9px] text-text-muted uppercase tracking-wider px-1 flex items-center gap-1.5">
+            <LayoutGrid size={10} />Disposition
+          </p>
+          <div className="space-y-0.5">
+            {LAYOUT_MODES.map(({ mode, label, hint }) => (
+              <button key={mode} onClick={() => onLayoutMode(mode)} title={hint}
+                aria-pressed={layoutMode === mode}
+                className={`w-full text-left px-2 py-1.5 rounded-md text-[11px] leading-tight transition-colors ${
+                  layoutMode === mode ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text hover:bg-surface-hover"}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <button onClick={onOpenReview}
+            className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-muted hover:text-text hover:bg-surface-hover">
+            <ClipboardCheck size={13} className="shrink-0" />
+            Pointer le mois
+            {overdueCount > 0 && (
+              <span className="ml-auto px-1.5 rounded-full bg-[#fbbf24] text-[#1a1400] text-[10px] font-bold tabular">
+                {overdueCount > 99 ? "99+" : overdueCount}
+              </span>
+            )}
+          </button>
+
+          <button onClick={() => setShowScrubBar(v => !v)}
+            aria-pressed={showScrubBar}
+            className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs mt-1 transition-colors ${
+              showScrubBar ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text hover:bg-surface-hover"}`}>
+            <FlaskConical size={13} className="shrink-0" />Simulateur
+          </button>
+
+          {showScrubBar && (
+            <div className="px-1 pt-1 space-y-2">
+              <label className="flex items-center justify-between text-[10px] text-text-muted">
+                <span>Horizon</span>
+                <span className="tabular text-accent font-medium">
+                  {scrubYears === 0 ? "aujourd'hui" : `+${scrubYears} an${scrubYears > 1 ? "s" : ""}`}
+                </span>
+              </label>
+              <input type="range" min={0} max={30} step={1} value={scrubYears}
+                onChange={e => setScrubYears(Number(e.target.value))}
+                aria-label="Horizon de projection en années"
+                className="w-full accent-accent" />
+              <label className="flex items-center justify-between text-[10px] text-text-muted">
+                <span>Rendement</span>
+                <span className="tabular text-accent font-medium">{scrubGrowth} %/an</span>
+              </label>
+              <input type="range" min={0} max={15} step={0.5} value={scrubGrowth}
+                onChange={e => setScrubGrowth(Number(e.target.value))}
+                aria-label="Rendement annuel moyen supposé"
+                className="w-full accent-accent" />
+              {scrubYears > 0 && (
+                <div className="pt-1 border-t border-border">
+                  <p className="text-[10px] text-text-muted">En {scrubYear}</p>
+                  <p className="text-sm font-[family-name:var(--font-mono-num)] tabular font-semibold text-accent">
+                    {fmt(scrubProjectedTotal)}
+                  </p>
+                  <p className="text-[9px] text-text-muted mt-0.5">
+                    hypothèse, pas une prévision
+                  </p>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1444,6 +1548,18 @@ export default function GalaxyView({
                     })}
                     {/* Warning shake effect on text */}
                     {tierImage && <rect x={-R * 0.95} y={-15} width={R * 1.9} height={ownerRevenue > 0 ? 42 : 27} rx={ownerRevenue > 0 ? 21 : 13.5} fill="rgba(6,6,10,0.55)" />}
+                    {overdueCount > 0 && n.memberId == null && (
+                      <g transform={`translate(${R * 0.72},${-R * 0.72})`} style={{ cursor: "pointer" }}
+                        onPointerDown={e => e.stopPropagation()}
+                        onClick={e => { e.stopPropagation(); onOpenReview(); }}>
+                        <title>{`${overdueCount} mouvement${overdueCount > 1 ? "s" : ""} à vérifier`}</title>
+                        <circle r={10} fill="#fbbf24" className="g-anim g-pulse" />
+                        <circle r={10} fill="#fbbf24" />
+                        <text y={3.5} textAnchor="middle" fontSize={11} fontWeight={700} fill="#1a1400">
+                          {overdueCount > 9 ? "9+" : overdueCount}
+                        </text>
+                      </g>
+                    )}
                     <g className={isOverBudget ? "g-anim g-shake" : undefined}>
                       <text y={-5} textAnchor="middle" fontSize={10} fontWeight={600} fill="#fff" style={ts}>{n.label}</text>
                       <text y={9} textAnchor="middle" fontSize={9} fill={isOverBudget ? "#ffaa70" : tier === "warning" ? "#ffd280" : "rgba(255,255,255,0.85)"} style={ts}>{mask(ownerExpenseTotal > 0 ? fmt(ownerExpenseTotal) : "0 €")}/m</text>
@@ -1731,7 +1847,7 @@ export default function GalaxyView({
       </div>
 
       {/* ── PANEL ── */}
-      <div className={`grid grid-rows-[44px_1fr]
+      <div className={`grid grid-rows-[44px_minmax(0,1fr)] h-full min-h-0
         max-lg:absolute max-lg:inset-y-0 max-lg:right-0 max-lg:z-30 max-lg:w-[19rem] max-lg:bg-surface max-lg:shadow-2xl
         ${drawer === "details" ? "" : "max-lg:hidden"}`}>
         <div className="border-l border-b border-border bg-surface/40 flex items-center justify-end gap-2 pl-4 pr-5 min-w-0">
@@ -1773,7 +1889,7 @@ export default function GalaxyView({
             )}
           </div>
         </div>
-        <div className="min-h-0">
+        <div className="min-h-0 h-full">
           <NodePanel selected={selected} loans={loans} portfolios={portfolios} members={members} goals={goals} flows={flows} goalLinks={goalLinks} portfolioOwnerships={portfolioOwnerships} actions={actions} onClear={() => setSelected(null)} createMode={createMode} setCreateMode={setCreateMode} salary={salary} onUpdateSalary={onUpdateSalary} onUpdateSelf={onUpdateSelf} groups={groups.map(g => ({ key: g.key, total: g.total, valued: g.valued }))} grossTotal={grossTotal} debt={debt} ownerName={ownerName} expenseMemberId={expenseMemberId} dividends={dividends} displayCurrency={displayCurrency} ctx={ctx}
             onPortfolioCreated={p => setSelected({ kind: "portfolio", id: p.id, name: p.name, color: p.color, skin: p.skin, total: 0, count: 0, memberId: p.memberId })} />
         </div>
