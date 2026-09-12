@@ -5,6 +5,7 @@ import { AlertTriangle, X, Eye, Sparkles, Loader2 } from "lucide-react";
 import GalaxyView from "@/components/GalaxyView";
 import SinceLastVisit from "@/components/SinceLastVisit";
 import MonthReview, { type Occurrence } from "@/components/MonthReview";
+import DemoIntro from "@/components/DemoIntro";
 import type { LayoutMode } from "@/lib/galaxyLayout";
 import { currentValue, goalProgress, isStale, totalDebt, type ValuationContext } from "@/lib/networth";
 import { formatMoney } from "@/lib/format";
@@ -339,7 +340,8 @@ export default function HomePage() {
             </div>
           </div>
         )}
-        {!isEmpty && <SinceLastVisit data={visitData} disabled={readOnly} />}
+        {readOnly && <DemoIntro />}
+        {!isEmpty && !readOnly && <SinceLastVisit data={visitData} disabled={readOnly} />}
         <GalaxyView
           assets={assets} portfolios={portfolios} goals={goals} loans={loans}
           members={members} flows={flows} goalLinks={goalLinks} portfolioOwnerships={portfolioOwnerships} quotes={quotes} dividends={dividends} actions={actions}
