@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { flowOccurrences, flows } from "@/db/schema";
-import { and, gte, lte, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { upcomingByMonth, type FlowLike } from "@/lib/calendar";
 
 /**
@@ -56,6 +56,29 @@ export async function generateOccurrences(
   // `DO NOTHING` et non `DO UPDATE` : une échéance déjà présente peut avoir été
   // validée avec un montant corrigé, la regénérer ne doit pas l'écraser.
   await db.insert(flowOccurrences).values(lignes).onConflictDoNothing();
+
+  // Puis on retire les échéances devenues sans objet : une règle dont on a
+  // changé la date ou la fréquence laissait derrière elle les dates de l'ancien
+  // calendrier, et rien ne les effaçait jamais — la génération n'ajoutait
+  // qu'à la suite. On s'en tient à deux garde-fous : seulement le `pending`,
+  // parce qu'une échéance pointée est une affirmation de l'utilisateur sur le
+  // passé et ne s'efface pas ; et seulement la fenêtre qu'on vient de
+  // recalculer, pour ne pas emporter les retards plus anciens que le badge
+  // compte encore.
+  const finFenetre = new Date(maintenant.getFullYear(), maintenant.getMonth() + moisFuturs + 1, 0);
+  const attendues = new Set(lignes.map((l) => `${l.flowId}|${l.dueDate}`));
+  const presentes = await db
+    .select({ id: flowOccurrences.id, flowId: flowOccurrences.flowId, dueDate: flowOccurrences.dueDate })
+    .from(flowOccurrences)
+    .where(and(
+      eq(flowOccurrences.status, "pending"),
+      gte(flowOccurrences.dueDate, jour(debut)),
+      lte(flowOccurrences.dueDate, jour(finFenetre)),
+    ));
+  const perimees = presentes.filter((o) => !attendues.has(`${o.flowId}|${o.dueDate}`)).map((o) => o.id);
+  if (perimees.length > 0) {
+    await db.delete(flowOccurrences).where(inArray(flowOccurrences.id, perimees));
+  }
   return lignes.length;
 }
 

@@ -134,3 +134,75 @@ describe("échéances passées", () => {
     assert.ok(total >= 8 && total <= 10, `${total} occurrences`);
   });
 });
+
+describe("échéances de fin de mois", () => {
+  // Régression : la boucle avançait avec `setMonth`, qui déborde. Un flux ancré
+  // le 31 janvier donnait 31/01 puis **3 mars** — février disparaissait de la
+  // liste, et toutes les échéances suivantes tombaient le 3 à vie. Sur un écran
+  // dont le seul rôle est de confirmer qu'un prélèvement est bien passé, perdre
+  // un mois entier est la panne la plus grave, et elle ne se voyait pas.
+  const jours = (f: FlowLike, mois: number, depuis: Date) =>
+    upcomingByMonth([f], mois, depuis)
+      .flatMap(g => g.occurrences)
+      .map(o => `${o.date.getFullYear()}-${String(o.date.getMonth() + 1).padStart(2, "0")}-${String(o.date.getDate()).padStart(2, "0")}`);
+
+  test("un flux du 31 tombe au dernier jour des mois courts, puis revient au 31", () => {
+    const f = flux({ createdAt: new Date(2026, 0, 31).toISOString() });
+    assert.deepEqual(jours(f, 6, new Date(2026, 0, 1)), [
+      "2026-01-31", "2026-02-28", "2026-03-31", "2026-04-30", "2026-05-31", "2026-06-30",
+    ]);
+  });
+
+  test("un flux du 30 ne saute pas février", () => {
+    const f = flux({ createdAt: new Date(2026, 0, 30).toISOString() });
+    assert.deepEqual(jours(f, 4, new Date(2026, 0, 1)), [
+      "2026-01-30", "2026-02-28", "2026-03-30", "2026-04-30",
+    ]);
+  });
+
+  test("le 29 février d'une année bissextile existe bien", () => {
+    const f = flux({ createdAt: new Date(2024, 0, 29).toISOString() });
+    assert.deepEqual(jours(f, 3, new Date(2024, 0, 1)), [
+      "2024-01-29", "2024-02-29", "2024-03-29",
+    ]);
+  });
+
+  test("un flux annuel du 29 février retombe au 28 les années communes", () => {
+    // 40 mois depuis janvier 2024 : la fenêtre court jusqu'au 30 avril 2027.
+    const f = flux({ frequency: "yearly", createdAt: new Date(2024, 1, 29).toISOString() });
+    assert.deepEqual(jours(f, 40, new Date(2024, 0, 1)), [
+      "2024-02-29", "2025-02-28", "2026-02-28", "2027-02-28",
+    ]);
+  });
+
+  test("chaque mois de la fenêtre reçoit exactement une échéance mensuelle", () => {
+    const f = flux({ createdAt: new Date(2025, 0, 31).toISOString() });
+    const groupes = upcomingByMonth([f], 12, new Date(2026, 0, 1));
+    assert.equal(groupes.length, 12, "douze mois attendus");
+    for (const g of groupes) assert.equal(g.occurrences.length, 1, `${g.cle} : une seule échéance`);
+  });
+
+  test("les clés restent uniques et datées en heure locale", () => {
+    const f = flux({ createdAt: new Date(2026, 0, 31).toISOString() });
+    const cles = upcomingByMonth([f], 6, new Date(2026, 0, 1)).flatMap(g => g.occurrences.map(o => o.key));
+    assert.equal(new Set(cles).size, cles.length);
+    assert.ok(cles.includes("1-2026-02-28"), cles.join(","));
+  });
+
+  test("un flux annuel garde son mois d'origine", () => {
+    const f = flux({ frequency: "yearly", createdAt: new Date(2020, 10, 20).toISOString() });
+    // 30 mois depuis janvier 2026 : la fenêtre s'arrête au 30 juin 2028, donc
+    // l'échéance de novembre 2028 en sort.
+    const j = jours(f, 30, new Date(2026, 0, 1));
+    assert.deepEqual(j, ["2026-11-20", "2027-11-20"]);
+  });
+
+  test("un flux hebdomadaire garde un pas de sept jours", () => {
+    const f = flux({ frequency: "weekly", createdAt: new Date(2026, 0, 1).toISOString() });
+    const j = jours(f, 2, new Date(2026, 0, 1));
+    for (let i = 1; i < j.length; i++) {
+      const a = new Date(j[i - 1]), b = new Date(j[i]);
+      assert.equal((b.getTime() - a.getTime()) / 86_400_000, 7, `${j[i - 1]} → ${j[i]}`);
+    }
+  });
+});

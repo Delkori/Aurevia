@@ -8,6 +8,11 @@
  * répondre était « qu'est-ce qui part en novembre ».
  */
 
+/** `2026-02-28`, en heure locale — `toISOString` décalerait d'un jour. */
+function cleJour(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 const MOIS = [
   "janvier", "février", "mars", "avril", "mai", "juin",
   "juillet", "août", "septembre", "octobre", "novembre", "décembre",
@@ -97,40 +102,57 @@ function occurrencesDe(flow: FlowLike, debut: Date, fin: Date): Occurrence[] {
   if (flow.frequency === "once") {
     if (origine >= debut && origine <= fin) {
       out.push({
-        key: `${flow.id}-${origine.toISOString().slice(0, 10)}`,
+        key: `${flow.id}-${cleJour(origine)}`,
         flowId: flow.id, date: new Date(origine), label, amount: montant, direction,
       });
     }
     return out;
   }
 
-  // Départ : on saute directement à la première occurrence >= debut, sans
-  // parcourir toutes celles qui séparent l'origine de la fenêtre.
-  const curseur = new Date(origine);
-  if (curseur < debut) {
-    if (flow.frequency === "weekly") {
+  const pousser = (d: Date) => out.push({
+    key: `${flow.id}-${cleJour(d)}`,
+    flowId: flow.id, date: d, label, amount: montant, direction,
+  });
+
+  if (flow.frequency === "weekly") {
+    // Sept jours sont sept jours : aucun report à craindre, on avance.
+    const curseur = new Date(origine);
+    if (curseur < debut) {
       const sauts = Math.floor((debut.getTime() - curseur.getTime()) / (7 * 86_400_000));
       curseur.setDate(curseur.getDate() + sauts * 7);
-    } else if (flow.frequency === "yearly") {
-      curseur.setFullYear(curseur.getFullYear() + (debut.getFullYear() - curseur.getFullYear()));
-    } else {
-      const mois = (debut.getFullYear() - curseur.getFullYear()) * 12 + (debut.getMonth() - curseur.getMonth());
-      curseur.setMonth(curseur.getMonth() + mois);
     }
+    for (let garde = 0; curseur <= fin && garde < 600; garde++) {
+      if (curseur >= debut) pousser(new Date(curseur));
+      curseur.setDate(curseur.getDate() + 7);
+    }
+    return out;
   }
 
-  let garde = 0;
-  while (curseur <= fin && garde < 500) {
-    if (curseur >= debut) {
-      out.push({
-        key: `${flow.id}-${curseur.toISOString().slice(0, 10)}`,
-        flowId: flow.id, date: new Date(curseur), label, amount: montant, direction,
-      });
-    }
-    if (flow.frequency === "weekly") curseur.setDate(curseur.getDate() + 7);
-    else if (flow.frequency === "yearly") curseur.setFullYear(curseur.getFullYear() + 1);
-    else curseur.setMonth(curseur.getMonth() + 1);
-    garde++;
+  // Mensuel et annuel : on avance par *rang de période* et on reconstruit la
+  // date à chaque fois, en ramenant le jour au dernier du mois quand il n'existe
+  // pas.
+  //
+  // `setMonth` ne peut pas servir ici. Appliqué au 31 janvier il déborde sur le
+  // 3 mars : février disparaissait purement et simplement de la liste, et toutes
+  // les échéances suivantes tombaient le 3 à vie. Pour un écran dont le seul but
+  // est de dire « les 380 € sont-ils bien passés », perdre un mois entier de
+  // prélèvement est la pire panne possible — d'autant qu'elle est silencieuse.
+  const pas = flow.frequency === "yearly" ? 12 : 1;
+  const jourVoulu = origine.getDate();
+  const rangOrigine = origine.getFullYear() * 12 + origine.getMonth();
+  const dateAuRang = (rang: number) => {
+    const an = Math.floor(rang / 12), mois = rang - an * 12;
+    const dernier = new Date(an, mois + 1, 0).getDate();
+    return new Date(an, mois, Math.min(jourVoulu, dernier),
+      origine.getHours(), origine.getMinutes(), origine.getSeconds());
+  };
+
+  const rangDebut = debut.getFullYear() * 12 + debut.getMonth();
+  let k = Math.max(0, Math.ceil((rangDebut - rangOrigine) / pas));
+  for (let garde = 0; garde < 600; garde++, k++) {
+    const d = dateAuRang(rangOrigine + k * pas);
+    if (d > fin) break;
+    if (d >= debut) pousser(d);
   }
   return out;
 }
