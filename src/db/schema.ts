@@ -6,6 +6,8 @@ import {
   timestamp,
   date,
   integer,
+  index,
+  unique,
 } from "drizzle-orm/pg-core";
 
 // ── Membres du foyer ─────────────────────────────────────────────────────────
@@ -27,7 +29,7 @@ export const portfolios = pgTable("portfolios", {
   skin: text("skin"),
   memberId: integer("member_id").references(() => members.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => [index("portfolios_member_id_idx").on(t.memberId)]);
 
 // ── Quotes-parts (répartition d'un portefeuille entre plusieurs propriétaires) ──
 // Absence de ligne pour un portefeuille = comportement historique (100% au
@@ -38,7 +40,7 @@ export const portfolioOwnerships = pgTable("portfolio_ownerships", {
   memberId: integer("member_id").references(() => members.id, { onDelete: "cascade" }), // null = "Moi"
   sharePercent: numeric("share_percent").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => [index("portfolio_ownerships_portfolio_id_idx").on(t.portfolioId)]);
 
 // ── Actifs ────────────────────────────────────────────────────────────────────
 export const assets = pgTable("assets", {
@@ -54,7 +56,7 @@ export const assets = pgTable("assets", {
   portfolioId: integer("portfolio_id").references(() => portfolios.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (t) => [index("assets_portfolio_id_idx").on(t.portfolioId)]);
 
 // ── Objectifs ─────────────────────────────────────────────────────────────────
 export const goals = pgTable("goals", {
@@ -75,7 +77,7 @@ export const goalLinks = pgTable("goal_links", {
   goalId: integer("goal_id").notNull().references(() => goals.id, { onDelete: "cascade" }),
   portfolioId: integer("portfolio_id").notNull().references(() => portfolios.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => [index("goal_links_goal_id_idx").on(t.goalId), index("goal_links_portfolio_id_idx").on(t.portfolioId)]);
 
 // ── Flux financiers ──────────────────────────────────────────────────────────
 // Un flux représente un transfert récurrent entre deux entités
@@ -101,7 +103,10 @@ export const settings = pgTable("settings", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
-// ── Budget ────────────────────────────────────────────────────────────────────
+// ── Budget (réservé) ─────────────────────────────────────────────────────────
+// Ces deux tables ne sont exposées par aucune route : la section budget a été
+// retirée de l'interface. Elles sont conservées pour une v2 plutôt que
+// supprimées, pour ne pas détruire les données d'un déploiement existant.
 export const budgetCategories = pgTable("budget_categories", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
@@ -119,7 +124,7 @@ export const budgetEntries = pgTable("budget_entries", {
   note: text("note"),
   date: date("date").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => [index("budget_entries_category_id_idx").on(t.categoryId)]);
 
 // ── Crédits / Prêts ──────────────────────────────────────────────────────────
 export const loans = pgTable("loans", {
@@ -135,12 +140,63 @@ export const loans = pgTable("loans", {
   currency: text("currency").notNull().default("EUR"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (t) => [index("loans_asset_id_idx").on(t.assetId)]);
 
 // ── Historique patrimoine net ─────────────────────────────────────────────────
+// `date` est unique : l'instantané du jour est mis à jour, jamais dupliqué —
+// deux onglets ouverts en même temps ne peuvent plus créer deux lignes.
 export const netWorthSnapshots = pgTable("net_worth_snapshots", {
   id: serial("id").primaryKey(),
   date: date("date").notNull(),
   totalValue: numeric("total_value").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [unique("net_worth_snapshots_date_unique").on(t.date)]);
+
+// ── Échéances à valider ──────────────────────────────────────────────────────
+// Un `flow` est une *règle* (« 380 € de crèche, tous les mois »). Cette table
+// en matérialise chaque échéance pour qu'on puisse la confronter au réel :
+// montant attendu d'un côté, montant constaté de l'autre. C'est cet écart que
+// ni un tableur ni un agrégateur ne donne.
+//
+// `(flow_id, due_date)` est unique : la génération des échéances peut être
+// relancée autant de fois qu'on veut sans jamais créer de doublon.
+export const flowOccurrences = pgTable("flow_occurrences", {
+  id: serial("id").primaryKey(),
+  flowId: integer("flow_id").notNull().references(() => flows.id, { onDelete: "cascade" }),
+  dueDate: date("due_date").notNull(),
+  expectedAmount: numeric("expected_amount").notNull(),
+  /** Renseigné à la validation. `null` tant que l'échéance n'a pas été vérifiée. */
+  actualAmount: numeric("actual_amount"),
+  // pending | confirmed | skipped
+  status: text("status").notNull().default("pending"),
+  note: text("note"),
+  confirmedAt: timestamp("confirmed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  unique("flow_occurrences_flow_due_unique").on(t.flowId, t.dueDate),
+  index("flow_occurrences_due_date_idx").on(t.dueDate),
+  index("flow_occurrences_status_idx").on(t.status),
+]);
+
+// ── Dernier cours connu ──────────────────────────────────────────────────────
+// Les caches mémoire de lib/prices.ts et lib/cryptoPrices.ts meurent avec
+// l'instance serverless : après chaque démarrage à froid, l'app re-tape Yahoo et
+// CoinGecko pour chaque ticker. Cette table leur sert de second niveau — et
+// surtout de dernier prix connu quand l'API ne répond pas, ce qui vaut mieux que
+// de retomber sur le prix de revient.
+export const priceCache = pgTable("price_cache", {
+  ticker: text("ticker").primaryKey(),
+  price: numeric("price").notNull(),
+  currency: text("currency").notNull(),
+  fetchedAt: timestamp("fetched_at").defaultNow().notNull(),
+});
+
+// ── Limitation des tentatives de connexion ───────────────────────────────────
+// Une ligne par IP. Sans ça, le mot de passe unique de l'app est exposé à un
+// nombre illimité d'essais.
+export const authThrottle = pgTable("auth_throttle", {
+  ip: text("ip").primaryKey(),
+  failures: integer("failures").notNull().default(0),
+  lockedUntil: timestamp("locked_until"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

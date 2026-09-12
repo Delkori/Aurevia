@@ -5,12 +5,15 @@ import {
   forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY,
   type Simulation, type SimulationNodeDatum,
 } from "d3-force";
-import { FolderPlus, Plus, PlusCircle, Star, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, AlertTriangle, Bell, Clock } from "lucide-react";
+import { FolderPlus, Plus, PlusCircle, Star, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, AlertTriangle, Bell, Clock, Menu, PanelRight, LayoutGrid, FlaskConical } from "lucide-react";
 import { findAccessory } from "@/lib/astronautAccessories";
 import { formatMoney } from "@/lib/format";
-import { currentValue, gain, gainPercent, totalDebt } from "@/lib/networth";
+import { currentValue, gain, gainPercent, goalProgress, totalDebt, ownedShare, type Rates, type ValuationContext } from "@/lib/networth";
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
 import { getLogoUrl } from "@/lib/logos";
+import { NATURE_COLORS, NATURE_LABELS, NATURE_ORDER, natureOfPortfolio, type Nature } from "@/lib/natures";
+import { flowLayout, LAYOUT_MODES, type LayoutMode } from "@/lib/galaxyLayout";
+import { ClipboardCheck, Loader2 } from "lucide-react";
 import { daysUntilNextOccurrence } from "@/lib/dates";
 import NodePanel, { PlanetModal, type Selection, type Actions } from "@/components/NodePanel";
 
@@ -71,12 +74,12 @@ function bezierPoint(s: { x: number; y: number }, c: { x: number; y: number }, t
 
 type PlanetSkin = "tech" | "crypto" | "terrain" | "ocean" | "chalet" | "vacances" | "generic" | "empty";
 const SKIN_IMAGE_TIERS: Partial<Record<PlanetSkin, string[]>> = {
-  tech: ["/planet-skins/tech-1.png", "/planet-skins/tech-2.png", "/planet-skins/tech-3.png"],
-  terrain: ["/planet-skins/terrain-1.png", "/planet-skins/terrain-2.png", "/planet-skins/terrain-3.png"],
-  ocean: ["/planet-skins/ocean.png"],
-  crypto: ["/planet-skins/crypto.png"],
-  chalet: ["/planet-skins/chalet.png"],
-  vacances: ["/planet-skins/vacances.png"],
+  tech: ["/planet-skins/tech-1.webp", "/planet-skins/tech-2.webp", "/planet-skins/tech-3.webp"],
+  terrain: ["/planet-skins/terrain-1.webp", "/planet-skins/terrain-2.webp", "/planet-skins/terrain-3.webp"],
+  ocean: ["/planet-skins/ocean.webp"],
+  crypto: ["/planet-skins/crypto.webp"],
+  chalet: ["/planet-skins/chalet.webp"],
+  vacances: ["/planet-skins/vacances.webp"],
 };
 function tierIndex(value: number, max: number, tiers: number) {
   if (max <= 0) return 0;
@@ -88,22 +91,22 @@ function skinImageForValue(skin: PlanetSkin, value: number, max: number): string
   if (!tiers || tiers.length === 0) return undefined;
   return tiers[tierIndex(value, max, tiers.length)];
 }
-const SALARY_IMAGES = ["/planet-skins/salary-1.png", "/planet-skins/salary-2.png", "/planet-skins/salary-3.png"];
+const SALARY_IMAGES = ["/planet-skins/salary-1.webp", "/planet-skins/salary-2.webp", "/planet-skins/salary-3.webp"];
 const SALARY_TIER_THRESHOLDS = [2500, 6000];
 function salaryImage(amount: number) {
   const idx = amount < SALARY_TIER_THRESHOLDS[0] ? 0 : amount < SALARY_TIER_THRESHOLDS[1] ? 1 : 2;
   return SALARY_IMAGES[idx];
 }
-const VACANCES_IMAGE = "/planet-skins/vacances.png";
+const VACANCES_IMAGE = "/planet-skins/vacances.webp";
 const EXPENSES_IMAGES = {
-  warning: "/planet-skins/expenses-warning.png",
-  eruption: "/planet-skins/expenses-eruption.png",
-  critical: "/planet-skins/expenses-critical.png",
+  warning: "/planet-skins/expenses-warning.webp",
+  eruption: "/planet-skins/expenses-eruption.webp",
+  critical: "/planet-skins/expenses-critical.webp",
 };
 const SHIP_IMAGES = {
-  small: "/ship-skins/transport-small.png",
-  medium: "/ship-skins/transport-medium.png",
-  large: "/ship-skins/transport-large.png",
+  small: "/ship-skins/transport-small.webp",
+  medium: "/ship-skins/transport-medium.webp",
+  large: "/ship-skins/transport-large.webp",
 };
 const SHIP_DIMS = {
   small: { w: 16, h: 10 },
@@ -155,20 +158,62 @@ function planetSkin(name: string, valued: { asset: { type: string }; value: numb
 interface GNode extends SimulationNodeDatum {
   id: string; kind: string; label: string; r: number; color: string;
   portfolioKey?: number | "unassigned"; assetId?: number; goalId?: number; memberId?: number | null;
-  gainVal?: number; gainPct?: number; sub?: string; logoUrl?: string | null; skin?: PlanetSkin;
+  gainVal?: number; gainPct?: number; sub?: string; logoUrl?: string | null; skin?: PlanetSkin; nature?: Nature;
   ownerExpenseTotal?: number; ownerRevenue?: number; flowId?: number; amount?: number; isProjected?: boolean; accessory?: string | null;
 }
 interface GLink { source: string; target: string }
 
+// Horloge d'animation de la galaxie. Chaque avance déclenche un rendu complet de
+// GalaxyView, donc sa cadence est directement le coût de l'animation ambiante.
+// Trois garde-fous, pour un résultat visuellement identique :
+//  · 30 images/s au lieu de 60 — les animations les plus rapides tournent à
+//    ~3 rad/s, très loin d'avoir besoin de 60 Hz ;
+//  · arrêt complet quand l'onglet est masqué — inutile de peindre en arrière-plan ;
+//  · arrêt complet si l'utilisateur a demandé « animations réduites », auquel cas
+//    la scène est simplement figée dans son état de repos.
+const FRAME_INTERVAL_MS = 1000 / 30;
+
 function useAnimClock() {
   const [t, setT] = useState(0);
-  const r = useRef<number>(0);
-  const s = useRef<number>(0);
+  const frame = useRef<number>(0);
+  const start = useRef<number>(0);
+  const lastEmit = useRef<number>(0);
+
   useEffect(() => {
-    const tick = (ts: number) => { if (!s.current) s.current = ts; setT((ts - s.current) / 1000); r.current = requestAnimationFrame(tick); };
-    r.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(r.current);
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    let running = false;
+
+    const tick = (ts: number) => {
+      if (!start.current) start.current = ts;
+      if (ts - lastEmit.current >= FRAME_INTERVAL_MS) {
+        lastEmit.current = ts;
+        setT((ts - start.current) / 1000);
+      }
+      frame.current = requestAnimationFrame(tick);
+    };
+
+    const stop = () => {
+      if (!running) return;
+      running = false;
+      cancelAnimationFrame(frame.current);
+    };
+    const play = () => {
+      if (running || document.hidden || reduced?.matches) return;
+      running = true;
+      frame.current = requestAnimationFrame(tick);
+    };
+    const sync = () => (document.hidden || reduced?.matches ? stop() : play());
+
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    reduced?.addEventListener("change", sync);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", sync);
+      reduced?.removeEventListener("change", sync);
+    };
   }, []);
+
   return t;
 }
 
@@ -179,13 +224,86 @@ const STARS = Array.from({ length: 260 }, (_, i) => ({
   op: i < 8 ? 0.4 + (i % 3) * 0.15 : 0.14 + (i % 7) * 0.06,
 }));
 
+/**
+ * Marqueurs qui parcourent les courbes : vaisseaux des versements et points de
+ * circulation. Ce sont les seules animations dont la position dépend du tracé
+ * et ne peut donc pas se réduire à une transformation CSS périodique.
+ *
+ * Ils vivent dans leur propre composant, avec leur propre horloge : c'est ce
+ * qui permet à GalaxyView de ne plus dépendre du temps du tout. Avant, une
+ * cinquantaine de marqueurs en mouvement obligeaient React à reconstruire les
+ * ~1000 éléments de la galaxie 22 fois par seconde.
+ */
+function TravelingMarkers({
+  flowLinks, links, goalLinkEdges, nodeById, totalRevenue, centerColor,
+}: {
+  flowLinks: { source: string; target: string; amount: number }[];
+  links: GLink[];
+  goalLinkEdges: { source: string; target: string }[];
+  nodeById: Map<string, GNode>;
+  totalRevenue: number;
+  centerColor: string;
+}) {
+  const t = useAnimClock();
+
+
+  return <>
+    {flowLinks.map((f, i) => {
+      const s = nodeById.get(f.source), tg = nodeById.get(f.target);
+      if (!s || !tg || s.x == null || tg.x == null) return null;
+      const seed = hashSeed(f.source, f.target), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
+      const sp = 3 + i * 0.6, p = (t / sp) % 1;
+      const head = bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, p);
+      const trail = [0.05, 0.1, 0.16, 0.23].map(off =>
+        bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, Math.max(0, p - off)));
+      const pct = totalRevenue > 0 ? f.amount / totalRevenue : f.amount / 500;
+      const shipTier: "small" | "medium" | "large" = pct < 0.08 ? "small" : pct < 0.25 ? "medium" : "large";
+      const d = SHIP_DIMS[shipTier];
+      return <g key={`rk-${i}`}>
+        {trail.map((pt, ti) => <circle key={`tr-${i}-${ti}`} cx={pt.x} cy={pt.y} r={3.5 - ti * 0.7} fill={tg.color} opacity={0.5 - ti * 0.11} />)}
+        <g transform={`translate(${head.x},${head.y}) rotate(${head.angle})`}>
+          <image href={SHIP_IMAGES[shipTier]} x={-d.w / 2} y={-d.h / 2} width={d.w} height={d.h} opacity={0.95} />
+        </g>
+      </g>;
+    })}
+
+    {links.filter(l => nodeById.get(l.target)?.kind !== "expense-item" && nodeById.get(l.target)?.kind !== "income-item").map(l => {
+      const s = nodeById.get(l.source), tg = nodeById.get(l.target);
+      if (!s || !tg || s.x == null || tg.x == null) return null;
+      // Les liens de propriété (patrimoine/membre → planète) font circuler leur
+      // point à l'envers : visuellement, la valeur de la planète remonte vers
+      // son propriétaire, elle ne s'en éloigne pas.
+      const isOwnershipLink = (s.kind === "member" || s.kind === "center") && (tg.kind === "portfolio" || tg.kind === "goal" || tg.kind === "member" || tg.kind === "member-salary");
+      const from = isOwnershipLink ? tg : s, to = isOwnershipLink ? s : tg;
+      const seed = hashSeed(s.id, tg.id), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
+      const sp = 5 + (s.id.charCodeAt(0) % 4), p = (t / sp) % 1;
+      const pt = bezierPoint({ x: from.x!, y: from.y! }, c, { x: to.x!, y: to.y! }, p);
+      const dotColor = isOwnershipLink ? (s.kind === "center" ? centerColor : s.color) : tg.color;
+      return <circle key={`dot-${s.id}-${tg.id}`} cx={pt.x} cy={pt.y} r={isOwnershipLink ? 2.6 : 2} fill={dotColor} opacity={isOwnershipLink ? 0.75 : 0.5} />;
+    })}
+
+    {goalLinkEdges.map((l, i) => {
+      const s = nodeById.get(l.source), tg = nodeById.get(l.target);
+      if (!s || !tg || s.x == null || tg.x == null) return null;
+      const seed = hashSeed(l.source, l.target), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
+      const pt = bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, (t / 6) % 1);
+      return <circle key={`gd-${i}`} cx={pt.x} cy={pt.y} r={2.5} fill="#34d399" opacity={0.85} />;
+    })}
+  </>;
+}
+
 export default function GalaxyView({
-  assets, portfolios, goals, loans, members, flows, goalLinks, portfolioOwnerships, quotes, dividends, actions, salary, onUpdateSalary, onUpdateSelf, onRefresh, showCountdown, ownerName, centerColor, ownerAccessory,
+  assets, portfolios, goals, loans, members, flows, goalLinks, portfolioOwnerships, quotes, dividends, actions, salary, onUpdateSalary, onUpdateSelf, onRefresh, showCountdown, ownerName, centerColor, ownerAccessory, rates, displayCurrency, readOnly = false, layoutMode, onLayoutMode, overdueCount = 0, onOpenReview, demoLoaded = false, onRemoveDemo, demoBusy = false,
 }: {
   assets: Asset[]; portfolios: Portfolio[]; goals: Goal[]; loans: Loan[];
   members: Member[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; quotes: Record<string, Quote>; dividends: Record<string, DividendInfo | null>;
   actions: Actions; salary: number; onUpdateSalary: (v: number) => Promise<void>; onUpdateSelf: (name: string, color: string, accessory: string | null) => Promise<void>; onRefresh: () => void; showCountdown: boolean;
   ownerName: string; centerColor: string; ownerAccessory: string | null;
+  rates: Rates; displayCurrency: string; readOnly?: boolean;
+  layoutMode: LayoutMode; onLayoutMode: (m: LayoutMode) => void;
+  overdueCount?: number; onOpenReview: () => void;
+  /** Le foyer d'exemple est chargé : on propose de le retirer. */
+  demoLoaded?: boolean; onRemoveDemo?: () => void; demoBusy?: boolean;
 }) {
   const [expanded, setExpanded] = useState<Set<number | "unassigned">>(new Set());
   const [selected, setSelected] = useState<Selection>(null);
@@ -198,6 +316,9 @@ export default function GalaxyView({
   const [alertsOpen, setAlertsOpen] = useState(false);
   const [expenseMemberId, setExpenseMemberId] = useState<number | null>(null);
   const [hideAmounts, setHideAmounts] = useState(false);
+  // Sous `lg`, les deux panneaux latéraux ne tiennent pas à côté de la galaxie :
+  // ils deviennent des tiroirs superposés, et la galaxie garde toute la largeur.
+  const [drawer, setDrawer] = useState<"menu" | "details" | null>(null);
   const [logoErrors, setLogoErrors] = useState<Set<string>>(new Set());
   const [showScrubBar, setShowScrubBar] = useState(false);
   const mask = (s: string) => hideAmounts ? "•••" : s;
@@ -207,7 +328,6 @@ export default function GalaxyView({
   const [pendingLink, setPendingLink] = useState<{ sourceType: string; sourceId: number | null; sourceLabel: string; targetType: string; targetId: number; targetLabel: string } | null>(null);
   const [linkAmount, setLinkAmount] = useState("");
   const [linkFrequency, setLinkFrequency] = useState("monthly");
-  const t = useAnimClock();
   const simRef = useRef<Simulation<GNode, GLink> | null>(null);
   const nodesMapRef = useRef<Map<string, GNode>>(new Map());
   const [, setTick] = useState(0);
@@ -215,11 +335,23 @@ export default function GalaxyView({
   const dragIdRef = useRef<string | null>(null);
   dragIdRef.current = dragId;
   const linksRef = useRef<GLink[]>([]);
+  /** Cibles de mise en page, lues à chaque tick — voir `snapColumns`. */
+  const targetsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const [snapTarget, setSnapTarget] = useState<string | null>(null);
   const dragStartPos = useRef<{ x: number; y: number } | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const zoomRef = useRef<{ k: number; x: number; y: number }>({ k: 1, x: 0, y: 0 });
   const rootRef = useRef<SVGGElement | null>(null);
+  const layoutModeRef = useRef(layoutMode);
+  layoutModeRef.current = layoutMode;
+
+  // Toutes les valorisations passent par ce contexte : sans lui, une ligne cotée
+  // en USD était additionnée comme si c'était des euros.
+  const ctx: ValuationContext = useMemo(
+    () => ({ rates, displayCurrency }),
+    [rates, displayCurrency]
+  );
+  const fmt = useCallback((v: number) => formatMoney(v, displayCurrency), [displayCurrency]);
 
   const groups = useMemo(() => {
     const byP = new Map<number | "unassigned", Asset[]>();
@@ -227,13 +359,13 @@ export default function GalaxyView({
     for (const p of portfolios) { if (!byP.has(p.id)) byP.set(p.id, []); } // keep empty planets visible
     return [...byP.entries()].map(([key, list]) => {
       const p = key === "unassigned" ? { id: "unassigned" as const, name: "Sans portefeuille", color: "#6b6b72", skin: null, memberId: null } : portfolios.find(p => p.id === key) ?? { id: key, name: "?", color: "#6b6b72", skin: null, memberId: null };
-      const valued = list.map(a => ({ asset: a, value: currentValue(a, a.ticker ? quotes[a.ticker] : null) }));
-      return { key, portfolio: p, valued, total: valued.reduce((s, v) => s + v.value, 0) };
+      const valued = list.map(a => ({ asset: a, value: currentValue(a, a.ticker ? quotes[a.ticker] : null, ctx) }));
+      return { key, portfolio: p, valued, total: valued.reduce((s, v) => s + v.value, 0), nature: natureOfPortfolio(valued) };
     }).sort((a, b) => b.total - a.total);
-  }, [assets, portfolios, quotes]);
+  }, [assets, portfolios, quotes, ctx]);
 
   const grossTotal = groups.reduce((s, g) => s + g.total, 0);
-  const debt = totalDebt(loans);
+  const debt = totalDebt(loans, ctx);
   const grandTotal = grossTotal - debt;
   const scrubMonthlyContribution = flows.reduce((s, f) => {
     if (f.targetType !== "portfolio" && f.targetType !== "goal") return s;
@@ -248,12 +380,11 @@ export default function GalaxyView({
   const currentYearForScrub = new Date().getFullYear();
   const scrubYear = currentYearForScrub + scrubYears;
 
-  const goalProgress = useCallback((goal: Goal) => {
-    const linkedIds = goalLinks.filter(gl => gl.goalId === goal.id).map(gl => gl.portfolioId);
-    if (linkedIds.length === 0) return 0;
-    const linkedTotal = linkedIds.reduce((s, pid) => s + (groups.find(g => g.key === pid)?.total ?? 0), 0);
-    return Math.min(1, linkedTotal / Number(goal.targetAmount));
-  }, [goalLinks, groups]);
+  const progressOf = useCallback(
+    (goal: Goal) =>
+      goalProgress(goal, goalLinks, pid => groups.find(g => g.key === pid)?.total ?? 0),
+    [goalLinks, groups]
+  );
 
   // Build graph
   const { targetNodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows, totalRevenue, totalInvest } = useMemo(() => {
@@ -287,7 +418,7 @@ export default function GalaxyView({
     const totalIncomeItems = incomeFlows.reduce((s, f) => s + Number(f.amount), 0);
     const totalRevenue = salary + totalIncomeItems;
 
-    if (totalRevenue > 0) nodes.push({ id: "salary", kind: "salary", label: "Revenus", r: 32, color: "#34d399", sub: formatMoney(totalRevenue), amount: totalRevenue });
+    if (totalRevenue > 0) nodes.push({ id: "salary", kind: "salary", label: "Revenus", r: 32, color: "#34d399", sub: fmt(totalRevenue), amount: totalRevenue });
     // Le Soleil grossit lui aussi avec la projection globale (racine carrée, comme sr(),
     // pour une croissance visuelle proportionnée plutôt que linéaire — un patrimoine x4
     // ne doit pas donner un Soleil x4 en rayon, sinon il avale tout le reste).
@@ -303,16 +434,21 @@ export default function GalaxyView({
     // Chaque planète-personne grossit avec SON patrimoine (portefeuilles qui lui sont
     // directement attribués), sur une échelle commune à Moi + tous les membres, pour que
     // les tailles restent comparables d'une personne à l'autre.
-    const selfTotal = groups.filter(g => !g.portfolio.memberId).reduce((s, g) => s + g.total, 0);
-    const memberTotal = (mid: number) => groups.filter(g => g.portfolio.memberId === mid).reduce((s, g) => s + g.total, 0);
+    // Les quotes-parts font foi quand elles existent : un bien commun réparti
+    // 50/50 compte pour moitié chez chacun, au lieu d'être attribué en entier au
+    // propriétaire déclaré de la planète.
+    const personTotal = (mid: number | null) => groups.reduce(
+      (s, g) => s + g.total * ownedShare(g.key, g.portfolio.memberId, mid, portfolioOwnerships), 0);
+    const selfTotal = personTotal(null);
+    const memberTotal = (mid: number) => personTotal(mid);
     const maxPersonTotal = Math.max(1, selfTotal, ...members.map(m => memberTotal(m.id)));
-    nodes.push({ id: "self", kind: "member", label: ownerName, r: sr(selfTotal, maxPersonTotal, 24, 48), color: centerColor, memberId: null, sub: formatMoney(selfTotal), accessory: ownerAccessory });
+    nodes.push({ id: "self", kind: "member", label: ownerName, r: sr(selfTotal, maxPersonTotal, 24, 48), color: centerColor, memberId: null, sub: fmt(selfTotal), accessory: ownerAccessory });
     links.push({ source: "center", target: "self" });
     if (totalRevenue > 0) links.push({ source: "salary", target: "center" });
 
     incomeFlows.forEach(inf => {
       const iid = `inc-${inf.id}`;
-      nodes.push({ id: iid, kind: "income-item", label: inf.name || "Revenu", r: 10 + Math.min(8, Number(inf.amount) / 200), color: "#34d399", sub: formatMoney(Number(inf.amount)), flowId: inf.id });
+      nodes.push({ id: iid, kind: "income-item", label: inf.name || "Revenu", r: 10 + Math.min(8, Number(inf.amount) / 200), color: "#34d399", sub: fmt(Number(inf.amount)), flowId: inf.id });
       links.push({ source: "salary", target: iid });
     });
 
@@ -331,25 +467,25 @@ export default function GalaxyView({
     if (totalRevenue > 0) {
       nodes.push({ id: "expenses", kind: "expenses", label: "Dépenses", r: 22 + Math.min(18, myExpenseTotal / 80), color: "#f87171", ownerExpenseTotal: myExpenseTotal, ownerRevenue: totalRevenue });
       links.push({ source: "salary", target: "expenses" });
-      if (myExpenseTotal > 0) flowLinks.push({ source: "salary", target: "expenses", label: formatMoney(myExpenseTotal), amount: myExpenseTotal });
+      if (myExpenseTotal > 0) flowLinks.push({ source: "salary", target: "expenses", label: fmt(myExpenseTotal), amount: myExpenseTotal });
       myExpFlows.forEach(ef => {
         const eid = `exp-${ef.id}`;
-        nodes.push({ id: eid, kind: "expense-item", label: ef.name || "Dépense", r: 10 + Math.min(8, Number(ef.amount) / 100), color: "#f87171", sub: formatMoney(Number(ef.amount)), flowId: ef.id });
+        nodes.push({ id: eid, kind: "expense-item", label: ef.name || "Dépense", r: 10 + Math.min(8, Number(ef.amount) / 100), color: "#f87171", sub: fmt(Number(ef.amount)), flowId: ef.id });
         links.push({ source: "expenses", target: eid });
       });
     }
     if (totalRevenue > 0 && resteAInvestir > 0) {
       nodes.push({ id: "reste", kind: "reste", label: "Reste", r: 18, color: "#9585ff" });
       links.push({ source: "salary", target: "reste" });
-      flowLinks.push({ source: "salary", target: "reste", label: formatMoney(resteAInvestir), amount: resteAInvestir });
+      flowLinks.push({ source: "salary", target: "reste", label: fmt(resteAInvestir), amount: resteAInvestir });
     }
 
     members.forEach(m => {
       const mTotal = memberTotal(m.id);
-      nodes.push({ id: `m-${m.id}`, kind: "member", label: m.name, r: sr(mTotal, maxPersonTotal, 20, 44), color: m.color, memberId: m.id, sub: formatMoney(mTotal), accessory: m.accessory });
+      nodes.push({ id: `m-${m.id}`, kind: "member", label: m.name, r: sr(mTotal, maxPersonTotal, 20, 44), color: m.color, memberId: m.id, sub: fmt(mTotal), accessory: m.accessory });
       links.push({ source: "center", target: `m-${m.id}` });
       if (m.salary && Number(m.salary) > 0) {
-        nodes.push({ id: `ms-${m.id}`, kind: "member-salary", label: `Salaire de ${m.name}`, r: 22, color: m.color, memberId: m.id, sub: formatMoney(Number(m.salary)), amount: Number(m.salary) });
+        nodes.push({ id: `ms-${m.id}`, kind: "member-salary", label: `Salaire de ${m.name}`, r: 22, color: m.color, memberId: m.id, sub: fmt(Number(m.salary)), amount: Number(m.salary) });
         links.push({ source: `m-${m.id}`, target: `ms-${m.id}` });
       }
       const memberExpFlows = expFlows.filter(f => f.memberId === m.id);
@@ -360,7 +496,7 @@ export default function GalaxyView({
       links.push({ source: `m-${m.id}`, target: meid });
       memberExpFlows.forEach(ef => {
         const eid = `exp-${ef.id}`;
-        nodes.push({ id: eid, kind: "expense-item", label: ef.name || "Dépense", r: 10 + Math.min(8, Number(ef.amount) / 100), color: "#f87171", sub: formatMoney(Number(ef.amount)), flowId: ef.id });
+        nodes.push({ id: eid, kind: "expense-item", label: ef.name || "Dépense", r: 10 + Math.min(8, Number(ef.amount) / 100), color: "#f87171", sub: fmt(Number(ef.amount)), flowId: ef.id });
         links.push({ source: meid, target: eid });
       });
     });
@@ -368,22 +504,22 @@ export default function GalaxyView({
     for (const g of groups) {
       const pid = `p-${g.key}`;
       const memberNode = g.portfolio.memberId ? `m-${g.portfolio.memberId}` : null;
-      const totalGain = g.valued.reduce((s, v) => { const a = v.asset; return s + ((a.avgBuyPrice && Number(a.avgBuyPrice) > 0) ? gain(a, a.ticker ? quotes[a.ticker] : null) : 0); }, 0);
+      const totalGain = g.valued.reduce((s, v) => { const a = v.asset; return s + ((a.avgBuyPrice && Number(a.avgBuyPrice) > 0) ? gain(a, a.ticker ? quotes[a.ticker] : null, ctx) : 0); }, 0);
       const skin = planetSkin(g.portfolio.name, g.valued, g.portfolio.skin);
       const projTotal = projectedGroupTotal(g);
       // En simulation, le gain affiché (calculé sur les cours réels du jour) perdrait son
       // sens à côté d'une valeur projetée dans le futur — on le masque plutôt que d'afficher
       // un chiffre qui semblerait porter sur la projection alors qu'il ne la concerne pas.
-      nodes.push({ id: pid, kind: "portfolio", label: g.portfolio.name, r: sr(projTotal, maxPV, 20, 78), color: g.portfolio.color, portfolioKey: g.key, gainVal: scrubYears > 0 ? undefined : totalGain, sub: formatMoney(projTotal), skin, isProjected: scrubYears > 0 });
+      nodes.push({ id: pid, kind: "portfolio", label: g.portfolio.name, r: sr(projTotal, maxPV, 20, 78), color: NATURE_COLORS[g.nature], nature: g.nature, portfolioKey: g.key, gainVal: scrubYears > 0 ? undefined : totalGain, sub: fmt(projTotal), skin, isProjected: scrubYears > 0 });
       links.push({ source: memberNode ?? "self", target: pid });
       if (expanded.has(g.key)) {
         const maxAV = Math.max(1, ...g.valued.map(v => v.value));
         for (const v of g.valued) {
           const a = v.asset, hasG = a.avgBuyPrice && Number(a.avgBuyPrice) > 0;
           const q = a.ticker ? quotes[a.ticker] : null;
-          const gn = hasG ? gain(a, q) : 0;
-          const gp = hasG ? gainPercent(a, q) : undefined;
-          nodes.push({ id: `a-${a.id}`, kind: "asset", label: a.name, r: sr(v.value, maxAV, 10, 28), color: g.portfolio.color, portfolioKey: g.key, assetId: a.id, gainVal: hasG ? gn : undefined, gainPct: gp, sub: formatMoney(v.value), logoUrl: getLogoUrl(a.type, a.ticker) });
+          const gn = hasG ? gain(a, q, ctx) : 0;
+          const gp = hasG ? gainPercent(a, q, ctx) : undefined;
+          nodes.push({ id: `a-${a.id}`, kind: "asset", label: a.name, r: sr(v.value, maxAV, 10, 28), color: NATURE_COLORS[g.nature], nature: g.nature, portfolioKey: g.key, assetId: a.id, gainVal: hasG ? gn : undefined, gainPct: gp, sub: fmt(v.value), logoUrl: getLogoUrl(a.type, a.ticker) });
           links.push({ source: pid, target: `a-${a.id}` });
         }
       }
@@ -393,7 +529,7 @@ export default function GalaxyView({
     for (const goal of goals) {
       const memberNode = goal.memberId ? `m-${goal.memberId}` : null;
       const linkedPortfolioIds = goalLinks.filter(gl => gl.goalId === goal.id).map(gl => gl.portfolioId);
-      const prog = goalProgress(goal);
+      const prog = progressOf(goal);
       nodes.push({ id: `g-${goal.id}`, kind: "goal", label: goal.name, r: 16 + Math.min(1, prog) * 44, color: goal.color, goalId: goal.id, sub: `${Math.round(prog * 100)}%` });
       links.push({ source: memberNode ?? "self", target: `g-${goal.id}` });
       linkedPortfolioIds.forEach(pid => { if (nodes.find(n => n.id === `p-${pid}`)) goalLinkEdges.push({ source: `g-${goal.id}`, target: `p-${pid}` }); });
@@ -404,11 +540,11 @@ export default function GalaxyView({
       const sId = f.sourceType === "salary" ? "salary" : f.sourceType === "portfolio" ? `p-${f.sourceId}` : f.sourceType === "member_salary" ? `ms-${f.sourceId}` : null;
       const tId = f.targetType === "portfolio" ? `p-${f.targetId}` : f.targetType === "goal" ? `g-${f.targetId}` : null;
       if (sId && tId && nodes.find(n => n.id === sId) && nodes.find(n => n.id === tId))
-        flowLinks.push({ source: sId, target: tId, label: formatMoney(Number(f.amount)), amount: Number(f.amount), days: daysUntilNextOccurrence(f.createdAt, f.frequency), isSalarySource: f.sourceType === "salary" || f.sourceType === "member_salary" });
+        flowLinks.push({ source: sId, target: tId, label: fmt(Number(f.amount)), amount: Number(f.amount), days: daysUntilNextOccurrence(f.createdAt, f.frequency), isSalarySource: f.sourceType === "salary" || f.sourceType === "member_salary" });
     });
 
     return { targetNodes: nodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows, totalRevenue, totalInvest };
-  }, [groups, expanded, goals, members, flows, quotes, salary, goalLinks, goalProgress, scrubYears, scrubGrowth, ownerName, centerColor, ownerAccessory]);
+  }, [groups, expanded, goals, members, flows, quotes, salary, goalLinks, progressOf, scrubYears, scrubGrowth, ownerName, centerColor, ownerAccessory, ctx, portfolioOwnerships, fmt]);
   linksRef.current = links;
 
   // Simulation
@@ -417,15 +553,27 @@ export default function GalaxyView({
     const nodes: GNode[] = targetNodes.map(n => {
       const prev = map.get(n.id);
       if (prev) return { ...prev, ...n, x: prev.x, y: prev.y, vx: prev.vx, vy: prev.vy };
-      const saved = getNodePosition(n.id);
+      const saved = getNodePosition(layoutMode, n.id);
       if (saved) return { ...n, x: saved.x, y: saved.y, fx: saved.x, fy: saved.y };
       return { ...n, x: CX + (Math.random() - 0.5) * 80, y: CY + (Math.random() - 0.5) * 80 };
     });
     nodesMapRef.current = new Map(nodes.map(n => [n.id, n]));
     const nm = nodesMapRef.current;
-    const c = nm.get("center"); if (c && !getNodePosition("center")) { c.fx = CX; c.fy = CY; }
-    const s = nm.get("salary"); if (s && !getNodePosition("salary")) { s.fx = CX; s.fy = 80; }
-    const e = nm.get("expenses"); if (e && !getNodePosition("expenses")) { e.fx = CX + 350; e.fy = 180; }
+
+    // Changement de disposition : tout ce qui n'est pas épinglé *dans cette
+    // lecture-ci* doit être relâché. Les nœuds sont réutilisés d'un rendu à
+    // l'autre pour garder leur élan, ce qui leur faisait traîner le `fx`/`fy`
+    // d'un glissement fait en orbite — la planète restait clouée là où on
+    // l'avait posée, en travers des colonnes.
+    nm.forEach(node => {
+      if (!getNodePosition(layoutMode, node.id)) { node.fx = null; node.fy = null; }
+    });
+
+    if (layoutMode === "radial") {
+      const c = nm.get("center"); if (c && !getNodePosition("radial", "center")) { c.fx = CX; c.fy = CY; }
+      const s = nm.get("salary"); if (s && !getNodePosition("radial", "salary")) { s.fx = CX; s.fy = 80; }
+      const e = nm.get("expenses"); if (e && !getNodePosition("radial", "expenses")) { e.fx = CX + 350; e.fy = 180; }
+    }
 
     // Radial layout: instead of leaving members/portfolios/goals to pure spring physics
     // (which reads as chaotic clutter with crossing links and overlap once there are more
@@ -450,6 +598,7 @@ export default function GalaxyView({
     const unowned = directChildren.filter(n => n.kind !== "member").sort((a, b) => (a.kind === "goal" ? 1 : 0) - (b.kind === "goal" ? 1 : 0) || a.id.localeCompare(b.id));
     const memberHubs = directChildren.filter(n => n.kind === "member").sort((a, b) => (a.id === "self" ? -1 : b.id === "self" ? 1 : a.id.localeCompare(b.id)));
     const radialTargets = new Map<string, { x: number; y: number }>();
+    if (layoutMode === "radial") {
     if (unowned.length > 0) {
       const r1 = packRadius(unowned, Math.PI * 2, 34, 190);
       unowned.forEach((n, i) => {
@@ -477,11 +626,101 @@ export default function GalaxyView({
         radialTargets.set(child.id, { x: base.x + Math.cos(angle) * r3, y: base.y + Math.sin(angle) * r3 });
       });
     });
+    } else {
+      // Lecture « flux » : les rangées remplacent les anneaux. Le poids sert à
+      // ranger les plus grosses planètes au milieu de leur colonne.
+      //
+      // Une planète qui porte des satellites occupe bien plus que son rayon :
+      // ils orbitent à `parent.r + enfant.r + 12`. En ne réservant que le rayon,
+      // la colonne des dépenses se tassait en bas — « Loyer », « Courses » et
+      // « Énergie » se chevauchaient avec la planète voisine. On réserve donc
+      // l'encombrement réel, halo compris.
+      const halo = new Map<string, number>();
+      for (const l of links) {
+        const enfant = nm.get(l.target);
+        if (!enfant || (enfant.kind !== "asset" && enfant.kind !== "expense-item" && enfant.kind !== "income-item")) continue;
+        const parent = nm.get(l.source);
+        if (!parent) continue;
+        halo.set(l.source, Math.max(halo.get(l.source) ?? 0, parent.r + enfant.r * 2 + 12));
+      }
+      const cibles = flowLayout(
+        [...nm.values()].map(node => ({
+          id: node.id,
+          kind: node.kind,
+          r: Math.max(node.r, halo.get(node.id) ?? 0),
+          // Le poids reste le vrai rayon : on ordonne par taille de planète, pas
+          // par nombre de satellites.
+          weight: node.r,
+        })),
+        layoutMode,
+        { width: W, height: H }
+      );
+      cibles.forEach((p, id) => radialTargets.set(id, p));
+    }
+    targetsRef.current = radialTargets;
+
+    /**
+     * Fixe l'axe principal des rangées, à chaque tick.
+     *
+     * `forceCollide` de d3 n'est pas pondérée par `alpha`, contrairement à
+     * `forceX`/`forceY`. À mesure que la simulation refroidit, l'aimant de la
+     * mise en page s'éteint pendant que la collision, elle, continue de
+     * pousser : ce sont donc les collisions qui décidaient des positions
+     * finales, et la colonne du milieu s'étalait sur 338 px.
+     *
+     * L'axe principal *est* la colonne — il dit « ceci est un revenu, cela une
+     * destination » — donc il ne se négocie pas. L'axe transverse reste libre :
+     * c'est là que la collision fait son travail, en écartant les planètes sans
+     * rien casser de la lecture.
+     */
+    const snapColumns = () => {
+      if (layoutModeRef.current === "radial") return;
+      const horizontal = layoutModeRef.current === "horizontal";
+      nodesMapRef.current.forEach(node => {
+        if (node.id === dragIdRef.current) return;
+        const cible = targetsRef.current.get(node.id);
+        if (!cible) return;
+        // Un nœud volontairement posé par l'utilisateur garde sa place.
+        if (getNodePosition(layoutModeRef.current, node.id)) return;
+        if (horizontal) { node.x = cible.x; node.vx = 0; }
+        else { node.y = cible.y; node.vy = 0; }
+      });
+    };
 
     // Locks satellites (assets, expense/income items) to an evenly-spaced ring around
     // their parent planet every tick, instead of letting them drift semi-independently
     // under generic link/charge forces — they now visually move as one piece with the
     // planet they orbit, which reads much cleaner while the planet is dragged or settles.
+    // Marge : le rayon de la planète, plus la place de son étiquette et du
+    // petit astronaute qui se tient au-dessus.
+    const contain = () => {
+      const nm = nodesMapRef.current;
+      // Un nœud qui porte des satellites occupe bien plus que son rayon : ils
+      // orbitent à `parent.r + enfant.r + 12`. Sans en tenir compte, la planète
+      // tenait dans le cadre mais ses satellites en sortaient.
+      const orbite = new Map<string, number>();
+      for (const l of linksRef.current) {
+        const enfant = nm.get(l.target);
+        if (!enfant || (enfant.kind !== "asset" && enfant.kind !== "expense-item" && enfant.kind !== "income-item")) continue;
+        const parent = nm.get(l.source);
+        if (!parent) continue;
+        orbite.set(l.source, Math.max(orbite.get(l.source) ?? 0, parent.r + enfant.r * 2 + 12));
+      }
+      nm.forEach(node => {
+        if (node.id === dragIdRef.current) return;
+        const etendue = Math.max(node.r, orbite.get(node.id) ?? 0);
+        const margeHaut = etendue + 26;
+        const margeBas = etendue + 20;
+        const margeCote = etendue + 12;
+        if (node.x != null) node.x = Math.max(margeCote, Math.min(W - margeCote, node.x));
+        if (node.y != null) node.y = Math.max(margeHaut, Math.min(H - margeBas, node.y));
+        // Un nœud figé par un glisser-déposer doit être ramené lui aussi,
+        // sinon il reste hors cadre après un « rangement auto ».
+        if (node.fx != null) node.fx = Math.max(margeCote, Math.min(W - margeCote, node.fx));
+        if (node.fy != null) node.fy = Math.max(margeHaut, Math.min(H - margeBas, node.fy));
+      });
+    };
+
     const snapSatellites = () => {
       const nm = nodesMapRef.current;
       const childrenByParent = new Map<string, string[]>();
@@ -510,12 +749,21 @@ export default function GalaxyView({
 
     if (!simRef.current) {
       simRef.current = forceSimulation<GNode>(nodes)
-        .force("charge", forceManyBody().strength(d => { const k = (d as GNode).kind; return k === "expense-item" || k === "income-item" ? -30 : k === "asset" ? -60 : -180; }))
-        .force("collide", forceCollide<GNode>().radius(d => d.r + 26).strength(0.9))
-        .force("x", forceX<GNode>(CX).strength(0.02))
-        .force("y", forceY<GNode>(CY).strength(0.02))
-        .alphaDecay(0.018).on("tick", () => { snapSatellites(); setTick(n => n + 1); });
+        .force("charge", forceManyBody().strength(d => {
+          const k = (d as GNode).kind;
+          const satellite = k === "expense-item" || k === "income-item" || k === "asset";
+          if (satellite) return k === "asset" ? -60 : -30;
+          // En colonnes, une forte répulsion entre planètes les éjecte de leur
+          // rangée : la disposition s'en charge, la répulsion n'a plus à écarter
+          // que ce qui se superpose vraiment.
+          return layoutModeRef.current === "radial" ? -180 : -40;
+        }))
+        .force("x", forceX<GNode>(CX).strength(() => layoutModeRef.current === "radial" ? 0.02 : 0))
+        .force("y", forceY<GNode>(CY).strength(() => layoutModeRef.current === "radial" ? 0.02 : 0))
+        .alphaDecay(0.018).on("tick", () => { snapColumns(); contain(); snapSatellites(); setTick(n => n + 1); });
     } else simRef.current.nodes(nodes);
+    snapColumns();
+    contain();
     snapSatellites();
 
     // d3's forceLink() mutates each link object in place, replacing .source/.target
@@ -525,17 +773,39 @@ export default function GalaxyView({
     // nodeById.get() lookups), every link would render fine for one frame and then silently
     // disappear the instant the simulation ticked and mutated them. Pass shallow clones so
     // d3 mutates its own copies and our render-time arrays keep their string ids forever.
+    const enFlux = layoutMode !== "radial";
+
+    // En orbite, la collision est la seule chose qui empêche les planètes de se
+    // superposer, d'où la marge généreuse. En colonnes, la mise en page réserve
+    // déjà la place de chaque nœud — halo de satellites compris — et cette même
+    // marge ne faisait plus que désordonner la rangée : `forceCollide` n'étant
+    // pas pondérée par `alpha`, elle continue de pousser après extinction de
+    // l'aimant et c'est elle qui fixait l'ordre final.
+    simRef.current.force("collide", forceCollide<GNode>()
+      .radius(d => d.r + (enFlux ? 6 : 26)).strength(0.9));
+
     simRef.current.force("link", forceLink<GNode, GLink>(links.map(l => ({ ...l }))).id(d => d.id).distance(l => {
       const tgt = typeof l.target === "object" ? l.target : nm.get(l.target as unknown as string);
       return tgt?.kind === "expense-item" || tgt?.kind === "income-item" ? 45 : tgt?.kind === "asset" ? 65 : tgt?.kind === "member" ? 130 : 180;
-    }).strength(0.3));
+    }).strength(enFlux ? 0.04 : 0.3));
     simRef.current.force("goalLink", forceLink<GNode, GLink>(goalLinkEdges.map(l => ({ ...l }))).id(d => d.id).distance(160).strength(0.08));
+    // Les deux axes ne jouent pas le même rôle en lecture « flux ». L'axe
+    // principal *est* la colonne : c'est lui qui dit « ceci est un revenu, cela
+    // une destination », et une planète qui en dérive de 100 px change de sens.
+    // L'axe transverse n'est qu'un rangement : la force de collision doit
+    // pouvoir y écarter deux planètes sans se battre contre l'aimant.
+    // À force égale sur les deux axes, la charge et les liens étalaient la
+    // colonne du milieu sur 253 px — les rangées ne se lisaient plus.
+    const aimant = layoutMode === "radial" ? 0.22 : 0.8;
+    const principal = layoutMode === "radial" ? aimant : 0.96;
+    const transverse = layoutMode === "radial" ? aimant : 0.75;
+    const tenu = (d: GNode) => radialTargets.has(d.id) && !getNodePosition(layoutMode, d.id);
     simRef.current.force("radialX", forceX<GNode>(d => radialTargets.get(d.id)?.x ?? d.x ?? CX)
-      .strength(d => radialTargets.has(d.id) && !getNodePosition(d.id) ? 0.22 : 0));
+      .strength(d => tenu(d) ? (layoutMode === "vertical" ? transverse : principal) : 0));
     simRef.current.force("radialY", forceY<GNode>(d => radialTargets.get(d.id)?.y ?? d.y ?? CY)
-      .strength(d => radialTargets.has(d.id) && !getNodePosition(d.id) ? 0.22 : 0));
+      .strength(d => tenu(d) ? (layoutMode === "vertical" ? principal : transverse) : 0));
     simRef.current.alpha(0.7).restart();
-  }, [targetNodes, links, goalLinkEdges]);
+  }, [targetNodes, links, goalLinkEdges, layoutMode]);
 
   useEffect(() => { const sim = simRef.current; return () => { sim?.stop(); }; }, []);
 
@@ -600,7 +870,7 @@ export default function GalaxyView({
           node.fx = null; node.fy = null; // release so it snaps to new parent
         }
       } else if (node && node.x != null && node.y != null) {
-        setNodePosition(dragId, { x: node.x, y: node.y });
+        setNodePosition(layoutModeRef.current, dragId, { x: node.x, y: node.y });
       }
       simRef.current?.alphaTarget(0);
       setDragId(null); setSnapTarget(null);
@@ -689,11 +959,11 @@ export default function GalaxyView({
       const g = groups.find(gr => gr.key === n.portfolioKey)!;
       const v = g.valued.find(val => val.asset.id === n.assetId)!;
       const q = v.asset.ticker ? quotes[v.asset.ticker] : null;
-      setSelected({ kind: "asset", asset: v.asset, value: v.value, gain: gain(v.asset, q), gainPct: gainPercent(v.asset, q), portfolioName: g.portfolio.name });
+      setSelected({ kind: "asset", asset: v.asset, value: v.value, gain: gain(v.asset, q, ctx), gainPct: gainPercent(v.asset, q, ctx), portfolioName: g.portfolio.name });
     }
     else if (n.kind === "goal" && n.goalId != null) {
       const goal = goals.find(g => g.id === n.goalId)!;
-      setSelected({ kind: "goal", goal, progress: goalProgress(goal), linkedPortfolioIds: goalLinks.filter(gl => gl.goalId === goal.id).map(gl => gl.portfolioId) });
+      setSelected({ kind: "goal", goal, progress: progressOf(goal), linkedPortfolioIds: goalLinks.filter(gl => gl.goalId === goal.id).map(gl => gl.portfolioId) });
     }
     else if (n.id === "self") setSelected({ kind: "self", name: ownerName, color: centerColor, accessory: ownerAccessory });
     else if (n.kind === "member" && n.memberId != null) {
@@ -709,7 +979,7 @@ export default function GalaxyView({
     }
   };
 
-  const autoLayout = () => { clearAllPositions(); nodesMapRef.current.forEach(n => { if (n.id !== "center") { n.fx = null; n.fy = null; } }); zoomRef.current = { k: 1, x: 0, y: 0 }; rootRef.current?.setAttribute("transform", ""); simRef.current?.alpha(1).restart(); };
+  const autoLayout = () => { clearAllPositions(layoutModeRef.current); nodesMapRef.current.forEach(n => { if (n.id !== "center") { n.fx = null; n.fy = null; } }); zoomRef.current = { k: 1, x: 0, y: 0 }; rootRef.current?.setAttribute("transform", ""); simRef.current?.alpha(1).restart(); };
 
   const exportPdf = async () => {
     const svg = svgRef.current; if (!svg) return;
@@ -730,8 +1000,8 @@ export default function GalaxyView({
     const dateStr = new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
     ctx.fillText(dateStr, W - 200, 865);
     ctx.font = "16px sans-serif"; ctx.fillStyle = "#b8b8c2";
-    ctx.fillText(`Net : ${formatMoney(grandTotal)}   ·   Actifs bruts : ${formatMoney(grossTotal)}   ·   Crédits : ${formatMoney(debt)}`, 40, 900);
-    if (totalRevenue > 0) ctx.fillText(`Revenus mensuels : ${formatMoney(totalRevenue)}   ·   Dépenses : ${formatMoney(totalExpenseFlows)}   ·   Épargne : ${tauxEpargne}%`, 40, 930);
+    ctx.fillText(`Net : ${fmt(grandTotal)}   ·   Actifs bruts : ${fmt(grossTotal)}   ·   Crédits : ${fmt(debt)}`, 40, 900);
+    if (totalRevenue > 0) ctx.fillText(`Revenus mensuels : ${fmt(totalRevenue)}   ·   Dépenses : ${fmt(totalExpenseFlows)}   ·   Épargne : ${tauxEpargne}%`, 40, 930);
     if (structureScore !== null) { ctx.fillStyle = structureScore >= 70 ? "#34d399" : structureScore >= 45 ? "#9585ff" : "#f87171"; ctx.font = "bold 16px sans-serif"; ctx.fillText(`Score de structure : ${structureScore}/100`, 40, 965); }
 
     const pdf = new jsPDF({ orientation: "landscape", unit: "px", format: [W, H] });
@@ -754,14 +1024,14 @@ export default function GalaxyView({
       pdf.setTextColor(150, 150, 160);
       pdf.text(`${g.valued.length} actif${g.valued.length > 1 ? "s" : ""}`, 320, y);
       pdf.setTextColor(226, 226, 230);
-      pdf.text(formatMoney(g.total), W - 100, y, { align: "right" });
+      pdf.text(fmt(g.total), W - 100, y, { align: "right" });
       y += 18;
       if (y > H - 60) { pdf.addPage([W, H], "landscape"); pdf.setFillColor(10, 10, 14); pdf.rect(0, 0, W, H, "F"); y = 60; }
     }
 
     if (debt > 0) {
       y += 12; pdf.setTextColor(248, 113, 113); pdf.setFont("helvetica", "bold"); pdf.setFontSize(12);
-      pdf.text(`Crédits en cours : ${formatMoney(debt)}`, 50, y); y += 12;
+      pdf.text(`Crédits en cours : ${fmt(debt)}`, 50, y); y += 12;
     }
 
     if (goals.length > 0) {
@@ -769,11 +1039,11 @@ export default function GalaxyView({
       pdf.text("Objectifs", 40, y); y += 22;
       pdf.setFont("helvetica", "normal"); pdf.setFontSize(11);
       for (const g of goals) {
-        const prog = Math.round(goalProgress(g) * 100);
+        const prog = Math.round(progressOf(g) * 100);
         pdf.setTextColor(200, 200, 208);
         pdf.text(String(g.name), 50, y);
         pdf.setTextColor(150, 150, 160);
-        pdf.text(`${formatMoney(Number(g.targetAmount))} visé`, 320, y);
+        pdf.text(`${fmt(Number(g.targetAmount))} visé`, 320, y);
         pdf.setTextColor(prog >= 100 ? 52 : 149, prog >= 100 ? 211 : 133, prog >= 100 ? 153 : 255);
         pdf.text(`${prog}%`, W - 100, y, { align: "right" });
         y += 18;
@@ -790,7 +1060,7 @@ export default function GalaxyView({
         pdf.text(String(m.name), 50, y);
         pdf.setTextColor(150, 150, 160);
         pdf.text(String(m.role || ""), 320, y);
-        if (m.salary) { pdf.setTextColor(226, 226, 230); pdf.text(formatMoney(Number(m.salary)), W - 100, y, { align: "right" }); }
+        if (m.salary) { pdf.setTextColor(226, 226, 230); pdf.text(fmt(Number(m.salary)), W - 100, y, { align: "right" }); }
         y += 18;
         if (y > H - 60) { pdf.addPage([W, H], "landscape"); pdf.setFillColor(10, 10, 14); pdf.rect(0, 0, W, H, "F"); y = 60; }
       }
@@ -802,12 +1072,23 @@ export default function GalaxyView({
     pdf.save("aurevia.pdf");
   };
 
+  const parNature = useMemo(() => {
+    const somme = new Map<Nature, number>();
+    for (const g of groups) somme.set(g.nature, (somme.get(g.nature) ?? 0) + Math.max(0, g.total));
+    const total = [...somme.values()].reduce((a, b) => a + b, 0);
+    return NATURE_ORDER
+      .map(nature => ({ nature, montant: somme.get(nature) ?? 0 }))
+      .filter(l => l.montant > 0)
+      .map(l => ({ ...l, part: total > 0 ? l.montant / total : 0 }))
+      .sort((a, b) => b.montant - a.montant);
+  }, [groups]);
+
   const budgetRatio = totalRevenue > 0 ? totalExpenseFlows / totalRevenue : 0; // 0..1+ (1+ = deficit)
   const tauxEpargne = totalRevenue > 0 ? Math.round((totalRevenue - totalExpenseFlows) / totalRevenue * 100) : 0;
 
   // Score de structure /100 — purement organisationnel (diversification, dette,
   // concentration, taux d'épargne), aucune recommandation d'investissement.
-  const structureScore = (() => {
+  const structureScore = useMemo(() => {
     if (grossTotal <= 0) return null;
     const savingsPart = totalRevenue > 0 ? Math.min(25, Math.max(0, tauxEpargne / 40 * 25)) : 12.5;
     const skins = new Set(groups.filter(g => g.total > 0).map(g => planetSkin(g.portfolio.name, g.valued, g.portfolio.skin)));
@@ -817,41 +1098,80 @@ export default function GalaxyView({
     const largestShare = grossTotal > 0 ? Math.max(0, ...groups.map(g => g.total)) / grossTotal : 0;
     const concentrationPart = largestShare <= 0.3 ? 25 : Math.max(0, 25 - (largestShare - 0.3) / 0.7 * 25);
     return Math.round(savingsPart + diversificationPart + debtPart + concentrationPart);
-  })();
+  }, [grossTotal, totalRevenue, tauxEpargne, groups, debt]);
 
   // Alertes de trajectoire : purement factuelles (écart en €), aucun conseil d'investissement.
-  const alerts: { id: string; text: string }[] = [];
-  if (totalRevenue > 0 && totalExpenseFlows > totalRevenue) {
-    alerts.push({ id: "exp", text: `Dépenses (${formatMoney(totalExpenseFlows)}) supérieures aux revenus (${formatMoney(totalRevenue)}) : ${formatMoney(totalExpenseFlows - totalRevenue)}/mois de déficit.` });
-  }
-  if (totalRevenue > 0 && totalInvest > totalRevenue) {
-    alerts.push({ id: "inv", text: `Investissements programmés (${formatMoney(totalInvest)}) supérieurs aux revenus (${formatMoney(totalRevenue)}) : ${formatMoney(totalInvest - totalRevenue)}/mois au-delà de ce qui rentre.` });
-  }
+  const alerts = useMemo(() => {
+    const list: { id: string; text: string }[] = [];
+    if (totalRevenue > 0 && totalExpenseFlows > totalRevenue) {
+      list.push({ id: "exp", text: `Dépenses (${fmt(totalExpenseFlows)}) supérieures aux revenus (${fmt(totalRevenue)}) : ${fmt(totalExpenseFlows - totalRevenue)}/mois de déficit.` });
+    }
+    if (totalRevenue > 0 && totalInvest > totalRevenue) {
+      list.push({ id: "inv", text: `Investissements programmés (${fmt(totalInvest)}) supérieurs aux revenus (${fmt(totalRevenue)}) : ${fmt(totalInvest - totalRevenue)}/mois au-delà de ce qui rentre.` });
+    }
+    return list;
+  }, [totalRevenue, totalExpenseFlows, totalInvest, fmt]);
 
   return (
-    <div className="grid h-full" style={{ gridTemplateColumns: "160px 1fr 280px" }}>
+    <div className="relative grid h-full grid-cols-1 lg:grid-cols-[160px_1fr_280px]">
+      {/* Voile sous le tiroir ouvert : un clic en dehors le referme. */}
+      {drawer && (
+        <button
+          aria-label="Fermer le panneau"
+          onClick={() => setDrawer(null)}
+          className="lg:hidden absolute inset-0 z-20 bg-bg/70 cursor-default"
+        />
+      )}
       {/* ── LEFT MENU ── */}
-      <div className="glass-panel border-r border-border flex flex-col overflow-y-auto">
+      <div className={`glass-panel border-r border-border flex-col overflow-y-auto h-full min-h-0
+        max-lg:absolute max-lg:inset-y-0 max-lg:left-0 max-lg:z-30 max-lg:w-52 max-lg:shadow-2xl
+        ${drawer === "menu" ? "flex" : "hidden lg:flex"}`}>
+        <button
+          onClick={() => setDrawer(null)}
+          aria-label="Fermer le menu"
+          className="lg:hidden self-end p-3 text-text-muted hover:text-text"
+        >
+          <X size={16} />
+        </button>
         {/* Stats header */}
         <div className="px-4 pt-4 pb-3 border-b border-border space-y-1">
           <div>
-            <p className="text-lg font-[family-name:var(--font-mono-num)] tabular font-semibold">{formatMoney(grandTotal)}</p>
-            <p className="text-[10px] text-text-muted mt-0.5">Patrimoine net{debt > 0 && <span className="tabular"> · {formatMoney(grossTotal)} brut</span>}</p>
+            <p className="text-lg font-[family-name:var(--font-mono-num)] tabular font-semibold">{fmt(grandTotal)}</p>
+            <p className="text-[10px] text-text-muted mt-0.5">Patrimoine net{debt > 0 && <span className="tabular"> · {fmt(grossTotal)} brut</span>}</p>
           </div>
-          {totalRevenue > 0 && <>
-            <div className="flex items-center justify-between text-[10px] pt-1.5">
-              <span className="text-text-muted flex items-center gap-1"><TrendingUp size={10} className="text-positive" />Épargne</span>
-              <span className="tabular text-positive font-medium">{tauxEpargne}%</span>
+          {totalRevenue > 0 && (
+            <div className="flex items-center justify-between text-[10px] pt-1.5" title={`Dépenses ${Math.round(budgetRatio * 100)} % des revenus · reste ${fmt(resteAInvestir)}`}>
+              <span className="text-text-muted flex items-center gap-1">
+                {tauxEpargne >= 0
+                  ? <TrendingUp size={10} className="text-positive" />
+                  : <TrendingDown size={10} className="text-negative" />}
+                Taux d&apos;épargne
+              </span>
+              <span className={`tabular font-medium ${tauxEpargne >= 0 ? "text-positive" : "text-negative"}`}>{tauxEpargne}%</span>
             </div>
-            <div className="flex items-center justify-between text-[10px]">
-              <span className="text-text-muted flex items-center gap-1"><TrendingDown size={10} className="text-negative" />Dépense</span>
-              <span className="tabular text-negative font-medium">{Math.round(budgetRatio * 100)}%</span>
+          )}
+
+          {parNature.length > 0 && (
+            <div className="pt-2.5 space-y-1.5">
+              {/* Barre de répartition : elle fait office de légende de la couleur
+                  des planètes et des flux, tout en donnant le partage réel. */}
+              <div className="flex h-1.5 rounded-full overflow-hidden gap-px" role="img"
+                aria-label={parNature.map(l => `${NATURE_LABELS[l.nature]} ${Math.round(l.part * 100)} %`).join(", ")}>
+                {parNature.map(l => (
+                  <div key={l.nature} style={{ width: `${l.part * 100}%`, background: NATURE_COLORS[l.nature] }} />
+                ))}
+              </div>
+              {parNature.map(l => (
+                <div key={l.nature} className="flex items-center justify-between text-[10px] gap-2">
+                  <span className="flex items-center gap-1.5 min-w-0">
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: NATURE_COLORS[l.nature] }} />
+                    <span className="text-text-muted truncate">{NATURE_LABELS[l.nature]}</span>
+                  </span>
+                  <span className="tabular text-text-muted shrink-0">{Math.round(l.part * 100)}%</span>
+                </div>
+              ))}
             </div>
-            <div className="flex items-center justify-between text-[10px]">
-              <span className="text-text-muted">Reste</span>
-              <span className={`tabular font-medium ${resteAInvestir > 0 ? "text-accent" : "text-text-muted"}`}>{Math.round(resteAInvestir / totalRevenue * 100)}%</span>
-            </div>
-          </>}
+          )}
           {structureScore !== null && (
             <div className="pt-1.5" title="Score organisationnel : diversification, dette, concentration, épargne — pas un conseil d'investissement.">
               <div className="flex items-center justify-between text-[10px]">
@@ -865,8 +1185,78 @@ export default function GalaxyView({
           )}
         </div>
 
-        {/* Create actions */}
-        <div className="px-3 py-3 space-y-0.5">
+        {/* ── Lecture : disposition et simulateur ── */}
+        <div className="px-3 py-3 border-b border-border space-y-2">
+          <p className="text-[9px] text-text-muted uppercase tracking-wider px-1 flex items-center gap-1.5">
+            <LayoutGrid size={10} />Disposition
+          </p>
+          <div className="space-y-0.5">
+            {LAYOUT_MODES.map(({ mode, label, hint }) => (
+              <button key={mode} onClick={() => onLayoutMode(mode)} title={hint}
+                aria-pressed={layoutMode === mode}
+                className={`w-full text-left px-2 py-1.5 rounded-md text-[11px] leading-tight transition-colors ${
+                  layoutMode === mode ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text hover:bg-surface-hover"}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <button onClick={onOpenReview}
+            className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-muted hover:text-text hover:bg-surface-hover">
+            <ClipboardCheck size={13} className="shrink-0" />
+            Pointer le mois
+            {overdueCount > 0 && (
+              <span className="ml-auto px-1.5 rounded-full bg-[#fbbf24] text-[#1a1400] text-[10px] font-bold tabular">
+                {overdueCount > 99 ? "99+" : overdueCount}
+              </span>
+            )}
+          </button>
+
+          <button onClick={() => setShowScrubBar(v => !v)}
+            aria-pressed={showScrubBar}
+            className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs mt-1 transition-colors ${
+              showScrubBar ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text hover:bg-surface-hover"}`}>
+            <FlaskConical size={13} className="shrink-0" />Simulateur
+          </button>
+
+          {showScrubBar && (
+            <div className="px-1 pt-1 space-y-2">
+              <label className="flex items-center justify-between text-[10px] text-text-muted">
+                <span>Horizon</span>
+                <span className="tabular text-accent font-medium">
+                  {scrubYears === 0 ? "aujourd'hui" : `+${scrubYears} an${scrubYears > 1 ? "s" : ""}`}
+                </span>
+              </label>
+              <input type="range" min={0} max={30} step={1} value={scrubYears}
+                onChange={e => setScrubYears(Number(e.target.value))}
+                aria-label="Horizon de projection en années"
+                className="w-full accent-accent" />
+              <label className="flex items-center justify-between text-[10px] text-text-muted">
+                <span>Rendement</span>
+                <span className="tabular text-accent font-medium">{scrubGrowth} %/an</span>
+              </label>
+              <input type="range" min={0} max={15} step={0.5} value={scrubGrowth}
+                onChange={e => setScrubGrowth(Number(e.target.value))}
+                aria-label="Rendement annuel moyen supposé"
+                className="w-full accent-accent" />
+              {scrubYears > 0 && (
+                <div className="pt-1 border-t border-border">
+                  <p className="text-[10px] text-text-muted">En {scrubYear}</p>
+                  <p className="text-sm font-[family-name:var(--font-mono-num)] tabular font-semibold text-accent">
+                    {fmt(scrubProjectedTotal)}
+                  </p>
+                  <p className="text-[9px] text-text-muted mt-0.5">
+                    hypothèse, pas une prévision
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Create actions — masquées en lecture seule : un bouton qui ne peut
+            qu'échouer n'a pas sa place dans une démonstration. */}
+        {!readOnly && <div className="px-3 py-3 space-y-0.5">
           <p className="text-[9px] text-text-muted uppercase tracking-wider px-1 mb-1.5">Créer</p>
           {[
             { icon: FolderPlus, label: "Planète", mode: "portfolio" },
@@ -887,23 +1277,23 @@ export default function GalaxyView({
           {linkMode && <p className="text-[10px] text-accent px-2 pt-1">
             {linkSourceNode ? `Clique la destination (depuis "${linkSourceNode.label}")…` : "Clique la planète source…"}
           </p>}
-        </div>
+        </div>}
 
         {/* Salary */}
-        <div className="px-3 py-2 border-t border-border">
+        {!readOnly && <div className="px-3 py-2 border-t border-border">
           <p className="text-[9px] text-text-muted uppercase tracking-wider px-1 mb-1.5">Revenus</p>
           <button onClick={() => { setSelected(null); setCreateMode("salary"); }}
             className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs ${createMode === "salary" ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text hover:bg-surface-hover"}`}>
             <Wallet size={13} className="shrink-0" />
             Salaire principal
-            {salary > 0 && <span className="ml-auto text-[10px] tabular text-text-muted">{formatMoney(salary)}</span>}
+            {salary > 0 && <span className="ml-auto text-[10px] tabular text-text-muted">{fmt(salary)}</span>}
           </button>
           <button onClick={() => { setSelected(null); setCreateMode("income"); }}
             className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs ${createMode === "income" ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text hover:bg-surface-hover"}`}>
             <PlusCircle size={13} className="shrink-0" />
             Source de revenus
           </button>
-        </div>
+        </div>}
 
 
         <div className="flex-1" />
@@ -923,6 +1313,17 @@ export default function GalaxyView({
           <button onClick={exportPdf} className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-muted hover:text-text hover:bg-surface-hover">
             <Download size={13} />Export PDF
           </button>
+          {demoLoaded && !readOnly && onRemoveDemo && (
+            <button
+              onClick={onRemoveDemo}
+              disabled={demoBusy}
+              title="Supprime uniquement les lignes créées par l'exemple"
+              className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-muted hover:text-negative hover:bg-surface-hover disabled:opacity-50"
+            >
+              {demoBusy ? <Loader2 size={13} className="animate-spin" /> : <X size={13} />}
+              <span className="min-w-0 truncate">Retirer l&apos;exemple</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -936,17 +1337,37 @@ export default function GalaxyView({
           "#050409",
         ].join(", "),
       }}>
+        {/* Commandes mobiles : sous `lg`, les panneaux sont des tiroirs, il faut
+            de quoi les ouvrir — et le patrimoine net doit rester lisible sans
+            avoir à en ouvrir un. */}
+        <div className="lg:hidden absolute top-0 inset-x-0 z-10 flex items-center gap-2 px-3 py-2 bg-bg/80 backdrop-blur border-b border-border">
+          <button
+            onClick={() => setDrawer(d => (d === "menu" ? null : "menu"))}
+            aria-label="Ouvrir le menu"
+            aria-expanded={drawer === "menu"}
+            className="shrink-0 p-1.5 -m-1.5 text-text-muted hover:text-text"
+          >
+            <Menu size={18} />
+          </button>
+          <div className="flex-1 min-w-0 text-center">
+            <p className="text-sm font-[family-name:var(--font-mono-num)] tabular font-semibold truncate">{fmt(grandTotal)}</p>
+            <p className="text-[9px] text-text-muted -mt-0.5">Patrimoine net</p>
+          </div>
+          <button
+            onClick={() => setDrawer(d => (d === "details" ? null : "details"))}
+            aria-label="Ouvrir le détail"
+            aria-expanded={drawer === "details"}
+            className="shrink-0 p-1.5 -m-1.5 text-text-muted hover:text-text"
+          >
+            <PanelRight size={18} />
+          </button>
+        </div>
         <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full h-full select-none touch-none block absolute inset-0"
           onPointerDown={onBgDown} onPointerMove={onBgMove} onPointerUp={onBgUp} onPointerLeave={onBgUp}
           onClick={() => { if (linkSourceNode) { setLinkSourceNode(null); return; } if (ownerSourceNode) { setOwnerSourceNode(null); return; } setSelected(null); setCreateMode(null); }}>
           <defs>
             <filter id="gl" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3" /></filter>
             <filter id="glow-strong" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="6" result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
-            <filter id="turb-lava"><feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="3" seed="5"><animate attributeName="seed" values="1;20;1" dur="2s" repeatCount="indefinite" /></feTurbulence><feDisplacementMap in="SourceGraphic" scale="6" /></filter>
-            <filter id="turb-water"><feTurbulence type="fractalNoise" baseFrequency="0.015" numOctaves="3" seed="7"><animate attributeName="baseFrequency" values="0.015;0.025;0.015" dur="5s" repeatCount="indefinite" /></feTurbulence><feDisplacementMap in="SourceGraphic" scale="4" /></filter>
-            <filter id="terrain" x="0%" y="0%" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency="0.045" numOctaves="5" seed="12" result="noise" /><feComponentTransfer in="noise" result="soft"><feFuncA type="gamma" amplitude="0.5" exponent="2" offset="0" /></feComponentTransfer><feComposite in="SourceGraphic" in2="soft" operator="arithmetic" k1="1.2" k2="0.3" k3="0" k4="0" /></filter>
-            <filter id="clouds" x="0%" y="0%" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency="0.025 0.04" numOctaves="3" seed="42" result="t"><animate attributeName="seed" values="42;44;42" dur="8s" repeatCount="indefinite" /></feTurbulence><feComponentTransfer in="t" result="tc"><feFuncA type="discrete" tableValues="0 0 0 0 0.1 0.25 0.35" /></feComponentTransfer><feColorMatrix in="tc" type="matrix" values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.5 0" result="c" /><feComposite in="c" in2="SourceGraphic" operator="atop" /></filter>
-            <filter id="circuits" x="-10%" y="-10%" width="120%" height="120%"><feTurbulence type="turbulence" baseFrequency="0.08" numOctaves="2" seed="99" /><feColorMatrix type="luminanceToAlpha" /><feComponentTransfer><feFuncA type="discrete" tableValues="0 0 0.15 0.55 0.9" /></feComponentTransfer><feFlood floodColor="#5cfff0" floodOpacity="1" result="c" /><feComposite in="c" operator="in" /><feComposite in2="SourceGraphic" /></filter>
 
             <radialGradient id="sph-center" cx="35%" cy="28%" r="65%"><stop offset="0%" stopColor={shade(centerColor, 0.85)} /><stop offset="15%" stopColor={shade(centerColor, 0.45)} /><stop offset="35%" stopColor={centerColor} /><stop offset="60%" stopColor={shade(centerColor, -0.35)} /><stop offset="100%" stopColor={shade(centerColor, -0.8)} /></radialGradient>
             <radialGradient id="glow-center" cx="50%" cy="50%" r="50%"><stop offset="0%" stopColor={shade(centerColor, 0.4)} stopOpacity="0.3" /><stop offset="60%" stopColor={centerColor} stopOpacity="0.08" /><stop offset="100%" stopColor={centerColor} stopOpacity="0" /></radialGradient>
@@ -1028,15 +1449,16 @@ export default function GalaxyView({
               + le dégradé CSS du fond) créaient une bande violette trop marquée en haut
               de l'écran sur les moniteurs larges et peu hauts. */}
           <g opacity={0.35}>
-            <ellipse cx={W * 0.8} cy={H * 0.72} rx={220} ry={170} fill="url(#glow-crypto)" opacity={0.28}>
-              <animate attributeName="cy" values={`${H * 0.72};${H * 0.66};${H * 0.72}`} dur="46s" repeatCount="indefinite" />
-            </ellipse>
+            <ellipse cx={W * 0.8} cy={H * 0.72} rx={220} ry={170} fill="url(#glow-crypto)" opacity={0.28} />
           </g>
           {/* Quadrillage HUD, estompé vers les bords */}
           <rect x={0} y={0} width={W} height={H} fill="url(#hud-grid)" mask="url(#hud-grid-mask)" opacity={0.6} pointerEvents="none" />
           {/* Fond étoilé — 180 points fixes (seedés, stables entre rendus serveur/client),
               8 d'entre eux scintillent doucement */}
-          {STARS.map((s, i) => <circle key={`s${i}`} cx={s.x} cy={s.y} r={s.r} fill="#fff" opacity={i < 8 ? s.op * (0.65 + 0.35 * Math.sin(t * 1.3 + i * 0.9)) : s.op} />)}
+          {STARS.map((s, i) => i < 8
+            ? <circle key={`s${i}`} cx={s.x} cy={s.y} r={s.r} fill="#fff" className="g-twinkle"
+                style={{ "--g-op-min": s.op * 0.65, "--g-op-max": s.op, animationDelay: `${i * 0.6}s` } as React.CSSProperties} />
+            : <circle key={`s${i}`} cx={s.x} cy={s.y} r={s.r} fill="#fff" opacity={s.op} />)}
           <circle cx={CX} cy={CY} r={200} fill="none" stroke="rgba(255,255,255,0.03)" strokeDasharray="4 12" />
           <circle cx={CX} cy={CY} r={350} fill="none" stroke="rgba(255,255,255,0.02)" strokeDasharray="4 16" />
 
@@ -1058,10 +1480,8 @@ export default function GalaxyView({
               const seed = hashSeed(f.source, f.target), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
               const mid = bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, 0.5);
               return <g key={`fl-${i}`}>
-                <path d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke="#9585ff" strokeOpacity={0.3} strokeWidth={1.5} strokeDasharray="6 4">
-                  <animate attributeName="stroke-dashoffset" from="0" to="-20" dur={f.isSalarySource ? "0.9s" : "1.6s"} repeatCount="indefinite" />
-                </path>
-                <text x={mid.x} y={mid.y - 12} textAnchor="middle" fontSize={10} fill="#b8a5ff" opacity={0.75} fontWeight={500}>{mask(f.label)}</text>
+                <path d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke={tg.color} strokeOpacity={0.45} strokeWidth={1.5} strokeDasharray="6 4" />
+                <text x={mid.x} y={mid.y - 12} textAnchor="middle" fontSize={10} fill={tg.color} opacity={0.9} fontWeight={600}>{mask(f.label)}</text>
                 {showCountdown && f.days !== undefined && !Number.isNaN(f.days) && (
                   <text x={mid.x} y={mid.y + 2} textAnchor="middle" fontSize={8} fill="#fbbf24" opacity={0.85} fontWeight={600}>
                     {f.days === 0 ? "aujourd'hui" : `dans ${f.days}j`}
@@ -1069,84 +1489,50 @@ export default function GalaxyView({
                 )}
               </g>;
             })}
-            {flowLinks.map((f, i) => {
-              const s = nodeById.get(f.source), tg = nodeById.get(f.target);
-              if (!s || !tg || s.x == null || tg.x == null) return null;
-              const seed = hashSeed(f.source, f.target), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
-              const sp = 3 + i * 0.6, p = (t / sp) % 1;
-              const head = bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, p);
-              const trail = [0.05, 0.1, 0.16, 0.23].map(off => {
-                const pp = Math.max(0, p - off);
-                return bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, pp);
-              });
-              const pct = totalRevenue > 0 ? f.amount / totalRevenue : f.amount / 500;
-              const shipTier: "small" | "medium" | "large" = pct < 0.08 ? "small" : pct < 0.25 ? "medium" : "large";
-              const shipDims = SHIP_DIMS[shipTier];
-              return <g key={`rk-${i}`}>
-                {trail.map((pt, ti) => <circle key={`tr-${i}-${ti}`} cx={pt.x} cy={pt.y} r={3.5 - ti * 0.7} fill="url(#rocket-trail)" opacity={0.55 - ti * 0.12} />)}
-                <g transform={`translate(${head.x},${head.y}) rotate(${head.angle})`}>
-                  <image href={SHIP_IMAGES[shipTier]} x={-shipDims.w / 2} y={-shipDims.h / 2} width={shipDims.w} height={shipDims.h} opacity={0.95} />
-                </g>
-              </g>;
-            })}
-            {links.filter(l => nodeById.get(l.target)?.kind !== "expense-item" && nodeById.get(l.target)?.kind !== "income-item").map(l => {
-              const s = nodeById.get(l.source), tg = nodeById.get(l.target);
-              if (!s || !tg || s.x == null || tg.x == null) return null;
-              // Ownership links (patrimoine/membre → planète) run their traveling dot in reverse:
-              // visually, the planet's value flows back INTO the owner, not away from it.
-              const isOwnershipLink = (s.kind === "member" || s.kind === "center") && (tg.kind === "portfolio" || tg.kind === "goal" || tg.kind === "member" || tg.kind === "member-salary");
-              const from = isOwnershipLink ? tg : s, to = isOwnershipLink ? s : tg;
-              const seed = hashSeed(s.id, tg.id), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
-              const sp = 5 + (s.id.charCodeAt(0) % 4), p = (t / sp) % 1;
-              const pt = bezierPoint({ x: from.x!, y: from.y! }, c, { x: to.x!, y: to.y! }, p);
-              const dotColor = isOwnershipLink ? (s.kind === "center" ? centerColor : s.color) : tg.color;
-              return <circle key={`dot-${s.id}-${tg.id}`} cx={pt.x} cy={pt.y} r={isOwnershipLink ? 2.6 : 2} fill={dotColor} opacity={isOwnershipLink ? 0.75 : 0.5} filter="url(#gl)" />;
-            })}
+            <TravelingMarkers
+              flowLinks={flowLinks} links={links} goalLinkEdges={goalLinkEdges}
+              nodeById={nodeById} totalRevenue={totalRevenue} centerColor={centerColor}
+            />
 
-            {/* Goal ↔ planet validation links */}
+            {/* Tracés objectif ↔ planète (le point qui les parcourt est dans TravelingMarkers) */}
             {goalLinkEdges.map((l, i) => {
               const s = nodeById.get(l.source), tg = nodeById.get(l.target);
               if (!s || !tg || s.x == null || tg.x == null) return null;
               const seed = hashSeed(l.source, l.target), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
-              const p = (t / 6) % 1;
-              const pt = bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, p);
-              return <g key={`gl-${i}`}>
-                <path d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke="#34d399" strokeOpacity={0.4} strokeWidth={1.4} />
-                <circle cx={pt.x} cy={pt.y} r={2.5} fill="#34d399" opacity={0.85} filter="url(#gl)" />
-              </g>;
+              return <path key={`gl-${i}`} d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke="#34d399" strokeOpacity={0.4} strokeWidth={1.4} />;
             })}
 
             {/* Link mode source highlight */}
-            {linkSourceNode && (() => { const tg = nodeById.get(linkSourceNode.id); if (!tg || tg.x == null) return null; return <circle cx={tg.x} cy={tg.y} r={tg.r + 10} fill="none" stroke="#34d399" strokeWidth={2} strokeDasharray="3 4"><animate attributeName="r" values={`${tg.r + 6};${tg.r + 14};${tg.r + 6}`} dur="1s" repeatCount="indefinite" /></circle>; })()}
+            {linkSourceNode && (() => { const tg = nodeById.get(linkSourceNode.id); if (!tg || tg.x == null) return null; return <circle cx={tg.x} cy={tg.y} r={tg.r + 10} fill="none" stroke="#34d399" strokeWidth={2} strokeDasharray="3 4" className="pulse-ring" style={{ transformOrigin: `${tg.x}px ${tg.y}px` }} />; })()}
 
             {/* Owner mode source highlight */}
-            {ownerSourceNode && (() => { const tg = nodeById.get(ownerSourceNode.id); if (!tg || tg.x == null) return null; return <circle cx={tg.x} cy={tg.y} r={tg.r + 10} fill="none" stroke={centerColor} strokeWidth={2} strokeDasharray="3 4"><animate attributeName="r" values={`${tg.r + 6};${tg.r + 14};${tg.r + 6}`} dur="1s" repeatCount="indefinite" /></circle>; })()}
+            {ownerSourceNode && (() => { const tg = nodeById.get(ownerSourceNode.id); if (!tg || tg.x == null) return null; return <circle cx={tg.x} cy={tg.y} r={tg.r + 10} fill="none" stroke={centerColor} strokeWidth={2} strokeDasharray="3 4" className="pulse-ring" style={{ transformOrigin: `${tg.x}px ${tg.y}px` }} />; })()}
 
             {/* Magnetic snap halo */}
-            {snapTarget && (() => { const tg = nodeById.get(snapTarget); if (!tg || tg.x == null) return null; return <g><circle cx={tg.x} cy={tg.y} r={tg.r + 20} fill="none" stroke="#9585ff" strokeOpacity={0.6} strokeWidth={2.5} strokeDasharray="4 3"><animate attributeName="r" values={`${tg.r + 14};${tg.r + 24};${tg.r + 14}`} dur="0.7s" repeatCount="indefinite" /></circle><circle cx={tg.x} cy={tg.y} r={tg.r + 12} fill="rgba(149,133,255,0.06)" /></g>; })()}
+            {snapTarget && (() => { const tg = nodeById.get(snapTarget); if (!tg || tg.x == null) return null; return <g><circle cx={tg.x} cy={tg.y} r={tg.r + 20} fill="none" stroke="#9585ff" strokeOpacity={0.6} strokeWidth={2.5} strokeDasharray="4 3" className="pulse-ring pulse-ring-fast" style={{ transformOrigin: `${tg.x}px ${tg.y}px` }} /><circle cx={tg.x} cy={tg.y} r={tg.r + 12} fill="rgba(149,133,255,0.06)" /></g>; })()}
 
             {/* Nodes */}
             {nodes.map(n => {
               if (n.x == null || n.y == null) return null;
               const isExp = n.kind === "portfolio" && n.portfolioKey !== undefined && expanded.has(n.portfolioKey);
-              const gp = n.kind === "goal" && n.goalId != null ? (() => { const goal = goals.find(g => g.id === n.goalId); return goal ? goalProgress(goal) : null; })() : null;
+              const gp = n.kind === "goal" && n.goalId != null ? (() => { const goal = goals.find(g => g.id === n.goalId); return goal ? progressOf(goal) : null; })() : null;
               const ts = { textShadow: "0 1px 3px rgba(0,0,0,0.95), 0 0 8px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,1)" } as const;
               const isHoveredNode = hoveredId === n.id;
 
-              return <g key={n.id} className="nd" transform={`translate(${n.x},${n.y}) scale(${isHoveredNode ? 1.08 : 1})`} style={{ cursor: "pointer", transition: "transform 0.15s ease-out" }}
+              return <g key={n.id} className="nd" data-node-id={n.id} data-kind={n.kind} transform={`translate(${n.x},${n.y}) scale(${isHoveredNode ? 1.08 : 1})`} style={{ cursor: "pointer", transition: "transform 0.15s ease-out" }}
                 onPointerDown={onNodeDown(n.id)} onClick={e => { e.stopPropagation(); handleClick(n, e as unknown as React.MouseEvent); }}
                 onPointerEnter={() => setHoveredId(n.id)} onPointerLeave={() => setHoveredId(id => id === n.id ? null : id)}>
 
                 {n.kind === "center" && (() => {
                   const R = n.r;
-                  const bob = Math.sin(t * 1.5) * 1.2; // gentle breathing animation
+                  const bob = 0; // la respiration est désormais une animation CSS (.g-bob)
                   return <>
                     <circle r={R + 25} fill="url(#glow-center)" />
                     <circle r={R} fill="url(#sph-center)" filter="url(#glow-strong)" />
                     <circle r={R} fill="url(#sph-hl)" />
 
                     {/* ── Little astronaut standing on top ── */}
-                    <g transform={`translate(0, ${-R - 16 + bob})`}>
+                    <g className="g-bob-t" style={{ ["--g-y" as string]: `${-R - 16 + bob}px` }}>
                       {/* Legs */}
                       <line x1={-2.5} y1={8} x2={-3} y2={14} stroke="#e8e8ee" strokeWidth={2.2} strokeLinecap="round" />
                       <line x1={2.5} y1={8} x2={3} y2={14} stroke="#e8e8ee" strokeWidth={2.2} strokeLinecap="round" />
@@ -1164,11 +1550,11 @@ export default function GalaxyView({
                       <ellipse cx={-0.5} cy={-7} rx={1} ry={0.7} fill="rgba(255,255,255,0.5)" />
                       {/* Antenna */}
                       <line x1={0} y1={-11} x2={0} y2={-13.5} stroke="#c8c8d5" strokeWidth={0.7} />
-                      <circle cy={-14} r={0.9} fill="#ff5555" opacity={0.6 + Math.sin(t * 4) * 0.4} />
+                      <circle cy={-14} r={0.9} fill="#ff5555" className="g-blink-fast" />
                     </g>
 
                     <text y={-3} textAnchor="middle" fontSize={12} fontWeight={600} fill="#fff" style={ts}>{scrubYears > 0 ? `Patrimoine en ${scrubYear}` : "Patrimoine"}</text>
-                    <text y={13} textAnchor="middle" fontSize={10} fill={scrubYears > 0 ? "#9585ff" : "rgba(255,230,160,0.9)"} fontWeight={scrubYears > 0 ? 600 : 400}>{mask(formatMoney(scrubProjectedTotal))}{scrubYears > 0 ? " (projection)" : ""}</text>
+                    <text y={13} textAnchor="middle" fontSize={10} fill={scrubYears > 0 ? "#9585ff" : "rgba(255,230,160,0.9)"} fontWeight={scrubYears > 0 ? 600 : 400}>{mask(fmt(scrubProjectedTotal))}{scrubYears > 0 ? " (projection)" : ""}</text>
                   </>;
                 })()}
 
@@ -1179,7 +1565,7 @@ export default function GalaxyView({
                     <g clipPath={`url(#cp-${n.id})`}><image href={salImg} x={-n.r} y={-n.r} width={n.r * 2} height={n.r * 2} preserveAspectRatio="xMidYMid slice" /></g>
                   ) : <>
                     <circle r={n.r} fill="url(#sph-salary)" />
-                    <g clipPath={`url(#cp-${n.id})`}><circle r={n.r} fill="url(#sph-salary)" filter="url(#terrain)" /><circle r={n.r} fill="url(#salary-land)" /><circle r={n.r} fill="url(#sph-salary)" filter="url(#clouds)" opacity={0.4} /></g>
+                    <g clipPath={`url(#cp-${n.id})`}><circle r={n.r} fill="url(#sph-salary)" /><circle r={n.r} fill="url(#salary-land)" /></g>
                     <g clipPath="url(#clip-sal)">{Array.from({ length: 18 }, (_, i) => <line key={i} x1={-n.r + 3 + i * 3.5} y1={n.r - 1} x2={-n.r + 3 + i * 3.5 + (i % 2 ? 1 : -1)} y2={n.r - 1 - (3 + (i * 7 % 7))} stroke="#30e060" strokeWidth={1.3} strokeLinecap="round" opacity={0.4 + (i % 3) * 0.2} />)}</g>
                   </>}
                   <circle r={n.r} fill="url(#sph-hl)" />
@@ -1210,8 +1596,8 @@ export default function GalaxyView({
                   const isOverBudget = tier === "eruption" || tier === "critical";
                   return <>
                     {/* Heat glow */}
-                    {tier === "critical" && <circle r={R + 26 + Math.sin(t * 3) * 5} fill="url(#glow-lava)" />}
-                    {tier === "eruption" && <circle r={R + 18 + Math.sin(t * 3) * 4} fill="url(#glow-lava)" opacity={0.8} />}
+                    {tier === "critical" && <circle r={R + 26} fill="url(#glow-lava)" className="g-anim g-pulse-fast" />}
+                    {tier === "eruption" && <circle r={R + 18} fill="url(#glow-lava)" opacity={0.8} className="g-anim g-pulse-fast" />}
                     {tier === "warning" && <circle r={R + 10} fill="url(#glow-lava)" opacity={0.4} />}
                     {/* Planet body */}
                     <clipPath id={`cp-${n.id}`}><circle r={R} /></clipPath>
@@ -1222,38 +1608,53 @@ export default function GalaxyView({
 
                     {/* ── ERUPTION: fire particles (eruption/critical only) ── */}
                     {isOverBudget && Array.from({ length: tier === "critical" ? 16 : 12 }, (_, i) => {
-                      const phase = (t * 0.8 + i * 0.35) % 1;
                       const ang = -Math.PI / 2 + (Math.sin(i * 7.3) * 0.9);
-                      const dist = R + phase * 45;
-                      const px = Math.cos(ang) * dist + Math.sin(t * 2 + i) * 6 * phase;
-                      const py = Math.sin(ang) * dist - phase * 15;
-                      const sz = (1 - phase) * 3 + 0.5;
                       const cols = ["#ff6600", "#ff4400", "#ffaa00", "#ff2200"];
-                      return <circle key={`fire-${i}`} cx={px} cy={py} r={sz} fill={cols[i % 4]} opacity={(1 - phase) * 0.8} />;
+                      return <circle key={`fire-${i}`} cx={Math.cos(ang) * R} cy={Math.sin(ang) * R} r={3.5} fill={cols[i % 4]}
+                        className="g-ember" style={{
+                          ["--g-dx" as string]: `${Math.cos(ang) * 45}px`,
+                          ["--g-dy" as string]: `${Math.sin(ang) * 45 - 15}px`,
+                          animationDelay: `${-i * 0.35}s`,
+                        }} />;
                     })}
                     {/* Smoke plumes */}
                     {isOverBudget && Array.from({ length: tier === "critical" ? 9 : 6 }, (_, i) => {
-                      const phase = (t * 0.3 + i * 0.5) % 1;
-                      const px = Math.sin(t * 0.8 + i * 2) * 10 * phase;
-                      const py = -R - phase * 55;
-                      return <circle key={`smoke-${i}`} cx={px} cy={py} r={3 + phase * 9} fill="#555" opacity={(1 - phase) * 0.25} filter="url(#gl)" />;
+                      return <circle key={`smoke-${i}`} cx={0} cy={-R} r={9} fill="#555"
+                        className="g-smoke" style={{
+                          ["--g-dx" as string]: `${Math.sin(i * 2) * 10}px`,
+                          ["--g-dy" as string]: "-55px",
+                          animationDelay: `${-i * 0.5}s`,
+                        }} />;
                     })}
                     {/* Lava projections (arcs) */}
                     {isOverBudget && Array.from({ length: 4 }, (_, i) => {
-                      const phase = (t * 0.6 + i * 0.25) % 1;
                       const dir = i % 2 === 0 ? 1 : -1;
-                      const px = dir * phase * 35;
-                      const py = -R * 0.7 - Math.sin(phase * Math.PI) * 30;
-                      return <circle key={`proj-${i}`} cx={px} cy={py} r={1.8 - phase} fill="#ff5500" opacity={1 - phase} />;
+                      return <circle key={`proj-${i}`} cx={0} cy={-R * 0.7} r={1.6} fill="#ff5500"
+                        className="g-arc" style={{
+                          ["--g-dx" as string]: `${dir * 35}px`,
+                          animationDelay: `${-i * 0.42}s`,
+                        }} />;
                     })}
                     {/* Warning shake effect on text */}
                     {tierImage && <rect x={-R * 0.95} y={-15} width={R * 1.9} height={ownerRevenue > 0 ? 42 : 27} rx={ownerRevenue > 0 ? 21 : 13.5} fill="rgba(6,6,10,0.55)" />}
-                    <g transform={isOverBudget ? `translate(${Math.sin(t * 20) * 0.8},0)` : undefined}>
+                    {overdueCount > 0 && n.memberId == null && (
+                      <g transform={`translate(${R * 0.72},${-R * 0.72})`} style={{ cursor: "pointer" }}
+                        onPointerDown={e => e.stopPropagation()}
+                        onClick={e => { e.stopPropagation(); onOpenReview(); }}>
+                        <title>{`${overdueCount} mouvement${overdueCount > 1 ? "s" : ""} à vérifier`}</title>
+                        <circle r={10} fill="#fbbf24" className="g-anim g-pulse" />
+                        <circle r={10} fill="#fbbf24" />
+                        <text y={3.5} textAnchor="middle" fontSize={11} fontWeight={700} fill="#1a1400">
+                          {overdueCount > 9 ? "9+" : overdueCount}
+                        </text>
+                      </g>
+                    )}
+                    <g className={isOverBudget ? "g-anim g-shake" : undefined}>
                       <text y={-5} textAnchor="middle" fontSize={10} fontWeight={600} fill="#fff" style={ts}>{n.label}</text>
-                      <text y={9} textAnchor="middle" fontSize={9} fill={isOverBudget ? "#ffaa70" : tier === "warning" ? "#ffd280" : "rgba(255,255,255,0.85)"} style={ts}>{mask(ownerExpenseTotal > 0 ? formatMoney(ownerExpenseTotal) : "0 €")}/m</text>
+                      <text y={9} textAnchor="middle" fontSize={9} fill={isOverBudget ? "#ffaa70" : tier === "warning" ? "#ffd280" : "rgba(255,255,255,0.85)"} style={ts}>{mask(ownerExpenseTotal > 0 ? fmt(ownerExpenseTotal) : "0 €")}/m</text>
                       {ownerRevenue > 0 && <text y={22} textAnchor="middle" fontSize={8} fill={tier === "critical" ? "#ff2200" : tier === "eruption" ? "#ff6b35" : "#ffb84d"} fontWeight={600} style={ts}>{Math.round(ownerBudgetRatio * 100)}% des revenus</text>}
-                      {tier === "critical" && <text y={34} textAnchor="middle" fontSize={9} fill="#ff2200" fontWeight={700} opacity={0.7 + Math.sin(t * 8) * 0.3} style={ts}>DÉFICIT CRITIQUE</text>}
-                      {tier === "eruption" && <text y={34} textAnchor="middle" fontSize={9} fill="#ff6b35" fontWeight={700} opacity={0.6 + Math.sin(t * 6) * 0.4} style={ts}>DÉFICIT</text>}
+                      {tier === "critical" && <text y={34} textAnchor="middle" fontSize={9} fill="#ff2200" fontWeight={700} className="g-blink-fast" style={ts}>DÉFICIT CRITIQUE</text>}
+                      {tier === "eruption" && <text y={34} textAnchor="middle" fontSize={9} fill="#ff6b35" fontWeight={700} className="g-blink" style={ts}>DÉFICIT</text>}
                     </g>
                     <g transform={`translate(${(R + 13) * 0.7071},${(R + 13) * 0.7071})`} style={{ cursor: "pointer" }}
                       onPointerDown={e => e.stopPropagation()}
@@ -1266,22 +1667,19 @@ export default function GalaxyView({
 
                 {n.kind === "expense-item" && <><circle r={n.r} fill="rgba(248,113,113,0.1)" stroke="rgba(248,113,113,0.2)" strokeWidth={0.5} /><text y={-1} textAnchor="middle" fontSize={8} fill="rgba(255,255,255,0.65)">{n.label.length > 10 ? n.label.slice(0, 9) + "…" : n.label}</text><text y={8} textAnchor="middle" fontSize={7} fill="rgba(248,113,113,0.75)">{n.sub && mask(n.sub)}</text></>}
 
-                {n.kind === "reste" && <><circle r={n.r} fill="url(#sph-reste)" /><circle r={n.r} fill="url(#sph-hl)" /><text y={-4} textAnchor="middle" fontSize={10} fontWeight={500} fill="#e0d8ff">Reste</text><text y={9} textAnchor="middle" fontSize={9} fill="rgba(200,185,255,0.8)">{mask(formatMoney(resteAInvestir))}/m</text></>}
+                {n.kind === "reste" && <><circle r={n.r} fill="url(#sph-reste)" /><circle r={n.r} fill="url(#sph-hl)" /><text y={-4} textAnchor="middle" fontSize={10} fontWeight={500} fill="#e0d8ff">Reste</text><text y={9} textAnchor="middle" fontSize={9} fill="rgba(200,185,255,0.8)">{mask(fmt(resteAInvestir))}/m</text></>}
 
                 {n.kind === "portfolio" && (() => {
                   const skin = n.skin ?? "generic";
                   const imageHref = skinImageForValue(skin, n.r - 20, 58);
                   const skinFill = skin === "generic" ? `url(#sph-${n.id})` : `url(#sph-skin-${skin})`;
-                  const skinFilter = skin === "tech" ? "url(#circuits)" : skin === "ocean" ? "url(#turb-water)" : "url(#terrain)";
                   return <>
                     {isExp && <ellipse rx={n.r + 42} ry={(n.r + 42) * 0.55} fill="none" stroke={n.color} strokeOpacity={0.18} strokeWidth={1} strokeDasharray="2 7" />}
                     {/* Simulateur "avance rapide" : anneau fantôme + opacité réduite pour
                         qu'une planète en projection ne soit jamais confondue avec son état
                         réel actuel — la taille bouge, mais l'habillage reste clairement
                         "hypothétique" tant que le curseur temporel n'est pas revenu à zéro. */}
-                    {n.isProjected && <circle r={n.r + 14} fill="none" stroke="#9585ff" strokeOpacity={0.35} strokeWidth={1.5} strokeDasharray="1 5">
-                      <animate attributeName="stroke-dashoffset" from="0" to="-12" dur="1.4s" repeatCount="indefinite" />
-                    </circle>}
+                    {n.isProjected && <circle r={n.r + 14} fill="none" stroke="#9585ff" strokeOpacity={0.35} strokeWidth={1.5} strokeDasharray="1 5" className="spin-ring" />}
                     <g opacity={n.isProjected ? 0.72 : 1}>
                     <clipPath id={`cp-${n.id}`}><circle r={n.r} /></clipPath>
                     <circle r={n.r + 5} fill={`url(#atmo-${n.id})`} />
@@ -1291,25 +1689,7 @@ export default function GalaxyView({
                         (utile quand un même objectif est réparti sur plusieurs planètes, ou
                         alimenté par un flux dédié) — ces anneaux ne sont qu'un raccourci
                         visuel en plus, jamais la seule source de vérité. */}
-                    {(() => {
-                      const linkedGoals = goalLinks.filter(gl => gl.portfolioId === n.portfolioKey)
-                        .map(gl => goals.find(g => g.id === gl.goalId)).filter((g): g is Goal => !!g);
-                      if (linkedGoals.length === 0) return null;
-                      return <g pointerEvents="none">
-                        {linkedGoals.map((goal, gi) => {
-                          const prog = goalProgress(goal);
-                          const done = prog >= 1;
-                          const ringR = n.r + 9 + gi * 6, circ = 2 * Math.PI * ringR;
-                          return <g key={goal.id}>
-                            <circle r={ringR} fill="none" stroke={goal.color} strokeOpacity={0.16} strokeWidth={3} />
-                            <circle r={ringR} fill="none" stroke={goal.color} strokeWidth={3} strokeLinecap="round"
-                              strokeDasharray={`${circ * prog} ${circ}`} transform="rotate(-90)"
-                              opacity={0.9} style={done ? { filter: `drop-shadow(0 0 5px ${goal.color})` } : undefined} />
-                          </g>;
-                        })}
-                      </g>;
-                    })()}
-                    {skin === "crypto" && !imageHref && <circle r={n.r + 14 + Math.sin(t * 2) * 3} fill="url(#glow-crypto)" />}
+                    {skin === "crypto" && !imageHref && <circle r={n.r + 14} fill="url(#glow-crypto)" className="g-anim g-pulse" />}
 
                     {imageHref ? (
                       <g clipPath={`url(#cp-${n.id})`}>
@@ -1318,13 +1698,12 @@ export default function GalaxyView({
                     ) : <>
                       <circle r={n.r} fill={skinFill} />
                       <g clipPath={`url(#cp-${n.id})`}>
-                        <circle r={n.r} fill={skinFill} filter={skinFilter} opacity={0.65} />
-                        {skin !== "tech" && <circle r={n.r} fill={skinFill} opacity={0.3} filter="url(#clouds)" />}
+                        <circle r={n.r} fill={skinFill} opacity={0.65} />
                         {skin !== "generic" && <circle r={n.r} fill={`url(#pat-${skin})`} />}
 
                         {skin === "ocean" && <>
                           {[0.22, 0.5, 0.78].map((ry, i) => (
-                            <ellipse key={`wave-${i}`} cx={Math.sin(t * 0.6 + i * 2) * n.r * 0.12} cy={n.r * (ry - 0.5) * 1.5} rx={n.r * 1.05} ry={2.5 + i * 0.8} fill="#d0f7ff" opacity={0.16 + (i === 1 ? 0.1 : 0)} />
+                            <ellipse key={`wave-${i}`} className="g-anim g-wave" style={{ animationDelay: `${-i * 3.3}s` }} cx={0} cy={n.r * (ry - 0.5) * 1.5} rx={n.r * 1.05} ry={2.5 + i * 0.8} fill="#d0f7ff" opacity={0.16 + (i === 1 ? 0.1 : 0)} />
                           ))}
                           <ellipse cx={-n.r * 0.32} cy={n.r * 0.2} rx={n.r * 0.24} ry={n.r * 0.11} fill="#245a34" opacity={0.65} />
                           <ellipse cx={-n.r * 0.32} cy={n.r * 0.14} rx={n.r * 0.1} ry={n.r * 0.05} fill="#3a8a4c" opacity={0.5} />
@@ -1336,52 +1715,36 @@ export default function GalaxyView({
 
                         {skin === "crypto" && Array.from({ length: 6 }, (_, i) => {
                           const ang = (i / 6) * Math.PI * 2;
-                          const pulse = 0.5 + 0.5 * Math.sin(t * 3 + i);
-                          return <line key={`ve-${i}`} x1={0} y1={0} x2={Math.cos(ang) * n.r * 0.95} y2={Math.sin(ang) * n.r * 0.95} stroke="#e8c0ff" strokeWidth={0.7 + pulse * 0.9} opacity={0.25 + pulse * 0.45} />;
+                          const pulse = 0.5;
+                          return <line key={`ve-${i}`} x1={0} y1={0} x2={Math.cos(ang) * n.r * 0.95} y2={Math.sin(ang) * n.r * 0.95} className="g-blink" style={{ animationDelay: `${i * 0.26}s` }} stroke="#e8c0ff" strokeWidth={0.7 + pulse * 0.9} opacity={0.25 + pulse * 0.45} />;
                         })}
                       </g>
 
-                      {skin === "empty" && Array.from({ length: 3 }, (_, i) => {
-                        const ang = (i / 3) * Math.PI * 2 + t * 0.35;
+                      {skin === "empty" && <g className="g-anim g-spin-slow">{Array.from({ length: 3 }, (_, i) => {
+                        const ang = (i / 3) * Math.PI * 2;
                         const rr = n.r + 15;
                         return <circle key={`rock-${i}`} cx={Math.cos(ang) * rr} cy={Math.sin(ang) * rr * 0.55} r={1.6 + i * 0.6} fill="#8a84a0" opacity={0.55} />;
-                      })}
+                      })}</g>}
                     </>}
 
                     {skin === "tech" && !imageHref && <>
-                      {Array.from({ length: 5 }, (_, i) => {
-                        const ang = (i / 5) * Math.PI * 2 + t * 0.15;
-                        return <line key={`tc-${i}`} x1={Math.cos(ang) * n.r * 0.12} y1={Math.sin(ang) * n.r * 0.12} x2={Math.cos(ang) * n.r * 0.92} y2={Math.sin(ang) * n.r * 0.92} stroke="#5cfff0" strokeWidth={0.6} opacity={0.35 + Math.sin(t * 2 + i) * 0.2} clipPath={`url(#cp-${n.id})`} />;
-                      })}
-                      {Array.from({ length: 4 }, (_, i) => {
-                        const ang = (i / 4) * Math.PI * 2 - t * 0.2;
-                        return <circle key={`td-${i}`} cx={Math.cos(ang) * n.r * 0.55} cy={Math.sin(ang) * n.r * 0.55} r={1.5} fill="#baffee" opacity={0.6 + Math.sin(t * 3 + i) * 0.35} clipPath={`url(#cp-${n.id})`} />;
-                      })}
-                      <ellipse rx={n.r * 1.38} ry={n.r * 0.3} fill="none" stroke="#5cfff0" strokeOpacity={0.3} strokeWidth={1} transform={`rotate(${(t * 6) % 360})`} />
+                      <g className="g-anim g-spin-med">{Array.from({ length: 5 }, (_, i) => {
+                        const ang = (i / 5) * Math.PI * 2;
+                        return <line key={`tc-${i}`} x1={Math.cos(ang) * n.r * 0.12} y1={Math.sin(ang) * n.r * 0.12} x2={Math.cos(ang) * n.r * 0.92} y2={Math.sin(ang) * n.r * 0.92} stroke="#5cfff0" strokeWidth={0.6} className="g-blink" style={{ animationDelay: `${-i * 0.31}s` }} clipPath={`url(#cp-${n.id})`} />;
+                      })}</g>
+                      <g className="g-anim g-spin-rev">{Array.from({ length: 4 }, (_, i) => {
+                        const ang = (i / 4) * Math.PI * 2;
+                        return <circle key={`td-${i}`} cx={Math.cos(ang) * n.r * 0.55} cy={Math.sin(ang) * n.r * 0.55} r={1.5} fill="#baffee" className="g-blink" style={{ animationDelay: `${-i * 0.4}s` }} clipPath={`url(#cp-${n.id})`} />;
+                      })}</g>
+                      <ellipse rx={n.r * 1.38} ry={n.r * 0.3} fill="none" stroke="#5cfff0" strokeOpacity={0.3} strokeWidth={1} className="g-anim g-spin-ring" />
                     </>}
 
                     <circle r={n.r} fill="url(#sph-hl)" stroke={n.color} strokeOpacity={isExp ? 0.35 : 0.1} strokeWidth={isExp ? 1.5 : 0.5} />
-                    {imageHref && <rect x={-n.r * 0.95} y={-15} width={n.r * 1.9} height={(n.gainVal ?? 0) !== 0 ? 40 : 27} rx={(n.gainVal ?? 0) !== 0 ? 20 : 13.5} fill="rgba(6,6,10,0.55)" />}
+                    {imageHref && (() => { const avecGain = (n.gainVal ?? 0) !== 0 && n.r >= 34; return <rect x={-n.r * 0.95} y={-15} width={n.r * 1.9} height={avecGain ? 40 : 27} rx={avecGain ? 20 : 13.5} fill="rgba(6,6,10,0.55)" />; })()}
                     <text y={-6} textAnchor="middle" fontSize={11} fontWeight={600} fill="#fff" style={ts}>{n.label}</text>
                     <text y={9} textAnchor="middle" fontSize={9} fill={n.isProjected ? "#c8bfff" : "rgba(255,255,255,0.85)"} style={ts}>{n.sub && mask(n.sub)}</text>
                     {n.isProjected && <text y={20} textAnchor="middle" fontSize={7} fontWeight={600} fill="#9585ff" style={ts}>projection {scrubYear}</text>}
-                    {!n.isProjected && (n.gainVal ?? 0) !== 0 && <text y={22} textAnchor="middle" fontSize={8} fill={(n.gainVal ?? 0) >= 0 ? "#34d399" : "#fb7185"} style={ts}>{mask(`${(n.gainVal ?? 0) >= 0 ? "+" : ""}${formatMoney(n.gainVal ?? 0)}`)}</text>}
-                    {(() => {
-                      const linkedGoals = goalLinks.filter(gl => gl.portfolioId === n.portfolioKey)
-                        .map(gl => goals.find(g => g.id === gl.goalId)).filter((g): g is Goal => !!g);
-                      if (linkedGoals.length === 0) return null;
-                      const baseY = n.isProjected ? 32 : (n.gainVal ?? 0) !== 0 ? 34 : 22;
-                      return <>
-                        {linkedGoals.slice(0, 2).map((goal, gi) => {
-                          const prog = goalProgress(goal);
-                          const done = prog >= 1;
-                          return <text key={goal.id} y={baseY + gi * 11} textAnchor="middle" fontSize={8} fontWeight={600} fill={goal.color} style={ts}>
-                            {done ? "✓ " : "🎯 "}{goal.name.length > 14 ? goal.name.slice(0, 13) + "…" : goal.name} · {Math.round(prog * 100)}%
-                          </text>;
-                        })}
-                        {linkedGoals.length > 2 && <text y={baseY + 2 * 11} textAnchor="middle" fontSize={7} fill="rgba(255,255,255,0.5)" style={ts}>+{linkedGoals.length - 2} autre{linkedGoals.length - 2 > 1 ? "s" : ""}</text>}
-                      </>;
-                    })()}
+                    {!n.isProjected && (n.gainVal ?? 0) !== 0 && n.r >= 34 && <text y={22} textAnchor="middle" fontSize={8} fill={(n.gainVal ?? 0) >= 0 ? "#34d399" : "#fb7185"} style={ts}>{mask(`${(n.gainVal ?? 0) >= 0 ? "+" : ""}${fmt(n.gainVal ?? 0)}`)}</text>}
                     </g>
                     {selected?.kind === "portfolio" && selected.id === n.portfolioKey && (
                       <g transform={`translate(${(n.r + 13) * 0.7071},${(n.r + 13) * 0.7071})`} style={{ cursor: "pointer" }}
@@ -1404,7 +1767,7 @@ export default function GalaxyView({
                       <g clipPath={`url(#cp-${n.id})`}><image href={VACANCES_IMAGE} x={-n.r} y={-n.r} width={n.r * 2} height={n.r * 2} preserveAspectRatio="xMidYMid slice" /></g>
                     ) : <>
                       <circle r={n.r} fill={`url(#sph-${n.id})`} />
-                      <g clipPath={`url(#cp-${n.id})`}><circle r={n.r} fill={`url(#sph-${n.id})`} filter="url(#terrain)" opacity={0.6} /></g>
+                      <g clipPath={`url(#cp-${n.id})`}><circle r={n.r} fill={`url(#sph-${n.id})`} opacity={0.6} /></g>
                     </>}
                     <circle r={n.r} fill="url(#sph-hl)" />
                     {(gp ?? 0) >= 1 && <circle r={n.r + 6} fill="none" stroke="#34d399" strokeOpacity={0.45} strokeWidth={1.5} />}
@@ -1450,14 +1813,16 @@ export default function GalaxyView({
                       <circle cy={-logoR * 0.2} r={logoR * 0.55} fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth={0.6} />
                     </>}
                     <text y={hasLogo ? n.r * 0.55 : -3} textAnchor="middle" fontSize={hasLogo ? 7.5 : 9} fontWeight={500} fill={isCracked ? "#c8c4d2" : "#d8d8dc"}>{n.label.length > 11 ? n.label.slice(0, 10) + "…" : n.label}</text>
-                    {n.gainVal !== undefined && <text y={hasLogo ? n.r * 0.55 + 10 : 8} textAnchor="middle" fontSize={hasLogo ? 7 : 8} fill={isCracked ? "#fb7185" : n.gainVal >= 0 ? "#34d399" : "#fb7185"} fontWeight={isCracked ? 700 : 400}>{mask(`${n.gainVal >= 0 ? "+" : ""}${formatMoney(n.gainVal)}`)}</text>}
+                    {n.gainVal !== undefined && <text y={hasLogo ? n.r * 0.55 + 10 : 8} textAnchor="middle" fontSize={hasLogo ? 7 : 8} fill={isCracked ? "#fb7185" : n.gainVal >= 0 ? "#34d399" : "#fb7185"} fontWeight={isCracked ? 700 : 400}>{mask(`${n.gainVal >= 0 ? "+" : ""}${fmt(n.gainVal)}`)}</text>}
                     {n.gainVal === undefined && <text y={hasLogo ? n.r * 0.55 + 10 : 8} textAnchor="middle" fontSize={hasLogo ? 7 : 8} fill="rgba(255,255,255,0.5)">{n.sub && mask(n.sub)}</text>}
                     {nearDividend && Array.from({ length: 5 }, (_, i) => {
-                      const phase = (t * 0.45 + i * 0.37) % 1;
                       const px = Math.sin(i * 13.7) * n.r * 0.7;
-                      const py = -n.r * 1.7 + phase * n.r * 3.4;
-                      const op = phase < 0.85 ? (1 - phase) * 0.85 : 0;
-                      return <circle key={`div-${n.id}-${i}`} cx={px} cy={py} r={1.3} fill="#ffd76a" opacity={op} style={{ filter: "drop-shadow(0 0 3px #ffcf4a)" }} />;
+                      return <circle key={`div-${n.id}-${i}`} cx={px} cy={-n.r * 1.7} r={1.3} fill="#ffd76a"
+                        className="g-spark" style={{
+                          ["--g-dy" as string]: `${n.r * 3.4}px`,
+                          filter: "drop-shadow(0 0 3px #ffcf4a)",
+                          animationDelay: `${-i * 0.82}s`,
+                        }} />;
                     })}
                     {!nearDividend && nextUpcoming && (
                       <circle cx={n.r * 0.7} cy={-n.r * 0.7} r={3.5} fill="#12121a" stroke="#ffd76a" strokeWidth={1} opacity={0.85}>
@@ -1468,12 +1833,12 @@ export default function GalaxyView({
                 })()}
 
                 {n.kind === "member" && (() => {
-                  const bob = Math.sin(t * 1.4 + n.r) * 1;
+                  const bob = 0; // idem (.g-bob-slow-t)
                   const accessory = findAccessory(n.accessory);
                   return <>
                     <circle r={n.r} fill={`url(#sph-${n.id})`} />
                     <circle r={n.r} fill="url(#sph-hl)" />
-                    <g transform={`translate(0, ${-n.r - 13 + bob})`}>
+                    <g className="g-bob-slow-t" style={{ ["--g-y" as string]: `${-n.r - 13 + bob}px` }}>
                       <line x1={-2.2} y1={7} x2={-2.6} y2={12} stroke="#e8e8ee" strokeWidth={2} strokeLinecap="round" />
                       <line x1={2.2} y1={7} x2={2.6} y2={12} stroke="#e8e8ee" strokeWidth={2} strokeLinecap="round" />
                       <rect x={-3.4} y={-2} width={6.8} height={9.5} rx={2.6} fill="#f0f0f5" stroke={n.color} strokeWidth={0.7} />
@@ -1526,7 +1891,7 @@ export default function GalaxyView({
           </g>
           <rect x={0} y={0} width={W} height={H} fill="url(#vignette)" pointerEvents="none" />
         </svg>
-        <p className="absolute bottom-3 left-1/2 -translate-x-1/2 text-[10px] text-white/20 pointer-events-none">Molette = zoom · glisser pour déplacer · glisser un actif vers un portefeuille pour le réassigner</p>
+        <p className="hidden lg:block absolute bottom-3 left-1/2 -translate-x-1/2 text-[10px] text-white/20 pointer-events-none">Molette = zoom · glisser pour déplacer · glisser un actif vers un portefeuille pour le réassigner</p>
 
         {/* Curseur chronologique : projette le Patrimoine à une date future, hypothèse à taux constant */}
         {showScrubBar && (
@@ -1571,8 +1936,17 @@ export default function GalaxyView({
       </div>
 
       {/* ── PANEL ── */}
-      <div className="grid" style={{ gridTemplateRows: "44px 1fr" }}>
+      <div className={`grid grid-rows-[44px_minmax(0,1fr)] h-full min-h-0
+        max-lg:absolute max-lg:inset-y-0 max-lg:right-0 max-lg:z-30 max-lg:w-[19rem] max-lg:bg-surface max-lg:shadow-2xl
+        ${drawer === "details" ? "" : "max-lg:hidden"}`}>
         <div className="border-l border-b border-border bg-surface/40 flex items-center justify-end gap-2 pl-4 pr-5 min-w-0">
+          <button
+            onClick={() => setDrawer(null)}
+            aria-label="Fermer le détail"
+            className="lg:hidden mr-auto text-text-muted hover:text-text"
+          >
+            <X size={16} />
+          </button>
           <button title={hideAmounts ? "Afficher les montants" : "Masquer les montants"} onClick={() => setHideAmounts(h => !h)} className={`shrink-0 ${hideAmounts ? "text-accent" : "text-text-muted"} hover:text-text`}>
             {hideAmounts ? <EyeOff size={16} /> : <Eye size={16} />}
           </button>
@@ -1604,8 +1978,8 @@ export default function GalaxyView({
             )}
           </div>
         </div>
-        <div className="min-h-0">
-          <NodePanel selected={selected} loans={loans} portfolios={portfolios} members={members} goals={goals} flows={flows} goalLinks={goalLinks} portfolioOwnerships={portfolioOwnerships} actions={actions} onClear={() => setSelected(null)} createMode={createMode} setCreateMode={setCreateMode} salary={salary} onUpdateSalary={onUpdateSalary} onUpdateSelf={onUpdateSelf} groups={groups.map(g => ({ key: g.key, total: g.total, valued: g.valued }))} grossTotal={grossTotal} debt={debt} ownerName={ownerName} expenseMemberId={expenseMemberId} dividends={dividends}
+        <div className="min-h-0 h-full">
+          <NodePanel selected={selected} loans={loans} portfolios={portfolios} members={members} goals={goals} flows={flows} goalLinks={goalLinks} portfolioOwnerships={portfolioOwnerships} actions={actions} onClear={() => setSelected(null)} createMode={createMode} setCreateMode={setCreateMode} salary={salary} onUpdateSalary={onUpdateSalary} onUpdateSelf={onUpdateSelf} groups={groups.map(g => ({ key: g.key, total: g.total, valued: g.valued }))} grossTotal={grossTotal} debt={debt} ownerName={ownerName} expenseMemberId={expenseMemberId} dividends={dividends} displayCurrency={displayCurrency} ctx={ctx}
             onPortfolioCreated={p => setSelected({ kind: "portfolio", id: p.id, name: p.name, color: p.color, skin: p.skin, total: 0, count: 0, memberId: p.memberId })} />
         </div>
       </div>

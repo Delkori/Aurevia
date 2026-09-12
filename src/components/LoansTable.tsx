@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { Plus, Trash2, AlertTriangle, X } from "lucide-react";
 import { formatMoney } from "@/lib/format";
+import { totalDebt as sumDebt, type ValuationContext } from "@/lib/networth";
 import { apiFetch, ApiError } from "@/lib/api";
 
 type Loan = {
@@ -40,7 +41,8 @@ const emptyDraft: DraftRow = {
   currency: "EUR",
 };
 
-export default function LoansTable({ realEstateAssets }: { realEstateAssets: RealEstateAsset[] }) {
+export default function LoansTable({ realEstateAssets, ctx, displayCurrency }: { realEstateAssets: RealEstateAsset[]; ctx: ValuationContext; displayCurrency: string }) {
+  const fmt = (v: number) => formatMoney(v, displayCurrency);
   const [loans, setLoans] = useState<Loan[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -130,7 +132,8 @@ export default function LoansTable({ realEstateAssets }: { realEstateAssets: Rea
     }
   };
 
-  const totalDebt = loans.reduce((s, l) => s + Number(l.remainingBalance || 0), 0);
+  // Un crédit libellé en CHF ne s'additionne pas tel quel à un crédit en euros.
+  const totalDebt = sumDebt(loans, ctx);
 
   return (
     <div className="space-y-3">
@@ -142,7 +145,7 @@ export default function LoansTable({ realEstateAssets }: { realEstateAssets: Rea
           </p>
         </div>
         {totalDebt > 0 && (
-          <p className="text-sm text-negative tabular">-{formatMoney(totalDebt)}</p>
+          <p className="text-sm text-negative tabular">-{fmt(totalDebt)}</p>
         )}
       </div>
 

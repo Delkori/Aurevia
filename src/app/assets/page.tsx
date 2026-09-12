@@ -1,9 +1,9 @@
 "use client";
 
 import { Fragment, useEffect, useState, useCallback } from "react";
-import { Plus, Trash2, AlertTriangle, X } from "lucide-react";
+import { Plus, Trash2, AlertTriangle, X, CloudOff, History } from "lucide-react";
 import { formatMoney } from "@/lib/format";
-import { currentValue, gain, ASSET_TYPE_LABELS } from "@/lib/networth";
+import { currentValue, gain, isStale, quoteAsOf, ASSET_TYPE_LABELS, type ValuationContext } from "@/lib/networth";
 import { apiFetch, ApiError } from "@/lib/api";
 import { fetchAllQuotes } from "@/lib/allQuotes";
 import LoansTable from "@/components/LoansTable";
@@ -22,7 +22,8 @@ type Asset = {
 };
 
 type Portfolio = { id: number; name: string; color: string };
-type Quote = { price: number; currency: string } | null;
+type Quote = { price: number; currency: string; asOf?: string } | null;
+type Rates = Record<string, number>;
 
 // Types dont le prix vient de Yahoo Finance (actions/ETF/métaux précieux via tickers/futures)
 const YAHOO_TYPES = new Set(["stock", "etf", "precious_metal"]);
@@ -90,14 +91,25 @@ export default function AssetsPage() {
   const [error, setError] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<number | "draft" | null>(null);
   const [draft, setDraft] = useState<DraftRow>(emptyDraft);
+  const [rates, setRates] = useState<Rates>({ EUR: 1 });
+  const [displayCurrency, setDisplayCurrency] = useState("EUR");
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [assetsResult, portfoliosResult] = await Promise.allSettled([
-        apiFetch("/api/assets"),
-        apiFetch("/api/portfolios"),
-      ]);
+      const [assetsResult, portfoliosResult, ratesResult, settingsResult] =
+        await Promise.allSettled([
+          apiFetch("/api/assets"),
+          apiFetch("/api/portfolios"),
+          apiFetch("/api/exchange-rates"),
+          apiFetch("/api/settings"),
+        ]);
+
+      if (ratesResult.status === "fulfilled") setRates(ratesResult.value as Rates);
+      if (settingsResult.status === "fulfilled") {
+        const st = settingsResult.value as Record<string, string>;
+        setDisplayCurrency(st.display_currency || "EUR");
+      }
 
       if (assetsResult.status === "fulfilled") {
         setAssets(assetsResult.value as Asset[]);
@@ -214,8 +226,13 @@ export default function AssetsPage() {
     return list;
   })();
 
+  // Même contexte de valorisation que la galaxie : les montants du tableau et
+  // ceux des planètes ne peuvent pas diverger.
+  const ctx: ValuationContext = { rates, displayCurrency };
+  const fmt = (v: number) => formatMoney(v, displayCurrency);
+
   const groupTotal = (items: Asset[]) =>
-    items.reduce((s, a) => s + currentValue(a, a.ticker ? quotes[a.ticker] : null), 0);
+    items.reduce((s, a) => s + currentValue(a, a.ticker ? quotes[a.ticker] : null, ctx), 0);
 
   return (
     <div className="p-8 md:p-10 max-w-6xl mx-auto space-y-6">
@@ -240,7 +257,19 @@ export default function AssetsPage() {
       )}
 
       <div className="bg-surface border border-border rounded-lg overflow-x-auto">
-        <table className="w-full text-sm min-w-[900px]">
+        <table className="w-full table-fixed text-sm min-w-[1000px]">
+          <colgroup>
+            <col style={{ width: "15%" }} />{/* Nom */}
+            <col style={{ width: "12%" }} />{/* Type */}
+            <col style={{ width: "12%" }} />{/* Portefeuille */}
+            <col style={{ width: "11%" }} />{/* Ticker */}
+            <col style={{ width: "8%" }} />{/* Qté */}
+            <col style={{ width: "11%" }} />{/* Prix revient / Valeur */}
+            <col style={{ width: "9%" }} />{/* Devise */}
+            <col style={{ width: "10%" }} />{/* Valeur actuelle */}
+            <col style={{ width: "8%" }} />{/* +/- value */}
+            <col style={{ width: "4%" }} />{/* actions */}
+          </colgroup>
           <thead>
             <tr className="text-xs text-text-muted border-b border-border">
               <th className="text-left font-medium px-4 py-3">Nom</th>
@@ -263,21 +292,24 @@ export default function AssetsPage() {
                     <span className="inline-flex items-center gap-2">
                       {portfolio && <span className="w-2 h-2 rounded-full shrink-0" style={{ background: portfolio.color }} />}
                       {portfolio ? portfolio.name : "Sans planète"}
-                      <span className="text-text-muted font-normal normal-case ml-2 tabular">{formatMoney(groupTotal(items))}</span>
+                      <span className="text-text-muted font-normal normal-case ml-2 tabular">{fmt(groupTotal(items))}</span>
                     </span>
                   </td>
                 </tr>
                 {items.map((a) => {
               const needsTicker = TYPES_WITH_TICKER.has(a.type);
               const quote = a.ticker ? quotes[a.ticker] : null;
-              const value = currentValue(a, quote);
-              const g = gain(a, quote);
+              const value = currentValue(a, quote, ctx);
+              const g = gain(a, quote, ctx);
+              const stale = isStale(a, quote);
+              const asOf = quoteAsOf(quote);
               const isSaving = savingId === a.id;
               return (
                 <tr key={a.id} className="border-b border-border/60 last:border-0 align-middle">
                   <td className="px-4 py-2">
                     <input
                       value={a.name}
+                      title={a.name}
                       onChange={(e) => updateAssetField(a.id, { name: e.target.value })}
                       onBlur={() => saveAsset(a)}
                       className="w-full bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
@@ -290,7 +322,7 @@ export default function AssetsPage() {
                         updateAssetField(a.id, { type: e.target.value });
                         saveAsset({ ...a, type: e.target.value });
                       }}
-                      className="bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
+                      className="w-full min-w-0 bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
                     >
                       {Object.entries(ASSET_TYPE_LABELS).map(([value, label]) => (
                         <option key={value} value={value}>
@@ -307,7 +339,7 @@ export default function AssetsPage() {
                         updateAssetField(a.id, { portfolioId });
                         saveAsset({ ...a, portfolioId });
                       }}
-                      className="bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent max-w-[140px]"
+                      className="w-full min-w-0 bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
                     >
                       <option value="">—</option>
                       {portfolios.map((p) => (
@@ -326,7 +358,7 @@ export default function AssetsPage() {
                             updateAssetField(a.id, { ticker: e.target.value });
                             saveAsset({ ...a, ticker: e.target.value });
                           }}
-                          className="bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent max-w-[130px]"
+                          className="w-full min-w-0 bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
                         >
                           <option value="">—</option>
                           {METAL_TICKERS.map((m) => (
@@ -341,7 +373,7 @@ export default function AssetsPage() {
                           onChange={(e) => updateAssetField(a.id, { ticker: e.target.value })}
                           onBlur={() => saveAsset(a)}
                           placeholder={a.type === "crypto" ? "bitcoin" : "AAPL"}
-                          className="w-24 bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
+                          className="w-full min-w-0 bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
                         />
                       )
                     ) : (
@@ -356,7 +388,7 @@ export default function AssetsPage() {
                         value={a.quantity ?? ""}
                         onChange={(e) => updateAssetField(a.id, { quantity: e.target.value })}
                         onBlur={() => saveAsset(a)}
-                        className="w-20 bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent text-right tabular"
+                        className="w-full min-w-0 bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent text-right tabular"
                       />
                     ) : (
                       <span className="text-text-muted px-2">—</span>
@@ -376,7 +408,7 @@ export default function AssetsPage() {
                         )
                       }
                       onBlur={() => saveAsset(a)}
-                      className="w-28 bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent text-right tabular"
+                      className="w-full min-w-0 bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent text-right tabular"
                     />
                     {YIELD_TYPES.has(a.type) && (
                       <input
@@ -387,7 +419,7 @@ export default function AssetsPage() {
                         onBlur={() => saveAsset(a)}
                         placeholder="rendement %"
                         title="Rendement annuel (%)"
-                        className="w-20 mt-1 bg-transparent focus:bg-bg rounded px-2 py-1 outline-none focus:ring-1 focus:ring-accent text-right tabular text-xs text-text-muted"
+                        className="w-full min-w-0 mt-1 bg-transparent focus:bg-bg rounded px-2 py-1 outline-none focus:ring-1 focus:ring-accent text-right tabular text-xs text-text-muted"
                       />
                     )}
                   </td>
@@ -398,7 +430,7 @@ export default function AssetsPage() {
                         updateAssetField(a.id, { currency: e.target.value });
                         saveAsset({ ...a, currency: e.target.value });
                       }}
-                      className="bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
+                      className="w-full min-w-0 bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
                     >
                       {CURRENCIES.map((c) => (
                         <option key={c} value={c}>
@@ -408,14 +440,30 @@ export default function AssetsPage() {
                     </select>
                   </td>
                   <td className="px-3 py-2 text-right tabular font-medium">
-                    {formatMoney(value, a.currency)}
+                    <span className="inline-flex items-center gap-1.5 justify-end">
+                      {stale && (
+                        <CloudOff
+                          size={12}
+                          className="text-text-muted shrink-0"
+                          aria-label="Cours indisponible, valeur au prix de revient"
+                        />
+                      )}
+                      {!stale && asOf && (
+                        <History
+                          size={12}
+                          className="text-text-muted shrink-0"
+                          aria-label={`Dernier cours connu, du ${asOf.toLocaleDateString("fr-FR")}`}
+                        />
+                      )}
+                      <span className={stale || asOf ? "text-text-muted" : undefined}>{fmt(value)}</span>
+                    </span>
                   </td>
                   <td
                     className={`px-3 py-2 text-right tabular ${
                       g >= 0 ? "text-positive" : "text-negative"
                     }`}
                   >
-                    {(a.ticker || Number(a.avgBuyPrice) > 0) ? formatMoney(g, a.currency) : "—"}
+                    {(a.ticker || Number(a.avgBuyPrice) > 0) ? fmt(g) : "—"}
                   </td>
                   <td className="px-3 py-2 text-right">
                     <button
@@ -447,7 +495,7 @@ export default function AssetsPage() {
                 <select
                   value={draft.type}
                   onChange={(e) => setDraft({ ...draft, type: e.target.value })}
-                  className="bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
+                  className="w-full min-w-0 bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
                 >
                   {Object.entries(ASSET_TYPE_LABELS).map(([value, label]) => (
                     <option key={value} value={value}>
@@ -460,7 +508,7 @@ export default function AssetsPage() {
                 <select
                   value={draft.portfolioId}
                   onChange={(e) => setDraft({ ...draft, portfolioId: e.target.value })}
-                  className="bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent max-w-[140px]"
+                  className="w-full min-w-0 bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
                 >
                   <option value="">—</option>
                   {portfolios.map((p) => (
@@ -476,7 +524,7 @@ export default function AssetsPage() {
                     <select
                       value={draft.ticker}
                       onChange={(e) => setDraft({ ...draft, ticker: e.target.value })}
-                      className="bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent max-w-[130px]"
+                      className="w-full min-w-0 bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
                     >
                       <option value="">—</option>
                       {METAL_TICKERS.map((m) => (
@@ -491,7 +539,7 @@ export default function AssetsPage() {
                       onChange={(e) => setDraft({ ...draft, ticker: e.target.value })}
                       onBlur={commitDraft}
                       placeholder={draft.type === "crypto" ? "bitcoin" : "AAPL"}
-                      className="w-24 bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
+                      className="w-full min-w-0 bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
                     />
                   )
                 ) : (
@@ -506,7 +554,7 @@ export default function AssetsPage() {
                     value={draft.quantity}
                     onChange={(e) => setDraft({ ...draft, quantity: e.target.value })}
                     onBlur={commitDraft}
-                    className="w-20 bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent text-right tabular"
+                    className="w-full min-w-0 bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent text-right tabular"
                   />
                 ) : (
                   <span className="text-text-muted px-2">—</span>
@@ -525,7 +573,7 @@ export default function AssetsPage() {
                     )
                   }
                   onBlur={commitDraft}
-                  className="w-28 bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent text-right tabular"
+                  className="w-full min-w-0 bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent text-right tabular"
                 />
                 {YIELD_TYPES.has(draft.type) && (
                   <input
@@ -536,7 +584,7 @@ export default function AssetsPage() {
                     onBlur={commitDraft}
                     placeholder="rendement %"
                     title="Rendement annuel (%)"
-                    className="w-20 mt-1 bg-transparent focus:bg-bg rounded px-2 py-1 outline-none focus:ring-1 focus:ring-accent text-right tabular text-xs text-text-muted"
+                    className="w-full min-w-0 mt-1 bg-transparent focus:bg-bg rounded px-2 py-1 outline-none focus:ring-1 focus:ring-accent text-right tabular text-xs text-text-muted"
                   />
                 )}
               </td>
@@ -544,7 +592,7 @@ export default function AssetsPage() {
                 <select
                   value={draft.currency}
                   onChange={(e) => setDraft({ ...draft, currency: e.target.value })}
-                  className="bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
+                  className="w-full min-w-0 bg-transparent text-text focus:bg-bg rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
                 >
                   {CURRENCIES.map((c) => (
                     <option key={c} value={c}>
@@ -584,6 +632,8 @@ export default function AssetsPage() {
       <div className="pt-4 border-t border-border">
         <LoansTable
           realEstateAssets={assets.filter((a) => a.type === "real_estate").map((a) => ({ id: a.id, name: a.name }))}
+          ctx={ctx}
+          displayCurrency={displayCurrency}
         />
       </div>
     </div>
