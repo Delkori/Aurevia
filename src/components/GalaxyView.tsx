@@ -1285,7 +1285,14 @@ export default function GalaxyView({
             )}
           </button>
 
-          <button onClick={() => setShowScrubBar(v => !v)}
+          <button
+            onClick={() => setShowScrubBar(v => {
+              // Refermer le simulateur ramène à aujourd'hui. Sans ça, la galaxie
+              // restait projetée alors que plus aucun réglage n'était visible
+              // pour l'expliquer ni pour revenir en arrière.
+              if (v) setScrubYears(0);
+              return !v;
+            })}
             aria-pressed={showScrubBar}
             className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs mt-1 transition-colors ${
               showScrubBar ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text hover:bg-surface-hover"}`}>
@@ -1321,6 +1328,12 @@ export default function GalaxyView({
                   <p className="text-[9px] text-text-muted mt-0.5">
                     hypothèse, pas une prévision
                   </p>
+                  <button
+                    onClick={() => setScrubYears(0)}
+                    className="flex items-center gap-1.5 mt-2 w-full px-2 py-1 rounded-md text-[10px] text-text-muted hover:text-text hover:bg-surface-hover"
+                  >
+                    <RotateCcw size={11} className="shrink-0" />Revenir à aujourd&apos;hui
+                  </button>
                 </div>
               )}
             </div>
