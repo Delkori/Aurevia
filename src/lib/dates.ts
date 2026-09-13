@@ -9,11 +9,22 @@ const DAY_MS = 86_400_000;
  * épuisait le plafond et renvoyait une date encore dans le passé, affichée
  * « aujourd'hui ». On saute donc directement au bon multiple.
  */
-export function nextOccurrenceDate(createdAt: string, frequency: string): Date | null {
+export function nextOccurrenceDate(
+  createdAt: string,
+  frequency: string,
+  /**
+   * Date de référence. Injectable parce que `sinceLastVisit` travaille déjà sur
+   * une date fournie : appeler l'horloge réelle ici faisait cohabiter deux
+   * « maintenant » dans le même résumé, et rendait la fonction indétestable de
+   * façon déterministe — le changement de jour suffisait à faire échouer trois
+   * tests qui n'avaient rien demandé.
+   */
+  maintenant: Date = new Date()
+): Date | null {
   const start = new Date(createdAt);
   if (Number.isNaN(start.getTime())) return null;
 
-  const now = new Date();
+  const now = maintenant;
   if (start > now) return start;
 
   const next = new Date(start);
@@ -50,8 +61,12 @@ export function nextOccurrenceDate(createdAt: string, frequency: string): Date |
   return next;
 }
 
-export function daysUntilNextOccurrence(createdAt: string, frequency: string): number {
-  const next = nextOccurrenceDate(createdAt, frequency);
+export function daysUntilNextOccurrence(
+  createdAt: string,
+  frequency: string,
+  maintenant: Date = new Date()
+): number {
+  const next = nextOccurrenceDate(createdAt, frequency, maintenant);
   if (!next) return NaN;
-  return Math.max(0, Math.ceil((next.getTime() - Date.now()) / DAY_MS));
+  return Math.max(0, Math.ceil((next.getTime() - maintenant.getTime()) / DAY_MS));
 }
