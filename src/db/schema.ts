@@ -103,29 +103,6 @@ export const settings = pgTable("settings", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
-// ── Budget (réservé) ─────────────────────────────────────────────────────────
-// Ces deux tables ne sont exposées par aucune route : la section budget a été
-// retirée de l'interface. Elles sont conservées pour une v2 plutôt que
-// supprimées, pour ne pas détruire les données d'un déploiement existant.
-export const budgetCategories = pgTable("budget_categories", {
-  id: serial("id").primaryKey(),
-  name: text("name").notNull(),
-  kind: text("kind").notNull(),
-  monthlyTarget: numeric("monthly_target"),
-  color: text("color").notNull().default("#999999"),
-});
-
-export const budgetEntries = pgTable("budget_entries", {
-  id: serial("id").primaryKey(),
-  categoryId: integer("category_id")
-    .notNull()
-    .references(() => budgetCategories.id, { onDelete: "cascade" }),
-  amount: numeric("amount").notNull(),
-  note: text("note"),
-  date: date("date").notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (t) => [index("budget_entries_category_id_idx").on(t.categoryId)]);
-
 // ── Crédits / Prêts ──────────────────────────────────────────────────────────
 export const loans = pgTable("loans", {
   id: serial("id").primaryKey(),

@@ -5,6 +5,7 @@ import { AlertTriangle, Target, TrendingUp, X } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
 import { formatMoney } from "@/lib/format";
 import { monthsToReach, projectNetWorth } from "@/lib/projection";
+import { monthlyEquivalent } from "@/lib/flows";
 import { currentValue, totalDebt, type Rates } from "@/lib/networth";
 import { fetchAllQuotes } from "@/lib/allQuotes";
 import ProjectionChart from "@/components/ProjectionChart";
@@ -16,17 +17,6 @@ type Goal = { id: number; name: string; targetAmount: string; color: string };
 type Flow = { targetType: string; targetId: number | null; amount: string; frequency: string };
 type GoalLink = { goalId: number; portfolioId: number };
 type Quote = { price: number; currency: string } | null;
-
-/** Un flux ramené à son équivalent mensuel, pour additionner des rythmes différents. */
-function mensuel(f: Flow): number {
-  const a = Number(f.amount);
-  if (!Number.isFinite(a)) return 0;
-  if (f.frequency === "daily") return a * 30.44;
-  if (f.frequency === "weekly") return a * 4.345;
-  if (f.frequency === "yearly") return a / 12;
-  if (f.frequency === "once") return 0;
-  return a;
-}
 
 const ANNEES = [1, 3, 5, 10, 15, 20, 25, 30];
 
@@ -83,7 +73,7 @@ export default function ProjectionPage() {
 
   /** Ce qui part réellement vers les planètes et objectifs chaque mois. */
   const versementReel = useMemo(
-    () => flows.filter(f => f.targetType === "portfolio" || f.targetType === "goal").reduce((s, f) => s + mensuel(f), 0),
+    () => flows.filter(f => f.targetType === "portfolio" || f.targetType === "goal").reduce((s, f) => s + monthlyEquivalent(f), 0),
     [flows]
   );
   const versement = versementSaisi === null
@@ -122,8 +112,8 @@ export default function ProjectionPage() {
     const planetes = new Set(goalLinks.filter(gl => gl.goalId === g.id).map(gl => gl.portfolioId));
     const actuel = [...planetes].reduce((s, pid) => s + (totalParPlanete.get(pid) ?? 0), 0);
     const apport = flows.reduce((s, f) => {
-      if (f.targetType === "goal" && f.targetId === g.id) return s + mensuel(f);
-      if (f.targetType === "portfolio" && f.targetId != null && planetes.has(f.targetId)) return s + mensuel(f);
+      if (f.targetType === "goal" && f.targetId === g.id) return s + monthlyEquivalent(f);
+      if (f.targetType === "portfolio" && f.targetId != null && planetes.has(f.targetId)) return s + monthlyEquivalent(f);
       return s;
     }, 0);
     return {

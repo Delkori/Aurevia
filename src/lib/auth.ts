@@ -15,7 +15,7 @@ export async function currentRole(): Promise<SessionRole | null> {
   return readSession(store.get(SESSION_COOKIE)?.value);
 }
 
-export async function isAuthenticated() {
+async function isAuthenticated() {
   return (await currentRole()) !== null;
 }
 

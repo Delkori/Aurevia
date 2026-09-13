@@ -8,6 +8,8 @@ import {
 import { FolderPlus, Plus, PlusCircle, Star, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, AlertTriangle, Bell, Clock, Menu, PanelRight, LayoutGrid, FlaskConical } from "lucide-react";
 import { findAccessory } from "@/lib/astronautAccessories";
 import { formatMoney } from "@/lib/format";
+import { futureValue } from "@/lib/projection";
+import { monthlyEquivalent } from "@/lib/flows";
 import { currentValue, gain, gainPercent, goalProgress, totalDebt, ownedShare, type Rates, type ValuationContext } from "@/lib/networth";
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
 import { getLogoUrl } from "@/lib/logos";
@@ -57,16 +59,6 @@ function shade(hex: string, percent: number): string {
   const g = clamp(Math.round(((num >> 8) & 0xff) * (1 - p) + t * p));
   const b = clamp(Math.round((num & 0xff) * (1 - p) + t * p));
   return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
-}
-
-// FV of a lump sum + regular monthly contributions, compounded monthly — same
-// simplified constant-rate model as the Projection section on /timeline.
-function projectedValue(p0: number, monthlyContribution: number, annualRatePct: number, months: number): number {
-  const r = annualRatePct / 100 / 12;
-  if (months <= 0) return p0;
-  if (r === 0) return p0 + monthlyContribution * months;
-  const growth = Math.pow(1 + r, months);
-  return p0 * growth + monthlyContribution * ((growth - 1) / r);
 }
 
 function hashSeed(a: string, b: string) { let h = 0; for (const c of a + b) h = (h * 31 + c.charCodeAt(0)) | 0; return h; }
@@ -384,14 +376,9 @@ export default function GalaxyView({
   const grandTotal = grossTotal - debt;
   const scrubMonthlyContribution = flows.reduce((s, f) => {
     if (f.targetType !== "portfolio" && f.targetType !== "goal") return s;
-    const amt = Number(f.amount);
-    if (f.frequency === "monthly") return s + amt;
-    if (f.frequency === "daily") return s + amt * 30.44;
-    if (f.frequency === "weekly") return s + amt * 4.345;
-    if (f.frequency === "yearly") return s + amt / 12;
-    return s;
+    return s + monthlyEquivalent(f);
   }, 0);
-  const scrubProjectedTotal = scrubYears === 0 ? grandTotal : projectedValue(grandTotal, scrubMonthlyContribution, scrubGrowth, scrubYears * 12);
+  const scrubProjectedTotal = scrubYears === 0 ? grandTotal : futureValue(grandTotal, scrubMonthlyContribution, scrubGrowth, scrubYears * 12);
   const currentYearForScrub = new Date().getFullYear();
   const scrubYear = currentYearForScrub + scrubYears;
 
@@ -407,15 +394,7 @@ export default function GalaxyView({
     const links: GLink[] = [];
     const flowLinks: { source: string; target: string; label: string; amount: number; days?: number; isSalarySource?: boolean }[] = [];
 
-    // Normalise un flux à son équivalent mensuel — même barème que scrubMonthlyContribution
-    // plus haut, dupliqué ici volontairement pour ne pas ajouter une dépendance externe à
-    // ce useMemo (qui casserait sa mémoïsation à chaque render).
-    const monthlyAmount = (f: Flow) =>
-      f.frequency === "monthly" ? Number(f.amount)
-      : f.frequency === "daily" ? Number(f.amount) * 30.44
-      : f.frequency === "weekly" ? Number(f.amount) * 4.345
-      : f.frequency === "yearly" ? Number(f.amount) / 12
-      : 0;
+    const monthlyAmount = monthlyEquivalent;
 
     // Simulateur "avance rapide" : projette la valeur de CE portefeuille (pas une moyenne
     // globale) à scrubYears, à partir de ses propres flux entrants réguliers — deux
@@ -425,7 +404,7 @@ export default function GalaxyView({
       const monthlyContribution = flows
         .filter(f => f.targetType === "portfolio" && f.targetId === g.key)
         .reduce((s, f) => s + monthlyAmount(f), 0);
-      return projectedValue(g.total, monthlyContribution, scrubGrowth, scrubYears * 12);
+      return futureValue(g.total, monthlyContribution, scrubGrowth, scrubYears * 12);
     };
     const maxPV = Math.max(1, ...groups.map(g => projectedGroupTotal(g)));
 
@@ -439,7 +418,7 @@ export default function GalaxyView({
     // ne doit pas donner un Soleil x4 en rayon, sinon il avale tout le reste).
     const grossNow = groups.reduce((s, g) => s + g.total, 0);
     const globalMonthlyContribution = flows.reduce((s, f) => (f.targetType === "portfolio" || f.targetType === "goal") ? s + monthlyAmount(f) : s, 0);
-    const sunProjectedTotal = scrubYears === 0 ? grossNow : projectedValue(grossNow, globalMonthlyContribution, scrubGrowth, scrubYears * 12);
+    const sunProjectedTotal = scrubYears === 0 ? grossNow : futureValue(grossNow, globalMonthlyContribution, scrubGrowth, scrubYears * 12);
     const growthRatio = scrubYears === 0 ? 1 : sunProjectedTotal / Math.max(1, grossNow);
     const centerR = CENTER_R * Math.max(0.85, Math.min(1.55, Math.sqrt(growthRatio)));
     nodes.push({ id: "center", kind: "center", label: "Patrimoine", r: centerR, color: "#7c6af5" });

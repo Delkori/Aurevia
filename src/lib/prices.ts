@@ -75,9 +75,6 @@ export async function getQuotes(tickers: string[]): Promise<Record<string, Quote
   return result;
 }
 
-export async function getQuote(ticker: string): Promise<Quote | null> {
-  return (await getQuotes([ticker]))[ticker] ?? null;
-}
 
 export type TickerSearchResult = { symbol: string; name: string; exchange: string; type: string };
 

@@ -93,8 +93,3 @@ export function natureOfPortfolio(
   return bestWeight > 0 ? best : "autre";
 }
 
-export function colorOfPortfolio(
-  valued: { asset: { type: string }; value: number }[]
-): string {
-  return NATURE_COLORS[natureOfPortfolio(valued)];
-}
