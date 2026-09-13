@@ -10,6 +10,7 @@ import { findAccessory } from "@/lib/astronautAccessories";
 import { formatMoney } from "@/lib/format";
 import { futureValue } from "@/lib/projection";
 import { monthlyEquivalent } from "@/lib/flows";
+import { partDe, type PartLike } from "@/lib/expenseShares";
 import { currentValue, gain, gainPercent, goalProgress, totalDebt, ownedShare, type Rates, type ValuationContext } from "@/lib/networth";
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
 import { getLogoUrl } from "@/lib/logos";
@@ -25,7 +26,7 @@ type Portfolio = { id: number; name: string; color: string; skin: string | null;
 type Goal = { id: number; name: string; targetAmount: string; targetDate: string | null; color: string; memberId: number | null };
 type Loan = { id: number; name: string; remainingBalance: string; currency: string; assetId: number | null };
 type Member = { id: number; name: string; role: string; color: string; salary: string | null; accessory: string | null };
-type Flow = { id: number; name: string | null; sourceType: string; sourceId: number | null; targetType: string; targetId: number | null; amount: string; frequency: string; dueDay: number | null; memberId: number | null; createdAt: string };
+type Flow = { id: number; name: string | null; sourceType: string; sourceId: number | null; targetType: string; targetId: number | null; amount: string; frequency: string; dueDay: number | null; shared?: boolean | null; memberId: number | null; createdAt: string };
 type GoalLink = { id: number; goalId: number; portfolioId: number };
 type PortfolioOwnership = { id: number; portfolioId: number; memberId: number | null; sharePercent: string };
 type DividendEvent = { date: string; amount: number };
@@ -165,6 +166,8 @@ interface GNode extends SimulationNodeDatum {
   portfolioKey?: number | "unassigned"; assetId?: number; goalId?: number; memberId?: number | null;
   gainVal?: number; gainPct?: number; sub?: string; logoUrl?: string | null; skin?: PlanetSkin; nature?: Nature;
   ownerExpenseTotal?: number; ownerRevenue?: number; flowId?: number; amount?: number; isProjected?: boolean; accessory?: string | null;
+  /** Dépense portée par plusieurs personnes : le nœud n'en montre qu'une part. */
+  partagee?: boolean;
 }
 interface GLink { source: string; target: string }
 
@@ -298,7 +301,7 @@ function TravelingMarkers({
 }
 
 export default function GalaxyView({
-  assets, portfolios, goals, loans, members, flows, goalLinks, portfolioOwnerships, quotes, dividends, actions, salary, onUpdateSalary, onUpdateSelf, onRefresh, showCountdown, ownerName, centerColor, ownerAccessory, rates, displayCurrency, readOnly = false, layoutMode, onLayoutMode, overdueCount = 0, onOpenReview, demoLoaded = false, onRemoveDemo, demoBusy = false,
+  assets, portfolios, goals, loans, members, flows, goalLinks, portfolioOwnerships, quotes, dividends, actions, salary, onUpdateSalary, onUpdateSelf, onRefresh, showCountdown, ownerName, centerColor, ownerAccessory, rates, displayCurrency, readOnly = false, layoutMode, onLayoutMode, overdueCount = 0, onOpenReview, demoLoaded = false, onRemoveDemo, demoBusy = false, expenseShares = [],
 }: {
   assets: Asset[]; portfolios: Portfolio[]; goals: Goal[]; loans: Loan[];
   members: Member[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; quotes: Record<string, Quote>; dividends: Record<string, DividendInfo | null>;
@@ -307,6 +310,8 @@ export default function GalaxyView({
   rates: Rates; displayCurrency: string; readOnly?: boolean;
   layoutMode: LayoutMode; onLayoutMode: (m: LayoutMode) => void;
   overdueCount?: number; onOpenReview: () => void;
+  /** Règle du foyer et exceptions : qui porte quelle part de chaque dépense. */
+  expenseShares?: PartLike[];
   /** Le foyer d'exemple est chargé : on propose de le retirer. */
   demoLoaded?: boolean; onRemoveDemo?: () => void; demoBusy?: boolean;
 }) {
@@ -452,8 +457,12 @@ export default function GalaxyView({
     // memberId (null = Moi) et on crée un nœud par propriétaire.
     const expFlows = flows.filter(f => f.targetType === "expense");
     const totalExpenseFlows = expFlows.reduce((s, f) => s + Number(f.amount), 0);
-    const myExpFlows = expFlows.filter(f => f.memberId == null);
-    const myExpenseTotal = myExpFlows.reduce((s, f) => s + Number(f.amount), 0);
+    // Chacun ne porte que sa part. Une dépense commune comptait auparavant
+    // entière sur son porteur déclaré : le taux d'épargne de celui-là
+    // s'effondrait, celui de l'autre était flatté, et aucun des deux n'était vrai.
+    const partDepense = (f: Flow, mid: number | null) => Number(f.amount) * partDe(f, expenseShares, mid);
+    const myExpFlows = expFlows.filter(f => partDe(f, expenseShares, null) > 0);
+    const myExpenseTotal = expFlows.reduce((s, f) => s + partDepense(f, null), 0);
     const salInvest = flows.filter(f => f.sourceType === "salary" && (f.targetType === "portfolio" || f.targetType === "goal"));
     const totalInvest = salInvest.reduce((s, f) => s + Number(f.amount), 0);
     const resteAInvestir = totalRevenue > 0 ? Math.max(0, totalRevenue - totalInvest - totalExpenseFlows) : 0;
@@ -464,7 +473,8 @@ export default function GalaxyView({
       if (myExpenseTotal > 0) flowLinks.push({ source: "salary", target: "expenses", label: fmt(myExpenseTotal), amount: myExpenseTotal });
       myExpFlows.forEach(ef => {
         const eid = `exp-${ef.id}`;
-        nodes.push({ id: eid, kind: "expense-item", label: ef.name || "Dépense", r: 10 + Math.min(8, Number(ef.amount) / 100), color: "#f87171", sub: fmt(Number(ef.amount)), flowId: ef.id });
+        const part = partDepense(ef, null);
+        nodes.push({ id: eid, kind: "expense-item", label: ef.name || "Dépense", r: 10 + Math.min(8, part / 100), color: "#f87171", sub: fmt(part), flowId: ef.id, partagee: ef.shared === true });
         links.push({ source: "expenses", target: eid });
       });
     }
@@ -482,15 +492,16 @@ export default function GalaxyView({
         nodes.push({ id: `ms-${m.id}`, kind: "member-salary", label: `Salaire de ${m.name}`, r: 22, color: m.color, memberId: m.id, sub: fmt(Number(m.salary)), amount: Number(m.salary) });
         links.push({ source: `m-${m.id}`, target: `ms-${m.id}` });
       }
-      const memberExpFlows = expFlows.filter(f => f.memberId === m.id);
-      const memberExpenseTotal = memberExpFlows.reduce((s, f) => s + Number(f.amount), 0);
+      const memberExpFlows = expFlows.filter(f => partDe(f, expenseShares, m.id) > 0);
+      const memberExpenseTotal = expFlows.reduce((s, f) => s + partDepense(f, m.id), 0);
       const memberRevenue = m.salary ? Number(m.salary) : 0;
       const meid = `exp-m-${m.id}`;
       nodes.push({ id: meid, kind: "expenses", label: `Dépenses de ${m.name}`, r: 22 + Math.min(18, memberExpenseTotal / 80), color: "#f87171", memberId: m.id, ownerExpenseTotal: memberExpenseTotal, ownerRevenue: memberRevenue });
       links.push({ source: `m-${m.id}`, target: meid });
       memberExpFlows.forEach(ef => {
-        const eid = `exp-${ef.id}`;
-        nodes.push({ id: eid, kind: "expense-item", label: ef.name || "Dépense", r: 10 + Math.min(8, Number(ef.amount) / 100), color: "#f87171", sub: fmt(Number(ef.amount)), flowId: ef.id });
+        const eid = `exp-m${m.id}-${ef.id}`;
+        const part = partDepense(ef, m.id);
+        nodes.push({ id: eid, kind: "expense-item", label: ef.name || "Dépense", r: 10 + Math.min(8, part / 100), color: "#f87171", sub: fmt(part), flowId: ef.id, partagee: ef.shared === true });
         links.push({ source: meid, target: eid });
       });
     });
@@ -538,7 +549,7 @@ export default function GalaxyView({
     });
 
     return { targetNodes: nodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows, totalRevenue, totalInvest };
-  }, [groups, expanded, goals, members, flows, quotes, salary, goalLinks, progressOf, scrubYears, scrubGrowth, ownerName, centerColor, ownerAccessory, ctx, portfolioOwnerships, fmt]);
+  }, [groups, expanded, goals, members, flows, quotes, salary, goalLinks, progressOf, scrubYears, scrubGrowth, ownerName, centerColor, ownerAccessory, ctx, portfolioOwnerships, expenseShares, fmt]);
   linksRef.current = links;
 
   // Simulation

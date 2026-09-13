@@ -21,6 +21,7 @@ type Member = { id: number; name: string; role: string; color: string; salary: s
 type Flow = { id: number; name: string | null; sourceType: string; sourceId: number | null; targetType: string; targetId: number | null; amount: string; frequency: string; dueDay: number | null; memberId: number | null; createdAt: string };
 type GoalLink = { id: number; goalId: number; portfolioId: number };
 type PortfolioOwnership = { id: number; portfolioId: number; memberId: number | null; sharePercent: string };
+type ExpenseShare = { id: number; flowId: number | null; memberId: number | null; sharePercent: string };
 type Quote = { price: number; currency: string } | null;
 type Rates = Record<string, number>;
 
@@ -33,6 +34,7 @@ export default function HomePage() {
   const [flows, setFlows] = useState<Flow[]>([]);
   const [goalLinks, setGoalLinks] = useState<GoalLink[]>([]);
   const [portfolioOwnerships, setPortfolioOwnerships] = useState<PortfolioOwnership[]>([]);
+  const [expenseShares, setExpenseShares] = useState<ExpenseShare[]>([]);
   const [quotes, setQuotes] = useState<Record<string, Quote>>({});
   const [dividends, setDividends] = useState<Record<string, DividendInfo | null>>({});
   const [settings, setSettings] = useState<Record<string, string>>({});
@@ -55,12 +57,13 @@ export default function HomePage() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [a, p, g, l, m, f, s, gl, po, fx, se, dm, oc] = await Promise.allSettled([
+      const [a, p, g, l, m, f, s, gl, po, fx, se, dm, oc, es] = await Promise.allSettled([
         apiFetch("/api/assets"), apiFetch("/api/portfolios"), apiFetch("/api/goals"),
         apiFetch("/api/loans"), apiFetch("/api/members"), apiFetch("/api/flows"),
         apiFetch("/api/settings"), apiFetch("/api/goal-links"), apiFetch("/api/portfolio-ownerships"),
         apiFetch("/api/exchange-rates"),
         apiFetch("/api/session"), apiFetch("/api/demo"), apiFetch("/api/occurrences"),
+        apiFetch("/api/expense-shares"),
       ]);
       const ad = a.status === "fulfilled" ? (a.value as Asset[]) : [];
       setAssets(ad);
@@ -72,6 +75,7 @@ export default function HomePage() {
       setSettings(s.status === "fulfilled" ? (s.value as Record<string, string>) : {});
       setGoalLinks(gl.status === "fulfilled" ? (gl.value as GoalLink[]) : []);
       setPortfolioOwnerships(po.status === "fulfilled" ? (po.value as PortfolioOwnership[]) : []);
+      setExpenseShares(es.status === "fulfilled" ? (es.value as ExpenseShare[]) : []);
       if (fx.status === "fulfilled") setRates(fx.value as Rates);
       setRole(se.status === "fulfilled" ? (se.value as { role: "owner" | "demo" }).role : "owner");
       if (oc.status === "fulfilled") {
@@ -375,7 +379,7 @@ export default function HomePage() {
         {!isEmpty && !readOnly && <SinceLastVisit data={visitData} disabled={readOnly} />}
         <GalaxyView
           assets={assets} portfolios={portfolios} goals={goals} loans={loans}
-          members={members} flows={flows} goalLinks={goalLinks} portfolioOwnerships={portfolioOwnerships} quotes={quotes} dividends={dividends} actions={actions}
+          members={members} flows={flows} goalLinks={goalLinks} portfolioOwnerships={portfolioOwnerships} expenseShares={expenseShares} quotes={quotes} dividends={dividends} actions={actions}
           salary={Number(settings.monthly_salary) || 0}
           showCountdown={settings.show_payment_countdown !== "false"}
           ownerName={settings.owner_name || "Moi"}

@@ -1,4 +1,5 @@
 import {
+  boolean,
   pgTable,
   serial,
   text,
@@ -92,6 +93,13 @@ export const flows = pgTable("flows", {
   amount: numeric("amount").notNull(),
   frequency: text("frequency").notNull().default("monthly"), // monthly | weekly | yearly | once
   /**
+   * Dépense portée par le foyer et non par une seule personne. Voir
+   * `expense_shares` et `lib/expenseShares.ts` : `member_id` ne pouvait
+   * désigner qu'un seul porteur, ce qui rendait un loyer commun impossible à
+   * exprimer autrement qu'à 100 % sur l'un des deux.
+   */
+  shared: boolean("shared").notNull().default(false),
+  /**
    * Jour du mois de l'échéance (1-31), ramené au dernier jour quand il n'existe
    * pas. `null` = on prend le jour de `createdAt`, comme avant.
    *
@@ -103,6 +111,20 @@ export const flows = pgTable("flows", {
   memberId: integer("member_id").references(() => members.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+// ── Répartition des dépenses entre les personnes du foyer ───────────────────
+// Même principe que `portfolio_ownerships` pour les biens : un loyer peut être
+// porté moitié-moitié. `flow_id` à NULL décrit la règle du foyer — celle qu'on
+// règle une fois — et les lignes rattachées à un flux en sont les exceptions.
+export const expenseShares = pgTable("expense_shares", {
+  id: serial("id").primaryKey(),
+  /** `null` : règle du foyer, applicable à toute dépense déclarée commune. */
+  flowId: integer("flow_id").references(() => flows.id, { onDelete: "cascade" }),
+  /** `null` = le propriétaire du foyer (« Moi »). */
+  memberId: integer("member_id").references(() => members.id, { onDelete: "cascade" }),
+  sharePercent: numeric("share_percent").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [index("expense_shares_flow_id_idx").on(t.flowId)]);
 
 // ── Paramètres (clé-valeur) ──────────────────────────────────────────────────
 export const settings = pgTable("settings", {
