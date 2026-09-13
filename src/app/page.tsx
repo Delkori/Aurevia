@@ -6,6 +6,8 @@ import GalaxyView from "@/components/GalaxyView";
 import SinceLastVisit from "@/components/SinceLastVisit";
 import MonthReview, { type Occurrence } from "@/components/MonthReview";
 import DemoIntro from "@/components/DemoIntro";
+import { monthlyEquivalent } from "@/lib/flows";
+import { type EntreesSystemes, type SystemeId } from "@/lib/systemes";
 import type { LayoutMode } from "@/lib/galaxyLayout";
 import { currentValue, goalProgress, isStale, totalDebt, type ValuationContext } from "@/lib/networth";
 import { formatMoney } from "@/lib/format";
@@ -53,6 +55,8 @@ export default function HomePage() {
   const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
   const [overdue, setOverdue] = useState(0);
   const [reviewOpen, setReviewOpen] = useState(false);
+  /** `null` = vue d'ensemble des systèmes ; sinon on est entré dans l'un d'eux. */
+  const [systeme, setSysteme] = useState<SystemeId | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -283,6 +287,44 @@ export default function HomePage() {
     await rechargerEcheances();
   };
 
+  /** Ce que la vue d'ensemble a besoin de savoir, calculé une fois. */
+  const entreesSystemes: EntreesSystemes = useMemo(() => {
+    const ctx = { rates, displayCurrency: settings.display_currency || "EUR" };
+    const valeurPlanete = (pid: number) => assets
+      .filter(a => a.portfolioId === pid)
+      .reduce((s, a) => s + currentValue(a, a.ticker ? quotes[a.ticker] : null, ctx), 0);
+    const brut = assets.reduce((s, a) => s + currentValue(a, a.ticker ? quotes[a.ticker] : null, ctx), 0);
+    const depensesFlux = flows.filter(f => f.targetType === "expense");
+    const revenusFlux = flows.filter(f => f.targetType === "income");
+    const versementsFlux = flows.filter(f => f.targetType === "portfolio" || f.targetType === "goal");
+
+    return {
+      revenus: (Number(settings.monthly_salary) || 0)
+        + members.reduce((s, m) => s + (Number(m.salary) || 0), 0)
+        + revenusFlux.reduce((s, f) => s + monthlyEquivalent(f), 0),
+      depenses: depensesFlux.reduce((s, f) => s + monthlyEquivalent(f), 0),
+      patrimoine: brut - totalDebt(loans, ctx),
+      versements: versementsFlux.reduce((s, f) => s + monthlyEquivalent(f), 0),
+      planetes: portfolios.length,
+      lignesDepense: depensesFlux.length,
+      projets: goals.map(g => {
+        const liees = goalLinks.filter(gl => gl.goalId === g.id).map(gl => gl.portfolioId);
+        return {
+          goalId: g.id,
+          nom: g.name,
+          couleur: g.color,
+          acquis: liees.reduce((s, pid) => s + valeurPlanete(pid), 0),
+          apport: flows.reduce((s, f) => {
+            if (f.targetType === "goal" && f.targetId === g.id) return s + monthlyEquivalent(f);
+            if (f.targetType === "portfolio" && f.targetId != null && liees.includes(f.targetId)) return s + monthlyEquivalent(f);
+            return s;
+          }, 0),
+          planetes: liees.length,
+        };
+      }),
+    };
+  }, [assets, quotes, loans, flows, members, goals, goalLinks, portfolios, rates, settings]);
+
   const isEmpty =
     assets.length === 0 &&
     portfolios.length === 0 &&
@@ -376,6 +418,7 @@ export default function HomePage() {
           </div>
         )}
         {readOnly && <DemoIntro />}
+
         {!isEmpty && !readOnly && <SinceLastVisit data={visitData} disabled={readOnly} />}
         <GalaxyView
           assets={assets} portfolios={portfolios} goals={goals} loans={loans}
@@ -401,6 +444,10 @@ export default function HomePage() {
           }}
           onUpdateSalary={updateSalary}
           onUpdateSelf={updateSelf}
+          systeme={systeme}
+          onSortirSysteme={() => setSysteme(null)}
+          onEntrerSysteme={setSysteme}
+          entreesSystemes={entreesSystemes}
           onRefresh={load}
         />
       </div>

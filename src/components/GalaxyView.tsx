@@ -11,12 +11,14 @@ import { formatMoney } from "@/lib/format";
 import { futureValue } from "@/lib/projection";
 import { monthlyEquivalent } from "@/lib/flows";
 import { partDe, type PartLike } from "@/lib/expenseShares";
+import { goalIdDeProjet, systemeDuNoeud, type EntreesSystemes, type SystemeId } from "@/lib/systemes";
+import SystemesView from "@/components/SystemesView";
 import { currentValue, gain, gainPercent, goalProgress, totalDebt, ownedShare, type Rates, type ValuationContext } from "@/lib/networth";
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
 import { getLogoUrl } from "@/lib/logos";
 import { NATURE_COLORS, NATURE_LABELS, NATURE_ORDER, natureOfPortfolio, type Nature } from "@/lib/natures";
 import { flowLayout, LAYOUT_MODES, type LayoutMode } from "@/lib/galaxyLayout";
-import { ClipboardCheck, Loader2 } from "lucide-react";
+import { ChevronLeft, ClipboardCheck, Loader2 } from "lucide-react";
 import DateDuJour from "@/components/DateDuJour";
 import { daysUntilNextOccurrence } from "@/lib/dates";
 import NodePanel, { PlanetModal, type Selection, type Actions } from "@/components/NodePanel";
@@ -301,7 +303,7 @@ function TravelingMarkers({
 }
 
 export default function GalaxyView({
-  assets, portfolios, goals, loans, members, flows, goalLinks, portfolioOwnerships, quotes, dividends, actions, salary, onUpdateSalary, onUpdateSelf, onRefresh, showCountdown, ownerName, centerColor, ownerAccessory, rates, displayCurrency, readOnly = false, layoutMode, onLayoutMode, overdueCount = 0, onOpenReview, demoLoaded = false, onRemoveDemo, demoBusy = false, expenseShares = [],
+  assets, portfolios, goals, loans, members, flows, goalLinks, portfolioOwnerships, quotes, dividends, actions, salary, onUpdateSalary, onUpdateSelf, onRefresh, showCountdown, ownerName, centerColor, ownerAccessory, rates, displayCurrency, readOnly = false, layoutMode, onLayoutMode, overdueCount = 0, onOpenReview, demoLoaded = false, onRemoveDemo, demoBusy = false, expenseShares = [], systeme = null, onSortirSysteme, onEntrerSysteme, entreesSystemes,
 }: {
   assets: Asset[]; portfolios: Portfolio[]; goals: Goal[]; loans: Loan[];
   members: Member[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; quotes: Record<string, Quote>; dividends: Record<string, DividendInfo | null>;
@@ -312,6 +314,11 @@ export default function GalaxyView({
   overdueCount?: number; onOpenReview: () => void;
   /** Règle du foyer et exceptions : qui porte quelle part de chaque dépense. */
   expenseShares?: PartLike[];
+  /** Système visité, ou `null` pour la galaxie entière. */
+  systeme?: SystemeId | null;
+  onSortirSysteme?: () => void;
+  onEntrerSysteme?: (id: SystemeId) => void;
+  entreesSystemes?: EntreesSystemes;
   /** Le foyer d'exemple est chargé : on propose de le retirer. */
   demoLoaded?: boolean; onRemoveDemo?: () => void; demoBusy?: boolean;
 }) {
@@ -548,8 +555,48 @@ export default function GalaxyView({
         flowLinks.push({ source: sId, target: tId, label: fmt(Number(f.amount)), amount: Number(f.amount), days: daysUntilNextOccurrence(f.createdAt, f.frequency), isSalarySource: f.sourceType === "salary" || f.sourceType === "member_salary" });
     });
 
+    // Entrer dans un système ne change pas la façon de construire la galaxie :
+    // on la construit entière, puis on retire ce qui n'en fait pas partie.
+    // Restructurer la construction pour qu'elle filtre en amont aurait touché
+    // huit cents lignes pour le même résultat visible.
+    if (systeme) {
+      const objectifDuSysteme = goalIdDeProjet(systeme);
+      const garde = new Set<string>();
+      for (const n of nodes) {
+        const appartenance = systemeDuNoeud(n.kind);
+        if (appartenance === "contexte") { garde.add(n.id); continue; }
+        if (objectifDuSysteme != null) {
+          // Un projet montre son objectif et les planètes qui l'alimentent.
+          if (n.kind === "goal" && n.goalId === objectifDuSysteme) garde.add(n.id);
+          if (n.kind === "portfolio" && goalLinks.some(gl => gl.goalId === objectifDuSysteme && gl.portfolioId === n.portfolioKey)) garde.add(n.id);
+          continue;
+        }
+        if (appartenance === systeme) garde.add(n.id);
+      }
+      // Les satellites suivent leur parent : un actif n'a pas de sens sans sa
+      // planète. Uniquement les satellites : propager le long de *tous* les
+      // liens ramenait tout, puisque le foyer est du contexte et que chaque
+      // planète y est rattachée — « Dépenses » affichait les six planètes.
+      const parGenre = new Map(nodes.map(n => [n.id, n.kind]));
+      const estSatellite = (id: string) => {
+        const k = parGenre.get(id);
+        return k === "asset" || k === "expense-item" || k === "income-item";
+      };
+      for (const l of links) if (garde.has(l.source) && estSatellite(l.target)) garde.add(l.target);
+
+      const retenus = nodes.filter(n => garde.has(n.id));
+      const dansLeSysteme = (l: { source: string; target: string }) => garde.has(l.source) && garde.has(l.target);
+      return {
+        targetNodes: retenus,
+        links: links.filter(dansLeSysteme),
+        flowLinks: flowLinks.filter(dansLeSysteme),
+        goalLinkEdges: goalLinkEdges.filter(dansLeSysteme),
+        resteAInvestir, totalExpenseFlows, totalRevenue, totalInvest,
+      };
+    }
+
     return { targetNodes: nodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows, totalRevenue, totalInvest };
-  }, [groups, expanded, goals, members, flows, quotes, salary, goalLinks, progressOf, scrubYears, scrubGrowth, ownerName, centerColor, ownerAccessory, ctx, portfolioOwnerships, expenseShares, fmt]);
+  }, [groups, expanded, goals, members, flows, quotes, salary, goalLinks, progressOf, scrubYears, scrubGrowth, ownerName, centerColor, ownerAccessory, ctx, portfolioOwnerships, expenseShares, systeme, fmt]);
   linksRef.current = links;
 
   // Simulation
@@ -1438,6 +1485,19 @@ export default function GalaxyView({
             <PanelRight size={18} />
           </button>
         </div>
+        {systeme === null && entreesSystemes && onEntrerSysteme ? (
+          <div className="absolute inset-0 max-lg:top-11">
+            <SystemesView entrees={entreesSystemes} devise={displayCurrency} onEntrer={onEntrerSysteme} />
+          </div>
+        ) : (<>
+        {systeme !== null && onSortirSysteme && (
+          <button
+            onClick={onSortirSysteme}
+            className="absolute top-3 left-3 z-10 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg glass-panel border border-border text-xs text-text-muted hover:text-text max-lg:top-14"
+          >
+            <ChevronLeft size={13} />Vue d&apos;ensemble
+          </button>
+        )}
         <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full h-full select-none touch-none block absolute inset-0"
           onPointerDown={onBgDown} onPointerMove={onBgMove} onPointerUp={onBgUp} onPointerLeave={onBgUp}
           onClick={() => { if (linkSourceNode) { setLinkSourceNode(null); return; } if (ownerSourceNode) { setOwnerSourceNode(null); return; } setSelected(null); setCreateMode(null); }}>
@@ -1968,6 +2028,7 @@ export default function GalaxyView({
           <rect x={0} y={0} width={W} height={H} fill="url(#vignette)" pointerEvents="none" />
         </svg>
         <p className="hidden lg:block absolute bottom-3 left-1/2 -translate-x-1/2 text-[10px] text-white/20 pointer-events-none">Molette = zoom · glisser pour déplacer · glisser un actif vers un portefeuille pour le réassigner</p>
+        </>)}
 
         {/* Curseur chronologique : projette le Patrimoine à une date future, hypothèse à taux constant */}
         {showScrubBar && (
