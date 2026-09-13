@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Check, ChevronLeft, ChevronRight, Minus, RotateCcw, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Minus, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { formatMoney } from "@/lib/format";
 
 type Flow = {
@@ -14,7 +14,10 @@ type Flow = {
 
 export type Occurrence = {
   id: number;
-  flowId: number;
+  /** `null` pour un mouvement exceptionnel, saisi à la main. */
+  flowId: number | null;
+  label: string | null;
+  direction: string | null;
   dueDate: string;
   expectedAmount: string;
   actualAmount: string | null;
@@ -32,6 +35,91 @@ function cleMois(d: Date) {
 }
 
 /**
+ * Saisie d'un mouvement exceptionnel, ou correction d'un mouvement déjà saisi.
+ *
+ * Volontairement court : un libellé, un montant, un jour, un sens. Tout ce qui
+ * se répète a sa place dans les règles de la galaxie, pas ici.
+ */
+function FormulaireMouvement({ initial, mois, onValider, onAnnuler }: {
+  initial?: Occurrence;
+  /** Mois affiché, pour proposer une date qui tombe dedans. */
+  mois: Date;
+  onValider: (d: SaisieMouvement) => Promise<void>;
+  onAnnuler: () => void;
+}) {
+  const parDefaut = () => {
+    const aujourdhui = new Date();
+    const memeMois = aujourdhui.getFullYear() === mois.getFullYear() && aujourdhui.getMonth() === mois.getMonth();
+    const d = memeMois ? aujourdhui : new Date(mois.getFullYear(), mois.getMonth(), 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  const [f, setF] = useState<SaisieMouvement>({
+    label: initial?.label ?? "",
+    amount: initial?.expectedAmount ?? "",
+    dueDate: initial?.dueDate ?? parDefaut(),
+    direction: initial?.direction ?? "out",
+  });
+  const [envoi, setEnvoi] = useState(false);
+  const [erreur, setErreur] = useState<string | null>(null);
+
+  const valider = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setEnvoi(true); setErreur(null);
+    try {
+      await onValider(f);
+      onAnnuler();
+    } catch (err) {
+      setErreur(err instanceof Error ? err.message : "Enregistrement impossible.");
+    } finally { setEnvoi(false); }
+  };
+
+  return (
+    <form onSubmit={valider} className="px-5 py-3 bg-surface-hover/40 border-b border-border space-y-2">
+      <div className="flex gap-2">
+        <input
+          required autoFocus value={f.label}
+          onChange={(e) => setF({ ...f, label: e.target.value })}
+          placeholder="Réparation voiture, prime, cadeau…"
+          aria-label="Libellé du mouvement"
+          className="flex-1 min-w-0 bg-bg border border-border rounded-md px-2.5 py-1.5 text-xs"
+        />
+        <input
+          required type="date" value={f.dueDate}
+          onChange={(e) => setF({ ...f, dueDate: e.target.value })}
+          aria-label="Date du mouvement"
+          className="w-36 bg-bg border border-border rounded-md px-2 py-1.5 text-xs tabular"
+        />
+      </div>
+      <div className="flex gap-2">
+        <select
+          value={f.direction} onChange={(e) => setF({ ...f, direction: e.target.value })}
+          aria-label="Sens du mouvement"
+          className="w-28 bg-bg border border-border rounded-md px-2 py-1.5 text-xs"
+        >
+          <option value="out">Dépense</option>
+          <option value="in">Rentrée</option>
+        </select>
+        <input
+          required type="text" inputMode="decimal" value={f.amount}
+          onChange={(e) => setF({ ...f, amount: e.target.value })}
+          placeholder="Montant" aria-label="Montant du mouvement"
+          className="flex-1 min-w-0 bg-bg border border-border rounded-md px-2.5 py-1.5 text-xs tabular"
+        />
+        <button type="submit" disabled={envoi}
+          className="px-3 py-1.5 rounded-md bg-accent text-white text-xs font-medium hover:opacity-90 disabled:opacity-50">
+          {initial ? "Enregistrer" : "Ajouter"}
+        </button>
+        <button type="button" onClick={onAnnuler}
+          className="px-2.5 py-1.5 rounded-md border border-border text-xs text-text-muted hover:text-text">
+          Annuler
+        </button>
+      </div>
+      {erreur && <p className="text-[11px] text-negative">{erreur}</p>}
+    </form>
+  );
+}
+
+/**
  * Fenêtre de pointage mensuel.
  *
  * Le reste de l'app décrit un patrimoine tel qu'il *devrait* être : des règles,
@@ -42,8 +130,10 @@ function cleMois(d: Date) {
  * agrégateur ne donne : l'un ignore ce qui était prévu, l'autre ignore ce qui
  * s'est réellement produit.
  */
+export type SaisieMouvement = { label: string; amount: string; dueDate: string; direction: string };
+
 export default function MonthReview({
-  occurrences, flows, destinations, displayCurrency, onUpdate, onClose, readOnly,
+  occurrences, flows, destinations, displayCurrency, onUpdate, onCreate, onEdit, onDelete, onClose, readOnly,
 }: {
   occurrences: Occurrence[];
   flows: Flow[];
@@ -51,23 +141,31 @@ export default function MonthReview({
   destinations: Record<string, string>;
   displayCurrency: string;
   onUpdate: (id: number, patch: { status: string; actualAmount?: string | null }) => Promise<void>;
+  /** Mouvement exceptionnel : ce que la liste des règles ne pouvait pas prévoir. */
+  onCreate: (d: SaisieMouvement) => Promise<void>;
+  onEdit: (id: number, d: SaisieMouvement) => Promise<void>;
+  onDelete: (id: number) => Promise<void>;
   onClose: () => void;
   readOnly?: boolean;
 }) {
   const [mois, setMois] = useState(() => new Date());
   const [saisie, setSaisie] = useState<Record<number, string>>({});
   const [enCours, setEnCours] = useState<number | null>(null);
+  /** `"nouveau"` pour une saisie vierge, un identifiant pour une correction. */
+  const [formulaire, setFormulaire] = useState<"nouveau" | number | null>(null);
 
   const fmt = (v: number) => formatMoney(v, displayCurrency);
-  const nomDe = (flowId: number) => {
-    const f = flows.find((x) => x.id === flowId);
+  const nomDe = (o: Occurrence) => {
+    if (o.flowId == null) return o.label || "Mouvement";
+    const f = flows.find((x) => x.id === o.flowId);
     if (!f) return "Mouvement";
     if (f.name) return f.name;
     const dest = f.targetId != null ? destinations[`${f.targetType}:${f.targetId}`] : undefined;
     if (dest) return `Versement → ${dest}`;
     return f.targetType === "income" ? "Revenu" : "Versement";
   };
-  const estRevenu = (flowId: number) => flows.find((x) => x.id === flowId)?.targetType === "income";
+  const estRevenu = (o: Occurrence) =>
+    o.flowId == null ? o.direction === "in" : flows.find((x) => x.id === o.flowId)?.targetType === "income";
 
   const duMois = useMemo(() => {
     const cle = cleMois(mois);
@@ -83,7 +181,7 @@ export default function MonthReview({
     let prevuTotal = 0, prevuPointe = 0, constate = 0, aVerifier = 0;
     for (const o of duMois) {
       if (o.status === "skipped") continue;
-      const signe = estRevenu(o.flowId) ? 1 : -1;
+      const signe = estRevenu(o) ? 1 : -1;
       const attendu = signe * Number(o.expectedAmount);
       prevuTotal += attendu;
       if (o.status === "confirmed") {
@@ -141,11 +239,29 @@ export default function MonthReview({
                 : duMois.length > 0 ? "Tout est pointé" : "Aucun mouvement ce mois-ci"}
             </p>
           </div>
+          {!readOnly && (
+            <button onClick={() => setFormulaire(formulaire === "nouveau" ? null : "nouveau")}
+              aria-pressed={formulaire === "nouveau"}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs shrink-0 ${
+                formulaire === "nouveau"
+                  ? "bg-accent/15 text-accent"
+                  : "text-text-muted hover:text-text hover:bg-surface-hover"}`}>
+              <Plus size={13} />Ajouter
+            </button>
+          )}
           <button onClick={onClose} aria-label="Fermer"
             className="p-1 rounded text-text-muted hover:text-text hover:bg-surface-hover">
             <X size={16} />
           </button>
         </header>
+
+        {formulaire === "nouveau" && (
+          <FormulaireMouvement
+            mois={mois}
+            onValider={onCreate}
+            onAnnuler={() => setFormulaire(null)}
+          />
+        )}
 
         {duMois.length > 0 && (
           <div className="grid grid-cols-3 gap-px bg-border border-b border-border shrink-0">
@@ -172,8 +288,8 @@ export default function MonthReview({
         <div className="flex-1 min-h-0 overflow-y-auto">
           {duMois.length === 0 ? (
             <p className="p-6 text-sm text-text-muted text-center">
-              Rien de programmé sur ce mois. Les mouvements viennent des liens que tu crées
-              dans la galaxie.
+              Rien de programmé sur ce mois. Les mouvements récurrents viennent des liens
+              que tu crées dans la galaxie ; « Ajouter » sert à tout le reste.
             </p>
           ) : (
             <ul className="divide-y divide-border">
@@ -182,19 +298,47 @@ export default function MonthReview({
                 const constate = o.actualAmount != null ? Number(o.actualAmount) : null;
                 const ecart = constate != null ? constate - attendu : 0;
                 const enRetard = o.status === "pending" && o.dueDate <= aujourdhui;
-                const revenu = estRevenu(o.flowId);
+                const revenu = estRevenu(o);
+
+                const exceptionnel = o.flowId == null;
+
+                if (formulaire === o.id) {
+                  return (
+                    <li key={o.id}>
+                      <FormulaireMouvement
+                        initial={o} mois={mois}
+                        onValider={(d) => onEdit(o.id, d)}
+                        onAnnuler={() => setFormulaire(null)}
+                      />
+                    </li>
+                  );
+                }
 
                 return (
-                  <li key={o.id} className={`px-5 py-3 ${enRetard ? "bg-negative/5" : ""}`}>
+                  <li key={o.id} className={`px-5 py-3 group ${enRetard ? "bg-negative/5" : ""}`}>
                     <div className="flex items-baseline justify-between gap-3 mb-1.5">
                       <span className="text-sm min-w-0 truncate">
                         <span className="tabular text-text-muted mr-2">
                           {o.dueDate.slice(8, 10)}/{o.dueDate.slice(5, 7)}
                         </span>
-                        {nomDe(o.flowId)}
+                        {nomDe(o)}
                       </span>
-                      <span className={`text-sm tabular shrink-0 ${revenu ? "text-positive" : "text-text"}`}>
-                        {revenu ? "+" : "−"}{fmt(attendu)}
+                      <span className="flex items-baseline gap-2 shrink-0">
+                        {exceptionnel && !readOnly && (
+                          <span className="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                            <button onClick={() => setFormulaire(o.id)} title="Modifier"
+                              className="p-0.5 text-text-muted hover:text-text">
+                              <Pencil size={12} />
+                            </button>
+                            <button onClick={() => onDelete(o.id)} title="Supprimer"
+                              className="p-0.5 text-text-muted hover:text-negative">
+                              <Trash2 size={12} />
+                            </button>
+                          </span>
+                        )}
+                        <span className={`text-sm tabular ${revenu ? "text-positive" : "text-text"}`}>
+                          {revenu ? "+" : "−"}{fmt(attendu)}
+                        </span>
                       </span>
                     </div>
 
@@ -237,7 +381,7 @@ export default function MonthReview({
                           value={saisie[o.id] ?? ""}
                           onChange={(e) => setSaisie((s) => ({ ...s, [o.id]: e.target.value }))}
                           placeholder={String(attendu)}
-                          aria-label={`Montant constaté pour ${nomDe(o.flowId)}`}
+                          aria-label={`Montant constaté pour ${nomDe(o)}`}
                           className="w-24 bg-bg border border-border rounded-md px-2 py-1 text-xs tabular text-right"
                         />
                         <button onClick={() => valider(o, "confirmed")} disabled={enCours === o.id}

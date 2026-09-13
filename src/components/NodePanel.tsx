@@ -14,7 +14,7 @@ type Portfolio = { id: number; name: string; color: string; skin: string | null;
 type Goal = { id: number; name: string; targetAmount: string; targetDate: string | null; color: string; memberId: number | null };
 type Loan = { id: number; name: string; remainingBalance: string; currency: string; assetId: number | null };
 type Member = { id: number; name: string; role: string; color: string; salary: string | null; accessory: string | null };
-type Flow = { id: number; name: string | null; sourceType: string; sourceId: number | null; targetType: string; targetId: number | null; amount: string; frequency: string; memberId: number | null; createdAt: string };
+type Flow = { id: number; name: string | null; sourceType: string; sourceId: number | null; targetType: string; targetId: number | null; amount: string; frequency: string; dueDay: number | null; memberId: number | null; createdAt: string };
 type GoalLink = { id: number; goalId: number; portfolioId: number };
 type PortfolioOwnership = { id: number; portfolioId: number; memberId: number | null; sharePercent: string };
 type DividendEvent = { date: string; amount: number };
@@ -352,6 +352,7 @@ function FlowForm({ portfolios, goals, members, ownerName, defaultTargetType, de
     name: initial?.name ?? "",
     memberId: initial?.memberId ? String(initial.memberId) : defaultMemberId ? String(defaultMemberId) : "",
     date: initial?.createdAt ? initial.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10),
+    dueDay: initial?.dueDay != null ? String(initial.dueDay) : "",
   });
   const membersWithSalary = members.filter(m => m.salary && Number(m.salary) > 0);
   const targets = f.targetType === "portfolio" ? portfolios.map(p => ({ id: p.id, name: p.name }))
@@ -364,7 +365,7 @@ function FlowForm({ portfolios, goals, members, ownerName, defaultTargetType, de
   const isIncome = f.targetType === "income";
   const isExpenseOrIncome = f.targetType === "expense" || isIncome;
   return (
-    <form onSubmit={e => { e.preventDefault(); onSubmit({ ...f, sourceType: isIncome ? "external" : f.sourceType, sourceId: isIncome ? null : (f.sourceId ? Number(f.sourceId) : null), targetId: f.targetId ? Number(f.targetId) : null, memberId: f.memberId ? Number(f.memberId) : null, createdAt: f.date ? new Date(f.date).toISOString() : undefined }); }} className="space-y-1">
+    <form onSubmit={e => { e.preventDefault(); onSubmit({ ...f, sourceType: isIncome ? "external" : f.sourceType, sourceId: isIncome ? null : (f.sourceId ? Number(f.sourceId) : null), targetId: f.targetId ? Number(f.targetId) : null, memberId: f.memberId ? Number(f.memberId) : null, dueDay: f.dueDay === "" ? null : Number(f.dueDay), createdAt: f.date ? new Date(f.date).toISOString() : undefined }); }} className="space-y-1">
       <p className="text-[10px] text-text-muted uppercase tracking-wide">Nouveau flux</p>
       <Label>Nom (optionnel)</Label><Inp value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="Loyer, Épargne PEA…" />
       {!isIncome && <>
@@ -381,6 +382,17 @@ function FlowForm({ portfolios, goals, members, ownerName, defaultTargetType, de
       </>}
       <Label>Montant</Label><Inp required type="number" step="any" value={f.amount} onChange={e => setF({ ...f, amount: e.target.value })} placeholder="800" className="tabular" />
       <Label>Fréquence</Label><Sel value={f.frequency} onChange={e => setF({ ...f, frequency: e.target.value })}><option value="daily">Journalier</option><option value="weekly">Hebdo</option><option value="monthly">Mensuel</option><option value="yearly">Annuel</option></Sel>
+      {(f.frequency === "monthly" || f.frequency === "yearly") && <>
+        <Label>Jour du mois</Label>
+        <Inp type="number" min={1} max={31} value={f.dueDay}
+          onChange={e => setF({ ...f, dueDay: e.target.value })}
+          placeholder="jour de la date de départ" className="tabular" />
+        <p className="text-[10px] text-text-muted mt-1 mb-1">
+          Le jour où ça tombe réellement — le 6 pour un abonnement prélevé le 6.
+          Laissé vide, c&apos;est le jour de la date de départ. Le 31 devient le
+          dernier jour des mois plus courts.
+        </p>
+      </>}
       <Label>Date de départ</Label><Inp type="date" value={f.date} onChange={e => setF({ ...f, date: e.target.value })} />
       <div className="flex gap-2 pt-3">
         <Btn type="submit" variant="accent" className="flex-1">{initial ? "Enregistrer" : "Créer"}</Btn>

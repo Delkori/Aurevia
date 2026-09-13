@@ -3,7 +3,9 @@ import { handleApiError } from "@/lib/apiError";
 import { isDemo, requireOwner, requireSession } from "@/lib/auth";
 import { demoOccurrences, demoOverdue } from "@/lib/demoView";
 import { countOverdue, generateOccurrences, listOccurrences } from "@/lib/occurrences";
-import { optDate } from "@/lib/validate";
+import { ValidationError, oneOf, optDate, reqNumeric, reqString } from "@/lib/validate";
+import { db } from "@/db";
+import { flowOccurrences } from "@/db/schema";
 
 /**
  * Échéances d'une fenêtre de dates, avec le nombre de retards.
@@ -45,14 +47,45 @@ export async function GET(req: NextRequest) {
   }
 }
 
-/** Force une régénération — utile après avoir créé ou modifié un flux. */
-export async function POST() {
+/**
+ * Sans corps : force une régénération, utile après avoir créé ou modifié un flux.
+ * Avec un corps : enregistre un mouvement exceptionnel — une dépense que rien
+ * n'avait prévue, qui doit compter dans le mois sans pour autant devenir une
+ * règle qui se répète.
+ */
+export async function POST(req: NextRequest) {
   const unauthorized = await requireOwner();
   if (unauthorized) return unauthorized;
 
   try {
-    const n = await generateOccurrences();
-    return NextResponse.json({ ok: true, generated: n });
+    const brut = await req.text();
+    if (!brut.trim()) {
+      const n = await generateOccurrences();
+      return NextResponse.json({ ok: true, generated: n });
+    }
+
+    let body: Record<string, unknown>;
+    try {
+      body = JSON.parse(brut) as Record<string, unknown>;
+    } catch {
+      throw new ValidationError("Requête invalide.");
+    }
+
+    const [cree] = await db.insert(flowOccurrences).values({
+      flowId: null,
+      label: reqString(body.label, "Libellé", 80),
+      direction: oneOf(body.direction, "Sens", ["in", "out"] as const, "out"),
+      dueDate: optDate(body.dueDate, "Date") ?? new Date().toISOString().slice(0, 10),
+      expectedAmount: String(reqNumeric(body.amount, "Montant", { min: 0 })),
+      // Un mouvement qu'on saisit après coup est constaté par définition : on
+      // le pointe d'emblée, sinon il s'ajouterait à la liste de ce qui reste à
+      // vérifier alors qu'on vient précisément de le vérifier.
+      status: "confirmed",
+      actualAmount: String(reqNumeric(body.amount, "Montant", { min: 0 })),
+      confirmedAt: new Date(),
+    }).returning();
+
+    return NextResponse.json(cree, { status: 201 });
   } catch (err) {
     return handleApiError(err);
   }

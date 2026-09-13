@@ -91,6 +91,15 @@ export const flows = pgTable("flows", {
   targetId: integer("target_id"),
   amount: numeric("amount").notNull(),
   frequency: text("frequency").notNull().default("monthly"), // monthly | weekly | yearly | once
+  /**
+   * Jour du mois de l'échéance (1-31), ramené au dernier jour quand il n'existe
+   * pas. `null` = on prend le jour de `createdAt`, comme avant.
+   *
+   * Sans ce champ, toutes les échéances d'un foyer tombaient le jour où les
+   * flux avaient été saisis : une liste de pointage où dix prélèvements sont
+   * datés du même jour ne ressemble à aucun vrai mois.
+   */
+  dueDay: integer("due_day"),
   memberId: integer("member_id").references(() => members.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -139,7 +148,16 @@ export const netWorthSnapshots = pgTable("net_worth_snapshots", {
 // relancée autant de fois qu'on veut sans jamais créer de doublon.
 export const flowOccurrences = pgTable("flow_occurrences", {
   id: serial("id").primaryKey(),
-  flowId: integer("flow_id").notNull().references(() => flows.id, { onDelete: "cascade" }),
+  /**
+   * `null` pour un mouvement exceptionnel, saisi à la main depuis le pointage :
+   * une réparation de voiture n'est pas une règle et ne doit pas en devenir
+   * une. Il porte alors son propre libellé et son propre sens.
+   */
+  flowId: integer("flow_id").references(() => flows.id, { onDelete: "cascade" }),
+  /** Renseigné uniquement pour un mouvement sans règle. */
+  label: text("label"),
+  /** « in » ou « out ». Ne sert qu'aux mouvements sans règle ; sinon le flux décide. */
+  direction: text("direction"),
   dueDate: date("due_date").notNull(),
   expectedAmount: numeric("expected_amount").notNull(),
   /** Renseigné à la validation. `null` tant que l'échéance n'a pas été vérifiée. */

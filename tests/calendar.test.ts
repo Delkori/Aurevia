@@ -206,3 +206,42 @@ describe("échéances de fin de mois", () => {
     }
   });
 });
+
+describe("jour d'échéance choisi", () => {
+  // Sans ce champ, la date d'une échéance venait du jour de saisie du flux :
+  // un foyer qui enregistre ses dix prélèvements le même après-midi obtenait
+  // dix échéances au même jour, et aucun moyen de dire « ça tombe le 6 ».
+  const jours = (f: FlowLike, mois: number, depuis: Date) =>
+    upcomingByMonth([f], mois, depuis).flatMap(g => g.occurrences)
+      .map(o => `${o.date.getFullYear()}-${String(o.date.getMonth() + 1).padStart(2, "0")}-${String(o.date.getDate()).padStart(2, "0")}`);
+
+  test("le jour choisi l'emporte sur celui de la création", () => {
+    const f = flux({ createdAt: new Date(2026, 0, 22).toISOString(), dueDay: 6 });
+    assert.deepEqual(jours(f, 3, new Date(2026, 0, 1)), ["2026-01-06", "2026-02-06", "2026-03-06"]);
+  });
+
+  test("le 31 choisi devient le dernier jour des mois courts", () => {
+    const f = flux({ createdAt: new Date(2026, 0, 15).toISOString(), dueDay: 31 });
+    assert.deepEqual(jours(f, 4, new Date(2026, 0, 1)), ["2026-01-31", "2026-02-28", "2026-03-31", "2026-04-30"]);
+  });
+
+  test("sans jour choisi, on garde celui de la création", () => {
+    const f = flux({ createdAt: new Date(2026, 0, 22).toISOString() });
+    assert.deepEqual(jours(f, 2, new Date(2026, 0, 1)), ["2026-01-22", "2026-02-22"]);
+  });
+
+  test("un jour hors bornes est ignoré plutôt que de produire une date absurde", () => {
+    for (const mauvais of [0, 32, -3, NaN]) {
+      const f = flux({ createdAt: new Date(2026, 0, 22).toISOString(), dueDay: mauvais });
+      assert.deepEqual(jours(f, 1, new Date(2026, 0, 1)), ["2026-01-22"], `dueDay=${mauvais}`);
+    }
+  });
+
+  test("deux flux saisis le même jour peuvent tomber à des dates différentes", () => {
+    const meme = new Date(2026, 0, 22).toISOString();
+    const a = jours(flux({ id: 1, createdAt: meme, dueDay: 3 }), 1, new Date(2026, 0, 1));
+    const b = jours(flux({ id: 2, createdAt: meme, dueDay: 28 }), 1, new Date(2026, 0, 1));
+    assert.deepEqual(a, ["2026-01-03"]);
+    assert.deepEqual(b, ["2026-01-28"]);
+  });
+});

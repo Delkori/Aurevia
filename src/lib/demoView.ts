@@ -140,6 +140,7 @@ export function demoFlows(maintenant = new Date()) {
       targetId,
       amount: f.amount,
       frequency: f.frequency,
+      dueDay: jour,
       memberId: memberId(f.member),
       createdAt: new Date(debut.getFullYear(), debut.getMonth(), Math.min(jour, dernier)),
     };

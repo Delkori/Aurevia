@@ -24,6 +24,8 @@ export type FlowLike = {
   amount: string | number;
   frequency: string;
   createdAt: string;
+  /** Jour du mois choisi (1-31). Absent : on prend celui de `createdAt`. */
+  dueDay?: number | null;
   sourceType: string;
   targetType: string;
   targetId: number | null;
@@ -138,7 +140,12 @@ function occurrencesDe(flow: FlowLike, debut: Date, fin: Date): Occurrence[] {
   // est de dire « les 380 € sont-ils bien passés », perdre un mois entier de
   // prélèvement est la pire panne possible — d'autant qu'elle est silencieuse.
   const pas = flow.frequency === "yearly" ? 12 : 1;
-  const jourVoulu = origine.getDate();
+  // Le jour choisi l'emporte sur celui de la création : sans lui, toutes les
+  // échéances d'un foyer tombaient le jour de la saisie.
+  const choisi = Number(flow.dueDay);
+  const jourVoulu = Number.isInteger(choisi) && choisi >= 1 && choisi <= 31
+    ? choisi
+    : origine.getDate();
   const rangOrigine = origine.getFullYear() * 12 + origine.getMonth();
   const dateAuRang = (rang: number) => {
     const an = Math.floor(rang / 12), mois = rang - an * 12;

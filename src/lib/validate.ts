@@ -165,3 +165,17 @@ export const FLOW_FREQUENCIES = ["daily", "weekly", "monthly", "yearly", "once"]
 export const FLOW_SOURCE_TYPES = ["salary", "member_salary", "portfolio", "external"] as const;
 
 export const FLOW_TARGET_TYPES = ["portfolio", "goal", "expense", "income", "external"] as const;
+
+/**
+ * Jour du mois d'une échéance. On accepte 1 à 31 et on laisse le calendrier
+ * ramener au dernier jour des mois courts — refuser le 31 obligerait à saisir
+ * le 30 pour un prélèvement qui tombe bien le 31 quand le mois le permet.
+ */
+export function optDueDay(value: unknown): number | null {
+  if (value === undefined || value === null || value === "") return null;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1 || n > 31) {
+    throw new ValidationError("Le jour d'échéance doit être un entier entre 1 et 31.");
+  }
+  return n;
+}
