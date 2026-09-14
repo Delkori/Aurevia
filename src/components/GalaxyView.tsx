@@ -1733,7 +1733,26 @@ export default function GalaxyView({
               const fratrie = flowLinks.filter(g => g.source === f.source);
               const rang = fratrie.indexOf(f);
               const t = fratrie.length > 1 ? 0.18 + (rang / (fratrie.length - 1)) * 0.64 : 0.5;
-              const mid = bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, t);
+              // Étalés le long de leur propre courbe, les montants tombaient
+              // encore en travers d'une planète qui se trouvait sur le chemin :
+              // « 250 € dans 19j » se lisait par-dessus « Alex 244 637 € ».
+              // On décale donc vers la position libre la plus proche, en
+              // n'évitant que ce qui est vraiment sur la route — les extrémités
+              // du flux ne comptent pas, la courbe y aboutit par construction.
+              const point = (u: number) => bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, u);
+              const degage = (u: number) => {
+                const p = point(u);
+                let pire = Infinity;
+                for (const n of nodeById.values()) {
+                  if (n === s || n === tg || n.x == null || n.y == null) continue;
+                  pire = Math.min(pire, Math.hypot(p.x - n.x, p.y - n.y) - n.r);
+                }
+                return pire;
+              };
+              const candidats = [t, ...[-0.16, 0.16, -0.3, 0.3].map(d => t + d).filter(u => u > 0.12 && u < 0.88)];
+              const tLibre = degage(t) > 16 ? t
+                : candidats.reduce((a, b) => (degage(b) > degage(a) ? b : a), candidats[0]);
+              const mid = point(tLibre);
               return <g key={`fl-${i}`}>
                 <path d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke={f.couleur} strokeOpacity={0.55} strokeWidth={1.5} strokeDasharray="6 4" />
                 <text x={mid.x} y={mid.y - 12} textAnchor="middle" fontSize={10} fill={f.couleur} fontWeight={700} style={HALO_TEXTE}>{mask(f.label)}</text>
