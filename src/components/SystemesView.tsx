@@ -7,6 +7,7 @@ import {
   construireSystemes, SYSTEME_DEPENSES, SYSTEME_INVESTISSEMENTS, SYSTEME_REVENUS,
   type EntreesSystemes, type Satellite, type SystemeId,
 } from "@/lib/systemes";
+import { imageSysteme } from "@/lib/skins";
 
 /**
  * La vue d'ensemble : cinq ou six corps, et ce qui circule entre eux.
@@ -45,6 +46,8 @@ type Corps = {
   id: SystemeId; label: string; montant: number; parMois: boolean;
   couleur: string; contenu: number; satellites: Satellite[];
   x: number; y: number; r: number;
+  /** Habillage photographique, quand il y en a un pour ce corps. */
+  image?: string;
 };
 
 function rayon(montant: number, max: number): number {
@@ -133,7 +136,19 @@ export default function SystemesView({
         H,
       );
       membres.forEach((s, i) => {
-        corps.push({ ...s, x: COLONNES[c], y: ys[i], r: rayons[i] });
+        corps.push({
+          ...s, x: COLONNES[c], y: ys[i], r: rayons[i],
+          image: imageSysteme({
+            genre: s.id === SYSTEME_REVENUS ? "revenus"
+              : s.id === SYSTEME_DEPENSES ? "depenses"
+              : s.id === SYSTEME_INVESTISSEMENTS ? "investissements" : "projet",
+            label: s.label,
+            montant: s.montant,
+            revenus: entrees.revenus,
+            contenus: s.satellites.map(sat => sat.nom),
+            max: s.parMois ? maxFlux : maxStock,
+          }),
+        });
       });
     }
 
@@ -158,11 +173,22 @@ export default function SystemesView({
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-full select-none">
       <defs>
+        {/* Le reflet sphérique et le liseré d'ombre sont les mêmes pour tous :
+            c'est ce qui fait passer un disque plat pour une planète, image ou
+            pas. Repris tels quels de la galaxie détaillée. */}
+        <radialGradient id={`${id}-reflet`} cx="28%" cy="20%" r="28%">
+          <stop offset="0%" stopColor="white" stopOpacity="0.55" />
+          <stop offset="50%" stopColor="white" stopOpacity="0.12" />
+          <stop offset="100%" stopColor="white" stopOpacity="0" />
+        </radialGradient>
         {corps.map(c => (
           <radialGradient key={c.id} id={`${id}-sph-${c.id}`} cx="35%" cy="30%" r="75%">
             <stop offset="0%" stopColor={c.couleur} stopOpacity="0.95" />
             <stop offset="100%" stopColor={c.couleur} stopOpacity="0.42" />
           </radialGradient>
+        ))}
+        {corps.filter(c => c.image).map(c => (
+          <clipPath key={c.id} id={`${id}-cp-${c.id}`}><circle r={c.r} cx={c.x} cy={c.y} /></clipPath>
         ))}
       </defs>
 
@@ -237,8 +263,19 @@ export default function SystemesView({
             )}
 
             <circle r={c.r + 7} fill={c.couleur} opacity={actif ? 0.22 : 0.1} />
-            <circle r={c.r} fill={`url(#${id}-sph-${c.id})`} />
-            <circle r={c.r} fill="none" stroke={c.couleur} strokeOpacity={actif ? 0.9 : 0.45} strokeWidth={1.5} />
+            {c.image ? (
+              // Le détourage est posé dans les coordonnées du SVG, pas dans
+              // celles du groupe : on annule donc la translation du corps.
+              <g clipPath={`url(#${id}-cp-${c.id})`} transform={`translate(${-c.x},${-c.y})`}>
+                <image href={c.image} x={c.x - c.r} y={c.y - c.r} width={c.r * 2} height={c.r * 2}
+                  preserveAspectRatio="xMidYMid slice" />
+              </g>
+            ) : (
+              <circle r={c.r} fill={`url(#${id}-sph-${c.id})`} />
+            )}
+            <circle r={c.r} fill={`url(#${id}-reflet)`} />
+            <circle r={c.r} fill="none" stroke={c.couleur} strokeOpacity={actif ? 0.95 : 0.6} strokeWidth={2} />
+            <circle r={c.r - 1} fill="none" stroke="rgba(0,0,0,0.45)" strokeWidth={1.5} />
 
             {/* Un nom de projet est libre : « Apport résidence principale » dépasse
                 largement son cercle. Le contour sombre le laisse mordre sur le

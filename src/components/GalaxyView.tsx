@@ -17,6 +17,10 @@ import SystemesView from "@/components/SystemesView";
 import { currentValue, gain, gainPercent, goalProgress, totalDebt, ownedShare, type Rates, type ValuationContext } from "@/lib/networth";
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
 import { getLogoUrl } from "@/lib/logos";
+import {
+  EXPENSES_IMAGES, VACANCES_IMAGE, isVacationGoal, palierDepenses, planetSkin, salaryImage,
+  skinImageForValue, type PlanetSkin,
+} from "@/lib/skins";
 import { NATURE_COLORS, NATURE_LABELS, NATURE_ORDER, natureOfPortfolio, type Nature } from "@/lib/natures";
 import { flowLayout, LAYOUT_MODES, type LayoutMode } from "@/lib/galaxyLayout";
 import { ChevronLeft, ClipboardCheck, Loader2 } from "lucide-react";
@@ -81,37 +85,6 @@ function bezierPoint(s: { x: number; y: number }, c: { x: number; y: number }, t
   return { x, y, angle: Math.atan2(dy, dx) * 180 / Math.PI };
 }
 
-type PlanetSkin = "tech" | "crypto" | "terrain" | "ocean" | "chalet" | "vacances" | "generic" | "empty";
-const SKIN_IMAGE_TIERS: Partial<Record<PlanetSkin, string[]>> = {
-  tech: ["/planet-skins/tech-1.webp", "/planet-skins/tech-2.webp", "/planet-skins/tech-3.webp"],
-  terrain: ["/planet-skins/terrain-1.webp", "/planet-skins/terrain-2.webp", "/planet-skins/terrain-3.webp"],
-  ocean: ["/planet-skins/ocean.webp"],
-  crypto: ["/planet-skins/crypto.webp"],
-  chalet: ["/planet-skins/chalet.webp"],
-  vacances: ["/planet-skins/vacances.webp"],
-};
-function tierIndex(value: number, max: number, tiers: number) {
-  if (max <= 0) return 0;
-  const p = Math.max(0, Math.min(1, value / max));
-  return Math.min(tiers - 1, Math.floor(p * tiers));
-}
-function skinImageForValue(skin: PlanetSkin, value: number, max: number): string | undefined {
-  const tiers = SKIN_IMAGE_TIERS[skin];
-  if (!tiers || tiers.length === 0) return undefined;
-  return tiers[tierIndex(value, max, tiers.length)];
-}
-const SALARY_IMAGES = ["/planet-skins/salary-1.webp", "/planet-skins/salary-2.webp", "/planet-skins/salary-3.webp"];
-const SALARY_TIER_THRESHOLDS = [2500, 6000];
-function salaryImage(amount: number) {
-  const idx = amount < SALARY_TIER_THRESHOLDS[0] ? 0 : amount < SALARY_TIER_THRESHOLDS[1] ? 1 : 2;
-  return SALARY_IMAGES[idx];
-}
-const VACANCES_IMAGE = "/planet-skins/vacances.webp";
-const EXPENSES_IMAGES = {
-  warning: "/planet-skins/expenses-warning.webp",
-  eruption: "/planet-skins/expenses-eruption.webp",
-  critical: "/planet-skins/expenses-critical.webp",
-};
 const SHIP_IMAGES = {
   small: "/ship-skins/transport-small.webp",
   medium: "/ship-skins/transport-medium.webp",
@@ -122,48 +95,6 @@ const SHIP_DIMS = {
   medium: { w: 22, h: 15.6 },
   large: { w: 30, h: 21.5 },
 };
-function isVacationGoal(name: string) {
-  const n = name.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
-  return /vacance|voyage|plage|maldives|croisiere/.test(n);
-}
-const SKIN_BY_TYPE: Record<string, PlanetSkin> = {
-  stock: "tech", etf: "tech",
-  crypto: "crypto",
-  precious_metal: "terrain", real_estate: "terrain", scpi: "terrain",
-  cash: "ocean", life_insurance: "ocean",
-  private_equity: "generic", art: "generic", other: "generic",
-};
-function dominantAssetSkin(valued: { asset: { type: string }; value: number }[]): PlanetSkin {
-  if (valued.length === 0) return "empty";
-  const byType = new Map<string, number>();
-  for (const v of valued) byType.set(v.asset.type, (byType.get(v.asset.type) ?? 0) + Math.max(0, v.value));
-  let best: string | null = null, bestVal = -1;
-  byType.forEach((val, type) => { if (val > bestVal) { bestVal = val; best = type; } });
-  return best ? (SKIN_BY_TYPE[best] ?? "generic") : "generic";
-}
-
-const NAME_SKIN_KEYWORDS: [RegExp, PlanetSkin][] = [
-  [/\bcto\b/, "tech"],
-  [/\bpea\b/, "ocean"],
-  [/crypto|bitcoin|btc|eth/, "crypto"],
-  [/immobilier|scpi|pierre|foncier/, "terrain"],
-  [/assurance.?vie|livret|epargne|cash/, "ocean"],
-  [/or\b|metal|argent(?!\s)/, "terrain"],
-];
-function normalizeName(name: string) {
-  return name.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
-}
-function skinFromName(name: string): PlanetSkin | null {
-  const n = normalizeName(name);
-  for (const [re, skin] of NAME_SKIN_KEYWORDS) if (re.test(n)) return skin;
-  return null;
-}
-const EXPLICIT_SKINS = new Set<PlanetSkin>(["tech", "ocean", "terrain", "crypto", "chalet", "vacances", "generic"]);
-function planetSkin(name: string, valued: { asset: { type: string }; value: number }[], explicitSkin?: string | null): PlanetSkin {
-  if (explicitSkin && EXPLICIT_SKINS.has(explicitSkin as PlanetSkin)) return explicitSkin as PlanetSkin;
-  return skinFromName(name) ?? dominantAssetSkin(valued);
-}
-
 interface GNode extends SimulationNodeDatum {
   id: string; kind: string; label: string; r: number; color: string;
   portfolioKey?: number | "unassigned"; assetId?: number; goalId?: number; memberId?: number | null;
@@ -1839,11 +1770,7 @@ export default function GalaxyView({
                   const ownerExpenseTotal = n.ownerExpenseTotal ?? 0;
                   const ownerRevenue = n.ownerRevenue ?? 0;
                   const ownerBudgetRatio = ownerRevenue > 0 ? ownerExpenseTotal / ownerRevenue : 0;
-                  // Paliers resserrés pour que le stade visuel bouge avant le déficit, pas seulement après :
-                  // warning jusqu'à 60% des revenus, eruption 60-100%, critical au-delà de 100%.
-                  const tier: "calm" | "warning" | "eruption" | "critical" =
-                    ownerExpenseTotal <= 0 ? "calm" :
-                    ownerBudgetRatio > 1 ? "critical" : ownerBudgetRatio > 0.6 ? "eruption" : "warning";
+                  const tier = palierDepenses(ownerExpenseTotal, ownerRevenue);
                   const tierImage = tier !== "calm" ? EXPENSES_IMAGES[tier] : null;
                   const isOverBudget = tier === "eruption" || tier === "critical";
                   return <>
