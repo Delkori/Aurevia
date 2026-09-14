@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { proprietairesDe, arcsAnneau } from "./proprietaires.ts";
+import { proprietairesDe, arcsAnneau } from "../src/lib/proprietaires.ts";
 
 const personne = (id: number | null) => id === null ? { nom: "Moi", couleur: "#aaa" } : { nom: `M${id}`, couleur: `#c${id}` };
 

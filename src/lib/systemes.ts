@@ -55,6 +55,15 @@ export function systemeDuNoeud(kind: string): SystemeId | null | "contexte" {
   }
 }
 
+/** Un élément contenu dans un système, dessiné en orbite autour de lui. */
+export type Satellite = { nom: string; montant: number };
+
+/**
+ * Au-delà, l'anneau de satellites devient une couronne illisible : on garde
+ * les plus gros, et le compte exact reste écrit sous le montant.
+ */
+export const MAX_SATELLITES = 6;
+
 export type SystemeVue = {
   id: SystemeId;
   label: string;
@@ -65,6 +74,11 @@ export type SystemeVue = {
   couleur: string;
   /** Nombre de planètes ou de lignes contenues, pour situer la densité. */
   contenu: number;
+  /**
+   * Ce qu'on voit tourner autour du corps. Échantillon destiné à l'œil — les
+   * plus gros d'abord, six au plus ; `contenu` reste le compte qui fait foi.
+   */
+  satellites: Satellite[];
 };
 
 export type FluxSysteme = {
@@ -85,6 +99,15 @@ export type EntreesSystemes = {
   versements: number;
   planetes: number;
   lignesDepense: number;
+  /**
+   * Ce que contient chaque système, pour dessiner ses satellites. Facultatif :
+   * sans lui la vue reste juste, les corps tournent simplement à vide.
+   */
+  contenus?: {
+    revenus?: Satellite[];
+    depenses?: Satellite[];
+    planetes?: Satellite[];
+  };
   projets: {
     goalId: number;
     nom: string;
@@ -94,8 +117,17 @@ export type EntreesSystemes = {
     /** Versement mensuel qui l'alimente. */
     apport: number;
     planetes: number;
+    /** Les planètes reliées au projet, pour ses satellites. */
+    contenus?: Satellite[];
   }[];
 };
+
+/** Les plus gros d'abord, coupés à `MAX_SATELLITES`. */
+function satellitesDe(liste: Satellite[] | undefined): Satellite[] {
+  return [...(liste ?? [])]
+    .sort((a, b) => Math.abs(b.montant) - Math.abs(a.montant) || a.nom.localeCompare(b.nom))
+    .slice(0, MAX_SATELLITES);
+}
 
 /** Couleurs des trois systèmes fixes — reprises de la palette déjà validée. */
 export const COULEURS_SYSTEMES: Record<string, string> = {
@@ -121,12 +153,14 @@ export function construireSystemes(e: EntreesSystemes): {
     systemes.push({
       id: SYSTEME_REVENUS, label: "Revenus", montant: e.revenus, parMois: true,
       couleur: COULEURS_SYSTEMES[SYSTEME_REVENUS], contenu: 0,
+      satellites: satellitesDe(e.contenus?.revenus),
     });
   }
   if (e.depenses > 0 || e.lignesDepense > 0) {
     systemes.push({
       id: SYSTEME_DEPENSES, label: "Dépenses", montant: e.depenses, parMois: true,
       couleur: COULEURS_SYSTEMES[SYSTEME_DEPENSES], contenu: e.lignesDepense,
+      satellites: satellitesDe(e.contenus?.depenses),
     });
     if (e.revenus > 0) flux.push({ source: SYSTEME_REVENUS, cible: SYSTEME_DEPENSES, montant: e.depenses });
   }
@@ -134,6 +168,7 @@ export function construireSystemes(e: EntreesSystemes): {
     systemes.push({
       id: SYSTEME_INVESTISSEMENTS, label: "Investissements", montant: e.patrimoine, parMois: false,
       couleur: COULEURS_SYSTEMES[SYSTEME_INVESTISSEMENTS], contenu: e.planetes,
+      satellites: satellitesDe(e.contenus?.planetes),
     });
     if (e.revenus > 0 && e.versements > 0) {
       flux.push({ source: SYSTEME_REVENUS, cible: SYSTEME_INVESTISSEMENTS, montant: e.versements });
@@ -145,6 +180,7 @@ export function construireSystemes(e: EntreesSystemes): {
     systemes.push({
       id, label: p.nom, montant: p.acquis, parMois: false,
       couleur: p.couleur, contenu: p.planetes,
+      satellites: satellitesDe(p.contenus),
     });
     if (p.apport > 0) {
       // Un projet est alimenté par ce qu'on met de côté, donc par les
