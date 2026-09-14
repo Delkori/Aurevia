@@ -111,8 +111,10 @@ export function palierDepenses(depenses: number, revenus: number): PalierDepense
  * plus gros de ce qu'ils contiennent. Un projet de voyage passe avant : c'est
  * son intitulé qui le décrit, pas ce qui le finance.
  */
+export type GenreSysteme = "revenus" | "depenses" | "investissements" | "projet";
+
 export function imageSysteme(corps: {
-  genre: "revenus" | "depenses" | "investissements" | "projet";
+  genre: GenreSysteme;
   label: string;
   montant: number;
   /** Revenus du foyer — n'a de sens que pour les dépenses. */
@@ -140,4 +142,44 @@ export function imageSysteme(corps: {
     if (skin) return skinImageForValue(skin, Math.abs(corps.montant), corps.max);
   }
   return undefined;
+}
+
+// ── Les vaisseaux qui parcourent les flux ────────────────────────────────────
+
+export type PalierVaisseau = "small" | "medium" | "large";
+
+export const SHIP_IMAGES: Record<PalierVaisseau, string> = {
+  small: "/ship-skins/transport-small.webp",
+  medium: "/ship-skins/transport-medium.webp",
+  large: "/ship-skins/transport-large.webp",
+};
+export const SHIP_DIMS: Record<PalierVaisseau, { w: number; h: number }> = {
+  small: { w: 16, h: 10 },
+  medium: { w: 22, h: 15.6 },
+  large: { w: 30, h: 21.5 },
+};
+
+/** La taille du vaisseau dit le poids du versement, rapporté au plus gros. */
+export function palierVaisseau(part: number): PalierVaisseau {
+  return part < 0.08 ? "small" : part < 0.25 ? "medium" : "large";
+}
+
+/**
+ * L'image d'un satellite de la vue d'ensemble.
+ *
+ * Un satellite emprunte la famille de son système : une ligne de dépense est
+ * un caillou volcanique comme sa planète, une source de revenu un bout de la
+ * même campagne. Ailleurs, c'est le nom qui décide — et un nom qui n'évoque
+ * rien reste une pastille unie plutôt qu'une vignette prise au hasard.
+ *
+ * Pas de palier pour les planètes : à une douzaine de pixels la densité ne se
+ * voit pas, et l'image la plus fournie est celle qui garde le plus de couleur
+ * une fois réduite. Une dépense prend le palier le plus calme : une ligne
+ * seule ne fait pas un déficit, c'est leur somme qui le dit.
+ */
+export function imageSatellite(satellite: { nom: string; montant: number }, genre: GenreSysteme): string | undefined {
+  if (genre === "revenus") return salaryImage(satellite.montant);
+  if (genre === "depenses") return EXPENSES_IMAGES.warning;
+  const skin = skinFromName(satellite.nom);
+  return skin ? skinImageForValue(skin, 1, 1) : undefined;
 }

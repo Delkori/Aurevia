@@ -7,7 +7,9 @@ import {
   construireSystemes, SYSTEME_DEPENSES, SYSTEME_INVESTISSEMENTS, SYSTEME_REVENUS,
   type EntreesSystemes, type Satellite, type SystemeId,
 } from "@/lib/systemes";
-import { imageSysteme } from "@/lib/skins";
+import {
+  SHIP_DIMS, SHIP_IMAGES, imageSatellite, imageSysteme, palierVaisseau, type GenreSysteme,
+} from "@/lib/skins";
 
 /**
  * La vue d'ensemble : cinq ou six corps, et ce qui circule entre eux.
@@ -30,9 +32,9 @@ import { imageSysteme } from "@/lib/skins";
 const W = 1000, H = 620;
 const COLONNES = [140, 500, 860];
 /** Distance du corps à son anneau de satellites. */
-const ORBITE = 26;
+const ORBITE = 30;
 /** Ce que l'étiquette d'un satellite déborde sous son point. */
-const DEBORD_ETIQUETTE = 14;
+const DEBORD_ETIQUETTE = 18;
 /**
  * Secteur laissé libre en bas de l'anneau, en radians. C'est là qu'est écrit
  * « entrer » : sans ce trou, un satellite venait s'asseoir dessus.
@@ -48,7 +50,13 @@ type Corps = {
   x: number; y: number; r: number;
   /** Habillage photographique, quand il y en a un pour ce corps. */
   image?: string;
+  genre: GenreSysteme;
 };
+
+/** Rayon d'un satellite, du plus petit au plus gros de son anneau. */
+function rayonSatellite(montant: number, max: number): number {
+  return 5 + Math.sqrt(Math.min(1, Math.abs(montant) / Math.max(1, max))) * 6;
+}
 
 function rayon(montant: number, max: number): number {
   if (max <= 0) return 36;
@@ -136,12 +144,13 @@ export default function SystemesView({
         H,
       );
       membres.forEach((s, i) => {
+        const genre: GenreSysteme = s.id === SYSTEME_REVENUS ? "revenus"
+          : s.id === SYSTEME_DEPENSES ? "depenses"
+          : s.id === SYSTEME_INVESTISSEMENTS ? "investissements" : "projet";
         corps.push({
-          ...s, x: COLONNES[c], y: ys[i], r: rayons[i],
+          ...s, x: COLONNES[c], y: ys[i], r: rayons[i], genre,
           image: imageSysteme({
-            genre: s.id === SYSTEME_REVENUS ? "revenus"
-              : s.id === SYSTEME_DEPENSES ? "depenses"
-              : s.id === SYSTEME_INVESTISSEMENTS ? "investissements" : "projet",
+            genre,
             label: s.label,
             montant: s.montant,
             revenus: entrees.revenus,
@@ -190,25 +199,44 @@ export default function SystemesView({
         {corps.filter(c => c.image).map(c => (
           <clipPath key={c.id} id={`${id}-cp-${c.id}`}><circle r={c.r} cx={c.x} cy={c.y} /></clipPath>
         ))}
+        {/* Un détourage par satellite illustré. Le cercle est posé à l'origine
+            du repère du satellite, qui tourne avec lui : une rotation ne change
+            rien à un cercle centré. */}
+        {corps.flatMap(c => {
+          const maxSat = Math.max(1, ...c.satellites.map(sat => Math.abs(sat.montant)));
+          return c.satellites.map((sat, i) => imageSatellite(sat, c.genre) ? (
+            <clipPath key={`${c.id}-${i}`} id={`${id}-cps-${c.id}-${i}`}>
+              <circle r={rayonSatellite(sat.montant, maxSat)} />
+            </clipPath>
+          ) : null);
+        })}
       </defs>
 
       {traits.map(t => {
         const largeur = 1.5 + (t.montant / maxTrait) * 5;
         const mx = (t.a.x + t.b.x) / 2;
         const trace = `M${t.a.x + t.a.r},${t.a.y} C${mx},${t.a.y} ${mx},${t.b.y} ${t.b.x - t.b.r},${t.b.y}`;
-        // Un gros versement envoie plus de points qu'un petit : le débit se lit
-        // dans la densité autant que dans l'épaisseur du trait.
-        const points = 1 + Math.round((t.montant / maxTrait) * 2);
-        const duree = 3.4;
+        // Un gros versement envoie plus de vaisseaux qu'un petit, et de plus
+        // gros : le débit se lit dans la densité et dans la taille, pas
+        // seulement dans l'épaisseur du trait.
+        const part = t.montant / maxTrait;
+        const points = 1 + Math.round(part * 2);
+        const vaisseau = palierVaisseau(part);
+        const d = SHIP_DIMS[vaisseau];
+        const duree = 5.2;
         return (
           <g key={`${t.source}-${t.cible}`}>
             <path d={trace} fill="none" stroke={t.b.couleur} strokeOpacity={0.42}
               strokeWidth={largeur} strokeLinecap="round" />
             {anime && Array.from({ length: points }, (_, k) => (
-              <circle key={k} r={2.2 + largeur * 0.22} fill={t.b.couleur} opacity={0.95}>
+              // `rotate="auto"` oriente le vaisseau sur la tangente du tracé :
+              // il suit la courbe au lieu de glisser de côté.
+              <g key={k}>
+                <image href={SHIP_IMAGES[vaisseau]} x={-d.w / 2} y={-d.h / 2}
+                  width={d.w} height={d.h} opacity={0.95} />
                 <animateMotion dur={`${duree}s`} repeatCount="indefinite" path={trace}
-                  begin={`${-(k * duree) / points}s`} />
-              </circle>
+                  rotate="auto" begin={`${-(k * duree) / points}s`} />
+              </g>
             ))}
             <text x={mx} y={(t.a.y + t.b.y) / 2 - 7} textAnchor="middle"
               fontSize={12} fill="var(--text-muted)" className="tabular">
@@ -244,15 +272,27 @@ export default function SystemesView({
                 {c.satellites.map((sat, i) => {
                   const angle = Math.PI / 2 + SECTEUR_LIBRE / 2
                     + ((i + 0.5) / c.satellites.length) * (Math.PI * 2 - SECTEUR_LIBRE);
-                  const rSat = 3.2 + Math.sqrt(Math.abs(sat.montant) / maxSat) * 4.2;
+                  const rSat = rayonSatellite(sat.montant, maxSat);
+                  const vignette = imageSatellite(sat, c.genre);
                   const nom = sat.nom.length > 12 ? `${sat.nom.slice(0, 11)}…` : sat.nom;
                   return (
                     <g key={`${sat.nom}-${i}`}
                       transform={`translate(${Math.cos(angle) * rOrbite},${Math.sin(angle) * rOrbite})`}>
                       <g className="sv-contre" style={{ animationDuration: `${duree}s` }}>
-                        <circle r={rSat} fill={c.couleur} fillOpacity={0.95}
-                          stroke="#07070d" strokeWidth={0.8} />
-                        <text y={rSat + 9} textAnchor="middle" fontSize={8.5} fontWeight={600}
+                        {vignette ? (
+                          <>
+                            <g clipPath={`url(#${id}-cps-${c.id}-${i})`}>
+                              <image href={vignette} x={-rSat} y={-rSat} width={rSat * 2} height={rSat * 2}
+                                preserveAspectRatio="xMidYMid slice" />
+                            </g>
+                            <circle r={rSat} fill={`url(#${id}-reflet)`} />
+                            <circle r={rSat} fill="none" stroke={c.couleur} strokeOpacity={0.9} strokeWidth={1.2} />
+                          </>
+                        ) : (
+                          <circle r={rSat} fill={c.couleur} fillOpacity={0.95}
+                            stroke="#07070d" strokeWidth={0.8} />
+                        )}
+                        <text y={rSat + 10} textAnchor="middle" fontSize={8.5} fontWeight={600}
                           fill="rgba(255,255,255,0.82)" style={HALO_TEXTE}>{nom}</text>
                         <title>{`${sat.nom} · ${fmt(sat.montant)}`}</title>
                       </g>

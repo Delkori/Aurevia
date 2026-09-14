@@ -18,8 +18,8 @@ import { currentValue, gain, gainPercent, goalProgress, totalDebt, ownedShare, t
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
 import { getLogoUrl } from "@/lib/logos";
 import {
-  EXPENSES_IMAGES, VACANCES_IMAGE, isVacationGoal, palierDepenses, planetSkin, salaryImage,
-  skinImageForValue, type PlanetSkin,
+  EXPENSES_IMAGES, SHIP_DIMS, SHIP_IMAGES, VACANCES_IMAGE, isVacationGoal, palierDepenses,
+  planetSkin, salaryImage, skinImageForValue, type PlanetSkin,
 } from "@/lib/skins";
 import { NATURE_COLORS, NATURE_LABELS, NATURE_ORDER, natureOfPortfolio, type Nature } from "@/lib/natures";
 import { flowLayout, LAYOUT_MODES, type LayoutMode } from "@/lib/galaxyLayout";
@@ -85,16 +85,6 @@ function bezierPoint(s: { x: number; y: number }, c: { x: number; y: number }, t
   return { x, y, angle: Math.atan2(dy, dx) * 180 / Math.PI };
 }
 
-const SHIP_IMAGES = {
-  small: "/ship-skins/transport-small.webp",
-  medium: "/ship-skins/transport-medium.webp",
-  large: "/ship-skins/transport-large.webp",
-};
-const SHIP_DIMS = {
-  small: { w: 16, h: 10 },
-  medium: { w: 22, h: 15.6 },
-  large: { w: 30, h: 21.5 },
-};
 interface GNode extends SimulationNodeDatum {
   id: string; kind: string; label: string; r: number; color: string;
   portfolioKey?: number | "unassigned"; assetId?: number; goalId?: number; memberId?: number | null;

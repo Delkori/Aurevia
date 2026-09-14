@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { imageSysteme, palierDepenses, skinFromName } from "../src/lib/skins.ts";
+import { imageSatellite, imageSysteme, palierDepenses, skinFromName } from "../src/lib/skins.ts";
 
 describe("palierDepenses", () => {
   test("sans dépense, la planète est au calme", () => {
@@ -57,5 +57,23 @@ describe("imageSysteme", () => {
   test("un corps vide ne réclame aucune image", () => {
     assert.equal(imageSysteme({ ...base, genre: "investissements" }), undefined);
     assert.equal(imageSysteme({ ...base, genre: "projet", label: "Voiture" }), undefined);
+  });
+});
+
+describe("imageSatellite", () => {
+  test("une source de revenu est un bout de la même campagne, à sa mesure", () => {
+    assert.match(imageSatellite({ nom: "Salaire principal", montant: 3200 }, "revenus")!, /salary-2/);
+    assert.match(imageSatellite({ nom: "Loyer SCPI", montant: 120 }, "revenus")!, /salary-1/);
+  });
+
+  test("une ligne de dépense prend le palier le plus calme : seule, elle ne fait pas un déficit", () => {
+    assert.match(imageSatellite({ nom: "Loyer", montant: 1150 }, "depenses")!, /expenses-warning/);
+    assert.match(imageSatellite({ nom: "Transports", montant: 140 }, "depenses")!, /expenses-warning/);
+  });
+
+  test("ailleurs c'est le nom qui décide, et un nom muet reste une pastille", () => {
+    assert.match(imageSatellite({ nom: "PEA", montant: 31497 }, "investissements")!, /ocean/);
+    assert.match(imageSatellite({ nom: "Appartement Lyon", montant: 340000 }, "projet")!, /terrain/);
+    assert.equal(imageSatellite({ nom: "Divers", montant: 10 }, "investissements"), undefined);
   });
 });
