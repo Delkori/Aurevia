@@ -7,7 +7,7 @@ import {
 } from "d3-force";
 import { FolderPlus, Plus, PlusCircle, Star, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, AlertTriangle, Bell, Clock, Menu, PanelRight, LayoutGrid, FlaskConical } from "lucide-react";
 import { findAccessory } from "@/lib/astronautAccessories";
-import { formatMoney } from "@/lib/format";
+import { deNom, formatMoney } from "@/lib/format";
 import { futureValue } from "@/lib/projection";
 import { monthlyEquivalent } from "@/lib/flows";
 import { partDe, type PartLike } from "@/lib/expenseShares";
@@ -476,7 +476,7 @@ export default function GalaxyView({
     const resteAInvestir = totalRevenue > 0 ? Math.max(0, totalRevenue - totalInvest - totalExpenseFlows) : 0;
 
     if (totalRevenue > 0) {
-      nodes.push({ id: "expenses", kind: "expenses", label: "Dépenses", r: 22 + Math.min(18, myExpenseTotal / 80), color: "#f87171", ownerExpenseTotal: myExpenseTotal, ownerRevenue: totalRevenue, proprietaires: [personne(null)] });
+      nodes.push({ id: "expenses", kind: "expenses", label: `Dépenses ${deNom(ownerName)}`, r: 22 + Math.min(18, myExpenseTotal / 80), color: "#f87171", ownerExpenseTotal: myExpenseTotal, ownerRevenue: totalRevenue, proprietaires: [personne(null)] });
       links.push({ source: "salary", target: "expenses" });
       if (myExpenseTotal > 0) flowLinks.push({ source: "salary", target: "expenses", label: fmt(myExpenseTotal), amount: myExpenseTotal, couleur: centerColor });
       myExpFlows.forEach(ef => {
@@ -504,8 +504,11 @@ export default function GalaxyView({
       const memberExpenseTotal = expFlows.reduce((s, f) => s + partDepense(f, m.id), 0);
       const memberRevenue = m.salary ? Number(m.salary) : 0;
       const meid = `exp-m-${m.id}`;
-      nodes.push({ id: meid, kind: "expenses", label: `Dépenses de ${m.name}`, r: 22 + Math.min(18, memberExpenseTotal / 80), color: "#f87171", memberId: m.id, ownerExpenseTotal: memberExpenseTotal, ownerRevenue: memberRevenue, proprietaires: [personne(m.id)] });
+      nodes.push({ id: meid, kind: "expenses", label: `Dépenses ${deNom(m.name)}`, r: 22 + Math.min(18, memberExpenseTotal / 80), color: "#f87171", memberId: m.id, ownerExpenseTotal: memberExpenseTotal, ownerRevenue: memberRevenue, proprietaires: [personne(m.id)] });
       links.push({ source: `m-${m.id}`, target: meid });
+      if (memberExpenseTotal > 0 && memberRevenue > 0) {
+        flowLinks.push({ source: `ms-${m.id}`, target: meid, label: fmt(memberExpenseTotal), amount: memberExpenseTotal, couleur: m.color });
+      }
       memberExpFlows.forEach(ef => {
         const eid = `exp-m${m.id}-${ef.id}`;
         const part = partDepense(ef, m.id);
@@ -1651,7 +1654,13 @@ export default function GalaxyView({
               const s = nodeById.get(f.source), tg = nodeById.get(f.target);
               if (!s || !tg || s.x == null || tg.x == null) return null;
               const seed = hashSeed(f.source, f.target), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
-              const mid = bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, 0.5);
+              // Tous les montants écrits au milieu de leur courbe se rassemblaient
+              // au même endroit quand plusieurs flux partent de la même source :
+              // « 100 € », « 50 € » et « dans 19j » s'empilaient par-dessus la
+              // personne. On les échelonne le long de la courbe, à un point
+              // stable pour un flux donné.
+              const t = 0.32 + ((seed >>> 0) % 7) * 0.06;
+              const mid = bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, t);
               return <g key={`fl-${i}`}>
                 <path d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke={f.couleur} strokeOpacity={0.55} strokeWidth={1.5} strokeDasharray="6 4" />
                 <text x={mid.x} y={mid.y - 12} textAnchor="middle" fontSize={10} fill={f.couleur} fontWeight={700} style={HALO_TEXTE}>{mask(f.label)}</text>

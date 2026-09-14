@@ -39,8 +39,8 @@ export type Point = { x: number; y: number };
  * Rangée d'un nœud dans la lecture « flux ».
  *
  *   0 — ce qui produit l'argent
- *   1 — le foyer : le total, les personnes, et la fuite que sont les dépenses
- *   2 — ce vers quoi l'argent part
+ *   1 — le foyer : le total et les personnes
+ *   2 — ce vers quoi l'argent part, planètes de dépenses comprises
  *
  * Les satellites (actifs, lignes de dépense ou de revenu) ne sont pas rangés
  * ici : ils orbitent autour de leur parent, c'est la simulation qui les place.
@@ -52,9 +52,14 @@ export function layerOf(kind: string): number | null {
       return 0;
     case "center":
     case "member":
+      return 1;
+    // Une dépense est une destination comme une autre : l'argent y part. Rangée
+    // avec le foyer, elle partageait sa colonne — et dans le système
+    // « Dépenses », où il n'y a ni planète ni objectif, il ne restait que deux
+    // colonnes : les personnes et leurs dépenses se retrouvaient empilées au
+    // même endroit, anneaux de satellites confondus.
     case "expenses":
     case "reste":
-      return 1;
     case "portfolio":
     case "goal":
       return 2;
@@ -111,6 +116,9 @@ function spread(nodes: LayoutNode[], extent: number, gap: number): number[] {
   });
 }
 
+/** Écart maximal entre deux rangées, sur l'axe où l'argent progresse. */
+const PAS_MAX = 430;
+
 export type LayoutOptions = {
   width: number;
   height: number;
@@ -144,13 +152,17 @@ export function flowLayout(
   // Axe principal : celui dans lequel l'argent progresse.
   const longueur = horizontal ? width : height;
   const traverse = horizontal ? height : width;
-  const pas = (longueur - padding * 2) / Math.max(1, rangees.length - 1);
+  // Le pas est plafonné, et le bloc centré. Sans plafond, deux rangées se
+  // retrouvaient collées aux deux bords opposés avec tout le vide au milieu :
+  // un système qui n'a pas de troisième rangée n'a pas à être étiré.
+  const pas = Math.min(PAS_MAX, (longueur - padding * 2) / Math.max(1, rangees.length - 1));
+  const debut = (longueur - pas * (rangees.length - 1)) / 2;
 
   for (const [i, rangee] of rangees.entries()) {
     const membres = [...parRangee.get(rangee)!].sort(
       (a, b) => rankOf(a) - rankOf(b) || (b.weight ?? 0) - (a.weight ?? 0) || a.id.localeCompare(b.id)
     );
-    const principal = rangees.length === 1 ? longueur / 2 : padding + i * pas;
+    const principal = rangees.length === 1 ? longueur / 2 : debut + i * pas;
     const positions = spread(membres, traverse - padding * 2, 46);
 
     membres.forEach((n, j) => {

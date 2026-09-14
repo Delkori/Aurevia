@@ -457,7 +457,16 @@ export default function HomePage() {
           onLayoutMode={(m) => {
             // Optimiste : la galaxie se réorganise tout de suite, l'écriture suit.
             setSettings(prev => ({ ...prev, layout_mode: m }));
-            api("/api/settings", "PUT", { layout_mode: m }).catch(() => {});
+            // Une disposition n'est pas une donnée du foyer : en démonstration
+            // elle s'applique quand même, elle n'est simplement pas enregistrée.
+            // Passer par `api` affichait « les modifications sont désactivées »
+            // à qui n'avait fait que changer de point de vue.
+            if (readOnly) return;
+            apiFetch("/api/settings", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ layout_mode: m }),
+            }).catch(() => {});
           }}
           onUpdateSalary={updateSalary}
           onUpdateSelf={updateSelf}
