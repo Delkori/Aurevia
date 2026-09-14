@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useSyncExternalStore } from "react";
 import { AlertTriangle, X, Eye, Sparkles, Loader2 } from "lucide-react";
 import GalaxyView from "@/components/GalaxyView";
 import SinceLastVisit from "@/components/SinceLastVisit";
@@ -9,6 +9,7 @@ import DemoIntro from "@/components/DemoIntro";
 import { monthlyEquivalent } from "@/lib/flows";
 import { type EntreesSystemes, type SystemeId } from "@/lib/systemes";
 import type { LayoutMode } from "@/lib/galaxyLayout";
+import { LARGEUR_ETROITE } from "@/lib/zoom";
 import { currentValue, goalProgress, isStale, totalDebt, type ValuationContext } from "@/lib/networth";
 import { formatMoney } from "@/lib/format";
 import { apiFetch, ApiError } from "@/lib/api";
@@ -26,6 +27,27 @@ type PortfolioOwnership = { id: number; portfolioId: number; memberId: number | 
 type ExpenseShare = { id: number; flowId: number | null; memberId: number | null; sharePercent: string };
 type Quote = { price: number; currency: string } | null;
 type Rates = Record<string, number>;
+
+/**
+ * `true` sur un écran trop étroit pour une lecture de gauche à droite.
+ *
+ * Les rangées valent mieux que les colonnes sur un téléphone : l'argent
+ * descend au lieu de traverser, et le déplacement se fait dans un seul sens.
+ * Ne s'applique qu'à défaut de préférence enregistrée — un choix explicite
+ * reste un choix. Rendu serveur : `false`, la lecture large, pour ne pas faire
+ * sauter la disposition à l'hydratation sur un poste de bureau.
+ */
+function useEcranEtroit(): boolean {
+  return useSyncExternalStore(
+    (surChangement) => {
+      const mq = window.matchMedia(`(max-width: ${LARGEUR_ETROITE}px)`);
+      mq.addEventListener("change", surChangement);
+      return () => mq.removeEventListener("change", surChangement);
+    },
+    () => window.matchMedia(`(max-width: ${LARGEUR_ETROITE}px)`).matches,
+    () => false,
+  );
+}
 
 export default function HomePage() {
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -55,6 +77,7 @@ export default function HomePage() {
   const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
   const [overdue, setOverdue] = useState(0);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const ecranEtroit = useEcranEtroit();
   /** `null` = vue d'ensemble des systèmes ; sinon on est entré dans l'un d'eux. */
   const [systeme, setSysteme] = useState<SystemeId | null>(null);
 
@@ -528,7 +551,7 @@ export default function HomePage() {
           demoLoaded={demoLoaded}
           demoBusy={seeding}
           onRemoveDemo={removeDemo}
-          layoutMode={(settings.layout_mode as LayoutMode) || "horizontal"}
+          layoutMode={(settings.layout_mode as LayoutMode) || (ecranEtroit ? "vertical" : "horizontal")}
           onLayoutMode={(m) => {
             // Optimiste : la galaxie se réorganise tout de suite, l'écriture suit.
             setSettings(prev => ({ ...prev, layout_mode: m }));
