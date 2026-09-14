@@ -5,7 +5,7 @@ import {
   forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY,
   type Simulation, type SimulationNodeDatum,
 } from "d3-force";
-import { FolderPlus, Plus, PlusCircle, Star, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, AlertTriangle, Bell, Clock, Menu, PanelRight, FlaskConical, ArrowRight, ArrowDown, Orbit } from "lucide-react";
+import { FolderPlus, Plus, PlusCircle, Star, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, UserRoundCog, X, Eye, EyeOff, AlertTriangle, Bell, Clock, Menu, PanelRight, FlaskConical, ArrowRight, ArrowDown, Orbit } from "lucide-react";
 import { findAccessory } from "@/lib/astronautAccessories";
 import { deNom, formatMoney } from "@/lib/format";
 import { futureValue } from "@/lib/projection";
@@ -335,8 +335,15 @@ export default function GalaxyView({
   const [scrubGrowth, setScrubGrowth] = useState(5);
   const [linkSourceNode, setLinkSourceNode] = useState<{ id: string; kind: string; portfolioKey?: number | "unassigned"; memberId?: number; label: string } | null>(null);
   const [pendingLink, setPendingLink] = useState<{ sourceType: string; sourceId: number | null; sourceLabel: string; targetType: string; targetId: number; targetLabel: string } | null>(null);
-  /** Message court quand un geste n'a pas pu faire ce qu'il promettait. */
-  const [noteGeste, setNoteGeste] = useState<string | null>(null);
+  /**
+   * Quote-part en cours d'attribution, au geste : une personne a été posée sur
+   * une planète, reste à dire quelle part elle en détient.
+   */
+  const [pendingPart, setPendingPart] = useState<{
+    portfolioId: number; planete: string; proprietaireDeclare: number | null;
+    memberId: number | null; personne: string; aDesParts: boolean;
+  } | null>(null);
+  const [partSaisie, setPartSaisie] = useState("50");
   const [linkAmount, setLinkAmount] = useState("");
   const [linkFrequency, setLinkFrequency] = useState("monthly");
   const simRef = useRef<Simulation<GNode, GLink> | null>(null);
@@ -952,12 +959,6 @@ export default function GalaxyView({
 
   useEffect(() => { const sim = simRef.current; return () => { sim?.stop(); }; }, []);
 
-  // La note s'efface seule : elle explique un geste, elle n'attend pas de réponse.
-  useEffect(() => {
-    if (!noteGeste) return;
-    const t = setTimeout(() => setNoteGeste(null), 6000);
-    return () => clearTimeout(t);
-  }, [noteGeste]);
 
   /**
    * Zoom à la molette.
@@ -1087,18 +1088,21 @@ export default function GalaxyView({
       const newMemberId = ownerSourceNode.kind === "center" ? null : (ownerSourceNode.memberId as number);
       if (isPortfolio) {
         const g = groups.find(gr => gr.key === n.portfolioKey);
-        // Une planète déjà répartie ne se réattribue pas d'un trait : ses
-        // quotes-parts font foi partout — totaux, anneau, fils de propriété.
-        // Écrire le propriétaire déclaré ne changeait alors rien à l'écran, et
-        // le geste avait l'air d'échouer sans rien dire. On ouvre plutôt
-        // l'endroit où la répartition se décide.
-        const dejaRepartie = g && portfolioOwnerships.some(o => o.portfolioId === g.key);
-        if (g && dejaRepartie) {
-          setSelected({ kind: "portfolio", id: g.key, name: g.portfolio.name, color: g.portfolio.color, skin: g.portfolio.skin, total: g.total, count: g.valued.length, memberId: g.portfolio.memberId });
-          setDrawer("details");
-          setNoteGeste(`« ${g.portfolio.name} » est partagée : ce sont ses quotes-parts qui décident, dans le panneau.`);
-        } else if (g && g.key !== "unassigned") {
-          actions.updatePortfolio(g.key as number, { name: g.portfolio.name, color: g.portfolio.color, skin: g.portfolio.skin, memberId: newMemberId });
+        // Le geste demande la part plutôt que de réattribuer d'office. Sans
+        // cela, dire « Camille détient la moitié de l'appartement » n'était
+        // possible que dans l'éditeur du panneau : depuis la galaxie, on ne
+        // pouvait que retirer la planète à son propriétaire pour la donner à
+        // l'autre — jamais la partager.
+        if (g && g.key !== "unassigned") {
+          const lignes = portfolioOwnerships.filter(o => o.portfolioId === g.key);
+          const sienne = lignes.find(o => o.memberId === newMemberId);
+          setPendingPart({
+            portfolioId: g.key as number, planete: g.portfolio.name,
+            proprietaireDeclare: g.portfolio.memberId,
+            memberId: newMemberId, personne: ownerSourceNode.label,
+            aDesParts: lignes.length > 0,
+          });
+          setPartSaisie(sienne ? String(Math.round(Number(sienne.sharePercent))) : lignes.length > 0 ? "50" : "100");
         }
       } else if (isGoal) {
         const goal = goals.find(gg => gg.id === n.goalId);
@@ -1165,6 +1169,36 @@ export default function GalaxyView({
       setSelected({ kind: "member", member, total: mTotal });
       setCreateMode("edit-member");
     }
+  };
+
+  /**
+   * Écrit la quote-part décidée au geste.
+   *
+   * Une planète que personne ne partage encore n'a aucune ligne : lui en
+   * donner une seule à 50 % ferait d'un bien détenu à moitié un bien détenu
+   * *entièrement* par cette moitié, puisque les lignes font foi dès qu'il y en
+   * a une. On matérialise donc le propriétaire déclaré pour le reste.
+   *
+   * Et 100 % sur une planète que personne ne partage reste une réattribution,
+   * pas une copropriété : inutile de créer des lignes pour dire ce que le
+   * propriétaire déclaré disait déjà.
+   */
+  const appliquerPart = async () => {
+    if (!pendingPart) return;
+    const pct = Number(partSaisie);
+    if (!Number.isFinite(pct) || pct < 0 || pct > 100) return;
+    const { portfolioId, proprietaireDeclare, memberId, aDesParts } = pendingPart;
+    const g = groups.find(gr => gr.key === portfolioId);
+    if (pct >= 100 && !aDesParts) {
+      if (g) await actions.updatePortfolio(portfolioId, { name: g.portfolio.name, color: g.portfolio.color, skin: g.portfolio.skin, memberId });
+    } else {
+      if (!aDesParts && proprietaireDeclare !== memberId) {
+        await actions.setPortfolioOwnership({ portfolioId, memberId: proprietaireDeclare, sharePercent: 100 - pct });
+      }
+      await actions.setPortfolioOwnership({ portfolioId, memberId, sharePercent: pct });
+    }
+    setPendingPart(null);
+    onRefresh();
   };
 
   const autoLayout = () => { clearAllPositions(layoutModeRef.current); nodesMapRef.current.forEach(n => { if (n.id !== "center") { n.fx = null; n.fy = null; } }); Object.assign(zoomRef.current, { k: 1, x: 0, y: 0 }); rootRef.current?.setAttribute("transform", ""); simRef.current?.alpha(1).restart(); };
@@ -1453,10 +1487,15 @@ export default function GalaxyView({
             { icon: Star, label: "Objectifs", mode: "goal" },
             { icon: Users, label: "Membres", mode: "member" },
             { icon: Link2, label: "Liens", mode: "link" },
+            // Le geste « propriétaire » existait mais aucun bouton ne
+            // l'allumait : il n'y avait, depuis la galaxie, aucun moyen de
+            // dire qui détient quoi.
+            { icon: UserRoundCog, label: "Propriétaires", mode: "owner" },
           ].map(({ icon: Icon, label, mode }) => {
-            const active = mode === "link" ? linkMode : createMode === mode;
+            const active = mode === "link" ? linkMode : mode === "owner" ? ownerMode : createMode === mode;
             return <button key={mode} onClick={() => {
-              if (mode === "link") { setSelected(null); setCreateMode(null); setOwnerMode(false); setOwnerSourceNode(null); setLinkSourceNode(null); setLinkMode(m => !m); }
+              if (mode === "owner") { setSelected(null); setCreateMode(null); setLinkMode(false); setLinkSourceNode(null); setOwnerSourceNode(null); setOwnerMode(m => !m); }
+              else if (mode === "link") { setSelected(null); setCreateMode(null); setOwnerMode(false); setOwnerSourceNode(null); setLinkSourceNode(null); setLinkMode(m => !m); }
               else if (mode === "portfolio") { setSelected(null); setLinkMode(false); setLinkSourceNode(null); setOwnerMode(false); setOwnerSourceNode(null); setExpenseMemberId(null); setShowPlanetModal(true); }
               else { setSelected(null); setLinkMode(false); setLinkSourceNode(null); setOwnerMode(false); setOwnerSourceNode(null); setExpenseMemberId(null); setCreateMode(mode); }
             }}
@@ -1466,6 +1505,9 @@ export default function GalaxyView({
           })}
           {linkMode && <p className="text-[10px] text-accent px-2 pt-1">
             {linkSourceNode ? `Clique la destination (depuis "${linkSourceNode.label}")…` : "Clique la planète source…"}
+          </p>}
+          {ownerMode && <p className="text-[10px] text-accent px-2 pt-1">
+            {ownerSourceNode ? `Clique la planète que « ${ownerSourceNode.label} » détient…` : "Clique la personne, puis sa planète…"}
           </p>}
         </div>}
 
@@ -1811,13 +1853,21 @@ export default function GalaxyView({
                       {/* Legs */}
                       <line x1={-2.5} y1={8} x2={-3} y2={14} stroke="#e8e8ee" strokeWidth={2.2} strokeLinecap="round" />
                       <line x1={2.5} y1={8} x2={3} y2={14} stroke="#e8e8ee" strokeWidth={2.2} strokeLinecap="round" />
-                      {/* Body */}
-                      <rect x={-4} y={-2} width={8} height={11} rx={3} fill="#f0f0f5" stroke="#c8c8d5" strokeWidth={0.5} />
                       {/* Backpack */}
                       <rect x={-5.5} y={0} width={2.5} height={7} rx={1} fill="#b8b8c8" />
-                      {/* Arms (crossed pose) */}
-                      <line x1={-4} y1={2} x2={2} y2={4.5} stroke="#e8e8ee" strokeWidth={2} strokeLinecap="round" />
-                      <line x1={4} y1={2} x2={-2} y2={4.5} stroke="#e8e8ee" strokeWidth={2} strokeLinecap="round" />
+                      {/* Bras le long du corps, mains au bout. Les deux traits
+                          croisés d'avant se terminaient dans le vide au milieu
+                          du torse : de loin ça faisait une écharpe, de près un
+                          bonhomme sans mains. Ils passent derrière le corps,
+                          qui est redessiné juste après, pour que l'épaule soit
+                          nette. */}
+                      <path d="M -3.4 0.6 q -2.6 1.9 -2.2 5.2" fill="none" stroke="#e8e8ee" strokeWidth={1.9} strokeLinecap="round" />
+                      <path d="M 3.4 0.6 q 2.6 1.9 2.2 5.2" fill="none" stroke="#e8e8ee" strokeWidth={1.9} strokeLinecap="round" />
+                      {/* Body */}
+                      <rect x={-4} y={-2} width={8} height={11} rx={3} fill="#f0f0f5" stroke="#c8c8d5" strokeWidth={0.5} />
+                      {/* Mains */}
+                      <circle cx={-5.3} cy={6.2} r={1.45} fill="#f5f5fa" stroke="#c8c8d5" strokeWidth={0.4} />
+                      <circle cx={5.3} cy={6.2} r={1.45} fill="#f5f5fa" stroke="#c8c8d5" strokeWidth={0.4} />
                       {/* Helmet */}
                       <circle cy={-6} r={5} fill="#f5f5fa" stroke="#c8c8d5" strokeWidth={0.6} />
                       {/* Visor */}
@@ -2126,9 +2176,11 @@ export default function GalaxyView({
                     <g className="g-bob-slow-t" style={{ ["--g-y" as string]: `${-n.r - 13 + bob}px` }}>
                       <line x1={-2.2} y1={7} x2={-2.6} y2={12} stroke="#e8e8ee" strokeWidth={2} strokeLinecap="round" />
                       <line x1={2.2} y1={7} x2={2.6} y2={12} stroke="#e8e8ee" strokeWidth={2} strokeLinecap="round" />
+                      <path d="M -2.9 0.5 q -2.2 1.6 -1.9 4.4" fill="none" stroke="#e8e8ee" strokeWidth={1.65} strokeLinecap="round" />
+                      <path d="M 2.9 0.5 q 2.2 1.6 1.9 4.4" fill="none" stroke="#e8e8ee" strokeWidth={1.65} strokeLinecap="round" />
                       <rect x={-3.4} y={-2} width={6.8} height={9.5} rx={2.6} fill="#f0f0f5" stroke={n.color} strokeWidth={0.7} />
-                      <line x1={-3.4} y1={1.5} x2={2} y2={3.5} stroke="#e8e8ee" strokeWidth={1.7} strokeLinecap="round" />
-                      <line x1={3.4} y1={1.5} x2={-2} y2={3.5} stroke="#e8e8ee" strokeWidth={1.7} strokeLinecap="round" />
+                      <circle cx={-4.6} cy={5.3} r={1.25} fill="#f5f5fa" stroke={n.color} strokeWidth={0.5} />
+                      <circle cx={4.6} cy={5.3} r={1.25} fill="#f5f5fa" stroke={n.color} strokeWidth={0.5} />
                       <circle cy={-5.2} r={4.3} fill="#f5f5fa" stroke={n.color} strokeWidth={0.6} />
                       <ellipse cx={0.4} cy={-5.2} rx={2.7} ry={2.4} fill="#2a3550" />
                       <ellipse cx={-0.4} cy={-6} rx={0.8} ry={0.6} fill="rgba(255,255,255,0.5)" />
@@ -2196,12 +2248,54 @@ export default function GalaxyView({
           </div>
         )}
 
-        {noteGeste && (
-          <div role="status" className="absolute left-1/2 top-3 -translate-x-1/2 z-20 max-w-[22rem] flex items-start gap-2 px-3 py-2 rounded-lg glass-panel border border-border text-xs text-text shadow-lg">
-            <span className="flex-1">{noteGeste}</span>
-            <button onClick={() => setNoteGeste(null)} aria-label="Fermer" className="shrink-0 text-text-muted hover:text-text"><X size={13} /></button>
-          </div>
-        )}
+        {pendingPart && (() => {
+          const pct = Number(partSaisie);
+          const valide = Number.isFinite(pct) && pct >= 0 && pct <= 100;
+          // Total après écriture, pour dire tout de suite si la répartition
+          // tombe juste : ajouter 50 % à quelqu'un qui en détenait déjà 100
+          // ne partage pas le bien en deux, ça fait deux tiers / un tiers.
+          const autres = portfolioOwnerships
+            .filter(o => o.portfolioId === pendingPart.portfolioId && o.memberId !== pendingPart.memberId)
+            .reduce((s, o) => s + Number(o.sharePercent || 0), 0);
+          const total = pendingPart.aDesParts ? autres + (valide ? pct : 0) : 100;
+          const reattribution = pct >= 100 && !pendingPart.aDesParts;
+          const nomDeclare = pendingPart.proprietaireDeclare == null
+            ? ownerName
+            : members.find(m => m.id === pendingPart.proprietaireDeclare)?.name ?? "l'autre";
+          return (
+            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-surface border border-border rounded-xl p-4 w-72 shadow-xl space-y-2 z-20">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-medium min-w-0 truncate">{pendingPart.personne} → {pendingPart.planete}</p>
+                <button onClick={() => setPendingPart(null)} aria-label="Annuler" className="shrink-0 text-text-muted hover:text-text"><X size={14} /></button>
+              </div>
+              <label htmlFor="part-geste" className="text-[10px] text-text-muted uppercase tracking-wide block">Quote-part</label>
+              <div className="flex items-center gap-2">
+                <input id="part-geste" autoFocus type="number" min={0} max={100} step={1} value={partSaisie}
+                  onChange={e => setPartSaisie(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter" && valide) { e.preventDefault(); appliquerPart(); } }}
+                  className="w-20 bg-bg border border-border rounded-md px-3 py-2 text-sm tabular text-right" />
+                <span className="text-sm text-text-muted">%</span>
+              </div>
+              <p className="text-[10px] text-text-muted leading-snug">
+                {reattribution
+                  ? `« ${pendingPart.planete} » revient entièrement à ${pendingPart.personne}.`
+                  : pendingPart.aDesParts
+                    ? total === 100
+                      ? "Les autres parts ne changent pas ; le total tombe juste."
+                      : `Les autres parts ne changent pas : le total ferait ${Math.round(total)} %.`
+                    : `Le reste, ${valide ? 100 - pct : "…"} %, revient à ${nomDeclare}.`}
+              </p>
+              <div className="flex gap-2 pt-1">
+                <button onClick={() => setPendingPart(null)}
+                  className="text-xs px-3 py-2 rounded-md font-medium border border-border text-text-muted hover:text-text">Annuler</button>
+                <button disabled={!valide} onClick={appliquerPart}
+                  className="flex-1 text-xs px-3 py-2 rounded-md font-medium bg-accent text-white hover:opacity-90 disabled:opacity-40">
+                  {reattribution ? "Attribuer" : "Enregistrer la part"}
+                </button>
+              </div>
+            </div>
+          );
+        })()}
 
         {pendingLink && (
           <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-surface border border-border rounded-xl p-4 w-64 shadow-xl space-y-2">

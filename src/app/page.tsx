@@ -254,7 +254,38 @@ export default function HomePage() {
     setOverdue(res.overdue);
   };
 
+  /**
+   * Le pointage de la démonstration se joue dans l'onglet.
+   *
+   * Les routes qui écrivent répondent 403 à une session de démonstration — et
+   * c'est bien ainsi : un lien public ne doit pas pouvoir toucher aux données.
+   * Mais montrer un écran de pointage où l'on ne peut rien pointer ne montre
+   * rien du tout : c'est justement le geste que l'app demande chaque mois, et
+   * l'écart entre prévu et constaté ne se comprend qu'en le faisant. On tient
+   * donc l'état localement. Rien ne part au serveur, rien ne survit au
+   * rechargement, et la fenêtre le dit.
+   */
+  const enRetardParmi = (liste: Occurrence[]) => {
+    const j = new Date();
+    const jour = `${j.getFullYear()}-${String(j.getMonth() + 1).padStart(2, "0")}-${String(j.getDate()).padStart(2, "0")}`;
+    return liste.filter(o => o.status === "pending" && o.dueDate <= jour).length;
+  };
+  const majLocale = (transforme: (liste: Occurrence[]) => Occurrence[]) => {
+    // La liste suivante est calculée ici plutôt que dans la fonction de mise à
+    // jour : celle-ci tourne pendant le rendu, et y appeler `setOverdue` serait
+    // écrire dans un autre état au milieu du rendu du premier.
+    const suivant = transforme(occurrences);
+    setOccurrences(suivant);
+    setOverdue(enRetardParmi(suivant));
+  };
+
   const updateOccurrence = async (id: number, patch: { status: string; actualAmount?: string | null }) => {
+    if (readOnly) {
+      majLocale(liste => liste.map(o => o.id === id
+        ? { ...o, status: patch.status, actualAmount: patch.actualAmount ?? null }
+        : o));
+      return;
+    }
     await apiFetch(`/api/occurrences/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -263,8 +294,40 @@ export default function HomePage() {
     await rechargerEcheances();
   };
 
+  /**
+   * Pointer tout un mois. Un aller-retour par ligne *suivi d'un rechargement
+   * complet* par ligne rendait le bouton inutilisable dès dix mouvements : les
+   * écritures partent ensemble, et on ne recharge qu'une fois à la fin.
+   */
+  const updateManyOccurrences = async (majs: { id: number; status: string; actualAmount?: string | null }[]) => {
+    if (readOnly) {
+      const par = new Map(majs.map(m => [m.id, m]));
+      majLocale(liste => liste.map(o => {
+        const m = par.get(o.id);
+        return m ? { ...o, status: m.status, actualAmount: m.actualAmount ?? null } : o;
+      }));
+      return;
+    }
+    await Promise.all(majs.map(m => apiFetch(`/api/occurrences/${m.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: m.status, actualAmount: m.actualAmount }),
+    })));
+    await rechargerEcheances();
+  };
+
   /** Mouvement exceptionnel : une dépense que rien n'avait prévue. */
   const createOccurrence = async (d: { label: string; amount: string; dueDate: string; direction: string }) => {
+    if (readOnly) {
+      // Identifiants négatifs : aucun risque de collision avec ceux du foyer
+      // fictif, qui viennent du serveur et sont positifs.
+      majLocale(liste => [...liste, {
+        id: -(Date.now() % 1_000_000_000), flowId: null, label: d.label || null,
+        direction: d.direction, dueDate: d.dueDate, expectedAmount: d.amount,
+        actualAmount: null, status: "pending", note: null,
+      }]);
+      return;
+    }
     await apiFetch("/api/occurrences", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -274,6 +337,12 @@ export default function HomePage() {
   };
 
   const editOccurrence = async (id: number, d: { label: string; amount: string; dueDate: string; direction: string }) => {
+    if (readOnly) {
+      majLocale(liste => liste.map(o => o.id === id
+        ? { ...o, label: d.label || null, expectedAmount: d.amount, dueDate: d.dueDate, direction: d.direction }
+        : o));
+      return;
+    }
     await apiFetch(`/api/occurrences/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -283,6 +352,10 @@ export default function HomePage() {
   };
 
   const deleteOccurrence = async (id: number) => {
+    if (readOnly) {
+      majLocale(liste => liste.filter(o => o.id !== id));
+      return;
+    }
     await apiFetch(`/api/occurrences/${id}`, { method: "DELETE" });
     await rechargerEcheances();
   };
@@ -384,8 +457,9 @@ export default function HomePage() {
           onCreate={createOccurrence}
           onEdit={editOccurrence}
           onDelete={deleteOccurrence}
+          onUpdateMany={updateManyOccurrences}
           onClose={() => setReviewOpen(false)}
-          readOnly={readOnly}
+          ephemere={readOnly}
         />
       )}
       {error && (
