@@ -102,6 +102,21 @@ export function palierDepenses(depenses: number, revenus: number): PalierDepense
 }
 
 /**
+ * L'image d'une planète de dépenses, à tous les paliers.
+ *
+ * Le palier calme n'a pas d'illustration à lui : faute de mieux, celle du
+ * premier palier, qu'on éteint (`FILTRE_ETEINT`). Une personne sans dépense
+ * doit avoir l'air endormie — une sphère nue au milieu de planètes texturées
+ * se lisait comme un défaut d'affichage, pas comme un budget vide.
+ */
+export function imageDepenses(palier: PalierDepenses): string {
+  return EXPENSES_IMAGES[palier === "calm" ? "warning" : palier];
+}
+
+/** Volcan éteint : désaturé et assombri, pour le palier calme. */
+export const FILTRE_ETEINT = "grayscale(0.8) brightness(0.45) contrast(1.15)";
+
+/**
  * L'image d'un corps de la vue d'ensemble.
  *
  * Les trois systèmes n'ont pas d'illustration propre — elles restent à
@@ -127,8 +142,7 @@ export function imageSysteme(corps: {
   if (corps.genre === "revenus") return salaryImage(corps.montant);
 
   if (corps.genre === "depenses") {
-    const palier = palierDepenses(corps.montant, corps.revenus ?? 0);
-    return palier === "calm" ? undefined : EXPENSES_IMAGES[palier];
+    return imageDepenses(palierDepenses(corps.montant, corps.revenus ?? 0));
   }
 
   if (corps.genre === "projet" && isVacationGoal(corps.label)) return VACANCES_IMAGE;

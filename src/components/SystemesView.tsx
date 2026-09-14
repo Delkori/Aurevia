@@ -8,7 +8,8 @@ import {
   type EntreesSystemes, type Satellite, type SystemeId,
 } from "@/lib/systemes";
 import {
-  SHIP_DIMS, SHIP_IMAGES, imageSatellite, imageSysteme, palierVaisseau, type GenreSysteme,
+  FILTRE_ETEINT, SHIP_DIMS, SHIP_IMAGES, imageSatellite, imageSysteme, palierDepenses,
+  palierVaisseau, type GenreSysteme,
 } from "@/lib/skins";
 import { brancherMolette, transformeDe, type Vue } from "@/lib/molette";
 
@@ -53,6 +54,8 @@ type Corps = {
   x: number; y: number; r: number;
   /** Habillage photographique, quand il y en a un pour ce corps. */
   image?: string;
+  /** Filtre à appliquer à l'habillage — un volcan éteint, faute de dépense. */
+  filtre?: string;
   genre: GenreSysteme;
 };
 
@@ -200,6 +203,8 @@ export default function SystemesView({
           : s.id === SYSTEME_INVESTISSEMENTS ? "investissements" : "projet";
         corps.push({
           ...s, x: COLONNES[c], y: ys[i], r: rayons[i], genre,
+          filtre: genre === "depenses" && palierDepenses(s.montant, entrees.revenus) === "calm"
+            ? FILTRE_ETEINT : undefined,
           image: imageSysteme({
             genre,
             label: s.label,
@@ -377,7 +382,7 @@ export default function SystemesView({
               style={{ transition: "opacity 0.2s ease-out" }} />
             {/* Le corps lui-même s'éclaire : sans ça, seul son pourtour changeait
                 et l'habillage restait aussi terne qu'au repos. */}
-            <g style={{ filter: actif ? "brightness(1.22) saturate(1.12)" : "none", transition: "filter 0.2s ease-out" }}>
+            <g style={{ filter: actif ? `${c.filtre ?? ""} brightness(1.22) saturate(1.12)`.trim() : (c.filtre ?? "none"), transition: "filter 0.2s ease-out" }}>
               {c.image ? (
                 // Le détourage est posé dans les coordonnées du SVG, pas dans
                 // celles du groupe : on annule donc la translation du corps.
