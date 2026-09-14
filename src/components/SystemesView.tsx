@@ -51,6 +51,7 @@ const HALO_TEXTE = { paintOrder: "stroke", stroke: "#07070d", strokeWidth: 2.5, 
 type Corps = {
   id: SystemeId; label: string; montant: number; parMois: boolean;
   couleur: string; contenu: number; satellites: Satellite[];
+  progression?: number; cible?: number;
   x: number; y: number; r: number;
   /** Habillage photographique, quand il y en a un pour ce corps. */
   image?: string;
@@ -331,7 +332,9 @@ export default function SystemesView({
             onClick={() => onEntrer(c.id)}
             role="button" tabIndex={0}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onEntrer(c.id); } }}
-            aria-label={`${c.label}, ${fmt(c.montant)}${c.parMois ? " par mois" : ""}${c.contenu > 0 ? `, ${c.contenu} élément${c.contenu > 1 ? "s" : ""}` : ""}. Voyager vers ce système.`}>
+            aria-label={`${c.label}, ${fmt(c.montant)}${c.parMois ? " par mois" : ""}${
+              c.progression !== undefined ? `, ${Math.round(c.progression * 100)} % de ${fmt(c.cible ?? 0)}` : ""
+            }${c.contenu > 0 ? `, ${c.contenu} élément${c.contenu > 1 ? "s" : ""}` : ""}. Voyager vers ce système.`}>
 
             {/* Toujours dans le DOM, à opacité nulle au repos : une auréole
                 montée au survol n'aurait pas eu de fondu, elle aurait claqué. */}
@@ -399,6 +402,24 @@ export default function SystemesView({
               strokeWidth={actif ? 3 : 2} style={{ transition: "stroke-opacity 0.2s ease-out, stroke-width 0.2s ease-out" }} />
             <circle r={c.r - 1} fill="none" stroke="rgba(0,0,0,0.45)" strokeWidth={1.5} />
 
+            {/* Jauge d'avancement d'un projet : la part du tour parcourue dit
+                où on en est sans avoir à lire le chiffre. Elle part du haut,
+                dans le sens horaire, et ne tourne pas — c'est un cadran, pas
+                une orbite. */}
+            {c.progression !== undefined && (() => {
+              const rJauge = c.r + 6;
+              const tour = 2 * Math.PI * rJauge;
+              const part = Math.max(0, Math.min(1, c.progression));
+              const atteint = c.progression >= 1;
+              return (
+                <g transform="rotate(-90)" pointerEvents="none">
+                  <circle r={rJauge} fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth={3} />
+                  <circle r={rJauge} fill="none" stroke={atteint ? "#34d399" : c.couleur} strokeWidth={3}
+                    strokeLinecap="round" strokeDasharray={`${part * tour} ${tour}`} />
+                </g>
+              );
+            })()}
+
             {/* Un nom de projet est libre : « Apport résidence principale » dépasse
                 largement son cercle. Le contour sombre le laisse mordre sur le
                 fond plutôt que de le réduire à « Apport réside… » — la largeur
@@ -416,8 +437,13 @@ export default function SystemesView({
               className="tabular" style={HALO_TEXTE}>
               {fmt(c.montant)}
             </text>
-            <text y={29} textAnchor="middle" fontSize={10} fill="rgba(255,255,255,0.65)" style={HALO_TEXTE}>
-              {c.parMois ? "par mois" : c.contenu > 0 ? `${c.contenu} planète${c.contenu > 1 ? "s" : ""}` : "capital"}
+            <text y={29} textAnchor="middle" fontSize={10}
+              fontWeight={c.progression !== undefined ? 700 : 400}
+              fill={c.progression === undefined ? "rgba(255,255,255,0.65)"
+                : c.progression >= 1 ? "#6ee7b7" : "rgba(255,255,255,0.9)"} style={HALO_TEXTE}>
+              {c.progression !== undefined
+                ? `${Math.round(c.progression * 100)} % de ${fmt(c.cible ?? 0)}`
+                : c.parMois ? "par mois" : c.contenu > 0 ? `${c.contenu} planète${c.contenu > 1 ? "s" : ""}` : "capital"}
             </text>
 
             {/* Toujours présent, appuyé au survol : réservé au survol, rien ne

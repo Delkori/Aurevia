@@ -50,8 +50,8 @@ describe("vue d'ensemble", () => {
 
   test("chaque projet devient un système, alimenté par les placements", () => {
     const e = foyer({ projets: [
-      { goalId: 1, nom: "Japon", couleur: "#f0abfc", acquis: 32628, apport: 100, planetes: 1 },
-      { goalId: 2, nom: "Apport", couleur: "#7c6af5", acquis: 97797, apport: 900, planetes: 2 },
+      { goalId: 1, nom: "Japon", couleur: "#f0abfc", cible: 32628, acquis: 32628, apport: 100, planetes: 1 },
+      { goalId: 2, nom: "Apport", couleur: "#7c6af5", cible: 120000, acquis: 97797, apport: 900, planetes: 2 },
     ]});
     const { systemes, flux } = construireSystemes(e);
     assert.deepEqual(systemes.map(s => s.label).slice(3), ["Japon", "Apport"]);
@@ -63,7 +63,7 @@ describe("vue d'ensemble", () => {
 
   test("sans placement, un projet est alimenté directement par les revenus", () => {
     const e = foyer({ patrimoine: 0, planetes: 0, versements: 0, projets: [
-      { goalId: 1, nom: "Japon", couleur: "#f0abfc", acquis: 0, apport: 100, planetes: 0 },
+      { goalId: 1, nom: "Japon", couleur: "#f0abfc", cible: 32628, acquis: 0, apport: 100, planetes: 0 },
     ]});
     const { flux } = construireSystemes(e);
     assert.deepEqual(flux.find(f => f.cible === "projet-1"),
@@ -110,7 +110,7 @@ describe("nature des montants", () => {
 
   test("un projet porte ce qui est réuni, pas un rythme", () => {
     const { systemes } = construireSystemes(foyer({ projets: [
-      { goalId: 1, nom: "Japon", couleur: "#f0abfc", acquis: 32628, apport: 100, planetes: 1 },
+      { goalId: 1, nom: "Japon", couleur: "#f0abfc", cible: 32628, acquis: 32628, apport: 100, planetes: 1 },
     ]}));
     const japon = systemes.find(s => s.id === "projet-1")!;
     assert.equal(japon.parMois, false);
@@ -131,5 +131,36 @@ describe("contexteUtile", () => {
     assert.equal(contexteUtile("member", SYSTEME_REVENUS), true);
     assert.equal(contexteUtile("member", SYSTEME_INVESTISSEMENTS), true);
     assert.equal(contexteUtile("member", projetId(7)), true);
+  });
+});
+
+describe("avancement d'un projet", () => {
+  const avec = (acquis: number, cible: number) => construireSystemes(foyer({
+    projets: [{ goalId: 1, nom: "Japon", couleur: "#f0abfc", acquis, cible, apport: 100, planetes: 1 }],
+  })).systemes.find(s => s.id === projetId(1))!;
+
+  test("la part du montant visé, et le montant visé avec", () => {
+    const s = avec(30000, 120000);
+    assert.equal(s.progression, 0.25);
+    assert.equal(s.cible, 120000);
+  });
+
+  test("un objectif dépassé est atteint, pas « à 408 % »", () => {
+    // Le panneau latéral plafonne déjà (`goalProgress`) : deux chiffres
+    // différents pour la même chose seraient pires que l'un ou l'autre.
+    assert.equal(avec(32628, 8000).progression, 1);
+  });
+
+  test("sans montant visé, pas d'avancement à afficher", () => {
+    const s = avec(5000, 0);
+    assert.equal(s.progression, undefined);
+    assert.equal(s.cible, undefined);
+  });
+
+  test("les systèmes fixes n'ont pas d'avancement : ils ne visent rien", () => {
+    const { systemes } = construireSystemes(foyer({}));
+    for (const s of systemes.filter(x => !x.id.startsWith("projet-"))) {
+      assert.equal(s.progression, undefined, `${s.id} ne devrait pas avoir d'avancement`);
+    }
   });
 });
