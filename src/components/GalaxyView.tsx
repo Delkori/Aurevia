@@ -275,7 +275,7 @@ function TravelingMarkers({
       // Les liens de propriété (patrimoine/membre → planète) font circuler leur
       // point à l'envers : visuellement, la valeur de la planète remonte vers
       // son propriétaire, elle ne s'en éloigne pas.
-      const isOwnershipLink = (s.kind === "member" || s.kind === "center") && (tg.kind === "portfolio" || tg.kind === "goal" || tg.kind === "member" || tg.kind === "member-salary");
+      const isOwnershipLink = (s.kind === "member" || s.kind === "center") && (tg.kind === "portfolio" || tg.kind === "goal" || tg.kind === "member" || tg.kind === "member-salary" || tg.kind === "salary");
       const from = isOwnershipLink ? tg : s, to = isOwnershipLink ? s : tg;
       const seed = hashSeed(s.id, tg.id), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
       const sp = 5 + (s.id.charCodeAt(0) % 4), p = (t / sp) % 1;
@@ -425,7 +425,11 @@ export default function GalaxyView({
     const totalIncomeItems = incomeFlows.reduce((s, f) => s + Number(f.amount), 0);
     const totalRevenue = salary + totalIncomeItems;
 
-    if (totalRevenue > 0) nodes.push({ id: "salary", kind: "salary", label: "Revenus", r: 32, color: "#34d399", sub: fmt(totalRevenue), amount: totalRevenue, proprietaires: [personne(null)] });
+    // Le revenu du propriétaire porte son nom comme celui des autres : « Revenus »
+    // tout court flottait sans attache pendant que « Salaire de Camille » pendait
+    // à Camille — on ne voyait le lien entre une personne et ce qu'elle gagne que
+    // pour les membres.
+    if (totalRevenue > 0) nodes.push({ id: "salary", kind: "salary", label: `Revenus ${deNom(ownerName)}`, r: 32, color: "#34d399", sub: fmt(totalRevenue), amount: totalRevenue, proprietaires: [personne(null)] });
     // Le Soleil grossit lui aussi avec la projection globale (racine carrée, comme sr(),
     // pour une croissance visuelle proportionnée plutôt que linéaire — un patrimoine x4
     // ne doit pas donner un Soleil x4 en rayon, sinon il avale tout le reste).
@@ -451,7 +455,7 @@ export default function GalaxyView({
     const maxPersonTotal = Math.max(1, selfTotal, ...members.map(m => memberTotal(m.id)));
     nodes.push({ id: "self", kind: "member", label: ownerName, r: sr(selfTotal, maxPersonTotal, 24, 48), color: centerColor, memberId: null, sub: fmt(selfTotal), accessory: ownerAccessory });
     links.push({ source: "center", target: "self" });
-    if (totalRevenue > 0) links.push({ source: "salary", target: "center" });
+    if (totalRevenue > 0) links.push({ source: "self", target: "salary" });
 
     incomeFlows.forEach(inf => {
       const iid = `inc-${inf.id}`;
@@ -634,13 +638,18 @@ export default function GalaxyView({
     nodesMapRef.current = new Map(nodes.map(n => [n.id, n]));
     const nm = nodesMapRef.current;
 
-    // Changement de disposition : tout ce qui n'est pas épinglé *dans cette
-    // lecture-ci* doit être relâché. Les nœuds sont réutilisés d'un rendu à
+    // Changement de disposition : chaque lecture a ses propres ancres. Ce qui
+    // n'est pas ancré *ici* est relâché — les nœuds sont réutilisés d'un rendu à
     // l'autre pour garder leur élan, ce qui leur faisait traîner le `fx`/`fy`
-    // d'un glissement fait en orbite — la planète restait clouée là où on
-    // l'avait posée, en travers des colonnes.
+    // d'un glissement fait en orbite, la planète restant clouée en travers des
+    // colonnes. Et ce qui l'est y retourne : se contenter de ne pas l'effacer
+    // ne suffisait pas, puisque le passage par une autre disposition l'avait
+    // déjà mis à zéro. On posait une planète, on changeait de lecture, on
+    // revenait — elle avait oublié sa place.
     nm.forEach(node => {
-      if (!getNodePosition(layoutMode, node.id)) { node.fx = null; node.fy = null; }
+      const ancre = getNodePosition(layoutMode, node.id);
+      if (ancre) { node.x = ancre.x; node.y = ancre.y; node.fx = ancre.x; node.fy = ancre.y; }
+      else { node.fx = null; node.fy = null; }
     });
 
     if (layoutMode === "radial") {
@@ -660,7 +669,7 @@ export default function GalaxyView({
     const structuralParent = new Map<string, string>();
     for (const l of links) {
       const tgt = nm.get(l.target);
-      if (tgt && (tgt.kind === "portfolio" || tgt.kind === "goal" || tgt.kind === "member" || tgt.kind === "member-salary")) {
+      if (tgt && (tgt.kind === "portfolio" || tgt.kind === "goal" || tgt.kind === "member" || tgt.kind === "member-salary" || tgt.kind === "salary")) {
         structuralParent.set(l.target, l.source);
       }
     }
@@ -1638,7 +1647,7 @@ export default function GalaxyView({
               const s = nodeById.get(l.source), tg = nodeById.get(l.target);
               if (!s || !tg || s.x == null || tg.x == null) return null;
               const seed = hashSeed(s.id, tg.id), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
-              const isOwnershipLink = (s.kind === "member" || s.kind === "center") && (tg.kind === "portfolio" || tg.kind === "goal" || tg.kind === "member" || tg.kind === "member-salary");
+              const isOwnershipLink = (s.kind === "member" || s.kind === "center") && (tg.kind === "portfolio" || tg.kind === "goal" || tg.kind === "member" || tg.kind === "member-salary" || tg.kind === "salary");
               // Ownership links are drawn later, in their own top-layer pass after all node
               // circles, so a nearby planet can never visually cover them — skip them here.
               if (isOwnershipLink) return null;
@@ -1649,12 +1658,14 @@ export default function GalaxyView({
               const s = nodeById.get(f.source), tg = nodeById.get(f.target);
               if (!s || !tg || s.x == null || tg.x == null) return null;
               const seed = hashSeed(f.source, f.target), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
-              // Tous les montants écrits au milieu de leur courbe se rassemblaient
-              // au même endroit quand plusieurs flux partent de la même source :
-              // « 100 € », « 50 € » et « dans 19j » s'empilaient par-dessus la
-              // personne. On les échelonne le long de la courbe, à un point
-              // stable pour un flux donné.
-              const t = 0.32 + ((seed >>> 0) % 7) * 0.06;
+              // Les flux d'une même source sont presque parallèles : leurs
+              // montants se rassemblaient au même endroit, par-dessus la
+              // personne qui se trouvait là. Les échelonner au hasard ne
+              // suffisait pas — on les étale régulièrement le long de leur
+              // courbe, chacun à son rang parmi ceux qui partent du même point.
+              const fratrie = flowLinks.filter(g => g.source === f.source);
+              const rang = fratrie.indexOf(f);
+              const t = fratrie.length > 1 ? 0.18 + (rang / (fratrie.length - 1)) * 0.64 : 0.5;
               const mid = bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, t);
               return <g key={`fl-${i}`}>
                 <path d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke={f.couleur} strokeOpacity={0.55} strokeWidth={1.5} strokeDasharray="6 4" />
@@ -1748,7 +1759,7 @@ export default function GalaxyView({
                   </>}
                   <circle r={n.r} fill="url(#sph-hl)" stroke="rgba(0,0,0,0.4)" strokeWidth={1} />
                   <AnneauProprietaires r={n.r} proprietaires={n.proprietaires} />
-                  <EtiquettePlanete r={n.r + 3} cote={cote} titre="Revenus" sous={n.sub && `${mask(n.sub)}/mois`} couleurSous="#6ee7b7" />
+                  <EtiquettePlanete r={n.r + 3} cote={cote} titre={n.label} sous={n.sub && `${mask(n.sub)}/mois`} couleurSous="#6ee7b7" />
                   <g transform={positionBouton(n.r, cote)} style={{ cursor: "pointer" }}
                     onPointerDown={e => e.stopPropagation()}
                     onClick={e => { e.stopPropagation(); setSelected(null); setCreateMode("income"); }}>
@@ -2063,7 +2074,7 @@ export default function GalaxyView({
             {links.map(l => {
               const s = nodeById.get(l.source), tg = nodeById.get(l.target);
               if (!s || !tg || s.x == null || tg.x == null) return null;
-              const isOwnershipLink = (s.kind === "member" || s.kind === "center") && (tg.kind === "portfolio" || tg.kind === "goal" || tg.kind === "member" || tg.kind === "member-salary");
+              const isOwnershipLink = (s.kind === "member" || s.kind === "center") && (tg.kind === "portfolio" || tg.kind === "goal" || tg.kind === "member" || tg.kind === "member-salary" || tg.kind === "salary");
               if (!isOwnershipLink) return null;
               const seed = hashSeed(s.id, tg.id), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
               const ownerColor = s.kind === "center" ? centerColor : s.color;
