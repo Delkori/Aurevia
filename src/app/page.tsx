@@ -307,6 +307,19 @@ export default function HomePage() {
       versements: versementsFlux.reduce((s, f) => s + monthlyEquivalent(f), 0),
       planetes: portfolios.length,
       lignesDepense: depensesFlux.length,
+      contenus: {
+        // Les salaires ne sont pas des flux : sans eux, « Revenus 5 770 € »
+        // n'aurait montré en orbite que le petit loyer SCPI à 120 €.
+        revenus: [
+          ...(Number(settings.monthly_salary) > 0
+            ? [{ nom: "Salaire principal", montant: Number(settings.monthly_salary) }] : []),
+          ...members.filter(m => Number(m.salary) > 0)
+            .map(m => ({ nom: `Salaire de ${m.name}`, montant: Number(m.salary) })),
+          ...revenusFlux.map(f => ({ nom: f.name || "Revenu", montant: monthlyEquivalent(f) })),
+        ],
+        depenses: depensesFlux.map(f => ({ nom: f.name || "Dépense", montant: monthlyEquivalent(f) })),
+        planetes: portfolios.map(p => ({ nom: p.name, montant: valeurPlanete(p.id) })),
+      },
       projets: goals.map(g => {
         const liees = goalLinks.filter(gl => gl.goalId === g.id).map(gl => gl.portfolioId);
         return {
@@ -320,6 +333,10 @@ export default function HomePage() {
             return s;
           }, 0),
           planetes: liees.length,
+          contenus: liees.map(pid => ({
+            nom: portfolios.find(p => p.id === pid)?.name ?? "Planète",
+            montant: valeurPlanete(pid),
+          })),
         };
       }),
     };

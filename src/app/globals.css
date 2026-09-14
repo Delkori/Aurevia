@@ -164,3 +164,25 @@ body {
   to   { transform: translateY(var(--g-dy)); opacity: 0; }
 }
 .g-spark { animation: g-spark 2.22s linear infinite; transform-box: fill-box; }
+
+/* ── Vue d'ensemble : satellites en orbite ──────────────────────────────────
+   Le corps d'un système tourne avec ce qu'il contient. C'est ce mouvement qui
+   dit « il y a quelque chose là-dedans, et on peut y entrer » — un cercle
+   immobile ne le disait pas.
+   La durée est posée en ligne, différente d'un corps à l'autre : à cadence
+   identique, les trois systèmes tournaient comme un seul engrenage.
+   `.sv-contre` tourne en sens inverse, à la même cadence, pour que les
+   étiquettes restent à l'endroit au lieu de basculer la tête en bas. */
+@keyframes sv-orbite { to { transform: rotate(360deg); } }
+.sv-orbite {
+  animation: sv-orbite linear infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+  will-change: transform;
+}
+.sv-contre {
+  animation: sv-orbite linear infinite reverse;
+  transform-box: fill-box;
+  transform-origin: center;
+  will-change: transform;
+}
