@@ -35,6 +35,13 @@ export type LayoutNode = {
   r: number;
   /** Poids d'ordonnancement dans sa rangée : les plus gros au milieu. */
   weight?: number;
+  /**
+   * Rang imposé dans la rangée, avant le poids. L'appelant s'en sert pour
+   * mettre chaque destination en face de son propriétaire : trié par la seule
+   * taille, l'anneau des planètes ne suivait pas celui des personnes et les
+   * fils de propriété traversaient la vue en tous sens.
+   */
+  ordre?: number;
 };
 
 export type Point = { x: number; y: number };
@@ -163,8 +170,9 @@ export function flowLayout(
   const debut = (longueur - pas * (rangees.length - 1)) / 2;
 
   for (const [i, rangee] of rangees.entries()) {
+    const cle = (n: LayoutNode) => n.ordre ?? rankOf(n);
     const membres = [...parRangee.get(rangee)!].sort(
-      (a, b) => rankOf(a) - rankOf(b) || (b.weight ?? 0) - (a.weight ?? 0) || a.id.localeCompare(b.id)
+      (a, b) => cle(a) - cle(b) || (b.weight ?? 0) - (a.weight ?? 0) || a.id.localeCompare(b.id)
     );
     const principal = rangees.length === 1 ? longueur / 2 : debut + i * pas;
     const positions = spread(membres, traverse - padding * 2, 46);

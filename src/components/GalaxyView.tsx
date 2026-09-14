@@ -732,14 +732,27 @@ export default function GalaxyView({
       // change rien à l'empilement.
       const demiLargeurEtiquette = (node: GNode) =>
         layoutMode === "vertical" && PLANETES_ETIQUETEES.has(node.kind) ? Math.min(node.label.length, 18) * 3.6 : 0;
+      // Chaque destination se range en face de son propriétaire. Triées par la
+      // seule taille, les six planètes ne suivaient pas l'ordre des personnes :
+      // celles d'Alex encadraient celle de Camille, les fils de propriété se
+      // croisaient d'un bout à l'autre de la vue, et ça se lisait comme du
+      // désordre plutôt que comme un foyer.
+      const rangPersonne = new Map<number | null, number>([[null, 1]]);
+      members.forEach((m, i) => rangPersonne.set(m.id, 2 + i));
+      const rangDe = (node: GNode) =>
+        node.kind === "center" ? 0
+          : node.kind === "member" ? rangPersonne.get(node.memberId ?? null)
+            : rangPersonne.get(node.proprietaires?.[0]?.memberId ?? null);
+
       const cibles = flowLayout(
         [...nm.values()].map(node => ({
           id: node.id,
           kind: node.kind,
           r: Math.max(node.r, halo.get(node.id) ?? 0, demiLargeurEtiquette(node)),
-          // Le poids reste le vrai rayon : on ordonne par taille de planète, pas
-          // par nombre de satellites.
+          // Le poids reste le vrai rayon : à propriétaire égal, on ordonne par
+          // taille de planète, pas par nombre de satellites.
           weight: node.r,
+          ordre: rangDe(node),
         })),
         layoutMode,
         { width: W, height: H }
@@ -902,7 +915,7 @@ export default function GalaxyView({
     simRef.current.force("radialY", forceY<GNode>(d => radialTargets.get(d.id)?.y ?? d.y ?? CY)
       .strength(d => tenu(d) ? (layoutMode === "vertical" ? principal : transverse) : 0));
     simRef.current.alpha(0.7).restart();
-  }, [targetNodes, links, goalLinkEdges, layoutMode]);
+  }, [targetNodes, links, goalLinkEdges, layoutMode, members]);
 
   useEffect(() => { const sim = simRef.current; return () => { sim?.stop(); }; }, []);
 

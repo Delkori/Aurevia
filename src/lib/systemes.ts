@@ -93,6 +93,15 @@ export type SystemeVue = {
   /** Nombre de planètes ou de lignes contenues, pour situer la densité. */
   contenu: number;
   /**
+   * Avancement d'un projet, de 0 à 1, plafonné comme partout ailleurs
+   * (`goalProgress`) : un objectif à 8 000 € couvert par une planète à 32 628 €
+   * est atteint, pas « à 408 % ». `undefined` hors projet — un patrimoine ou
+   * des dépenses ne visent aucun montant.
+   */
+  progression?: number;
+  /** Montant visé par un projet. */
+  cible?: number;
+  /**
    * Ce qu'on voit tourner autour du corps. Échantillon destiné à l'œil — les
    * plus gros d'abord, six au plus ; `contenu` reste le compte qui fait foi.
    */
@@ -132,6 +141,8 @@ export type EntreesSystemes = {
     couleur: string;
     /** Ce qui est déjà réuni pour ce projet. */
     acquis: number;
+    /** Ce qu'il vise. */
+    cible: number;
     /** Versement mensuel qui l'alimente. */
     apport: number;
     planetes: number;
@@ -199,6 +210,8 @@ export function construireSystemes(e: EntreesSystemes): {
       id, label: p.nom, montant: p.acquis, parMois: false,
       couleur: p.couleur, contenu: p.planetes,
       satellites: satellitesDe(p.contenus),
+      cible: p.cible > 0 ? p.cible : undefined,
+      progression: p.cible > 0 ? Math.min(1, p.acquis / p.cible) : undefined,
     });
     if (p.apport > 0) {
       // Un projet est alimenté par ce qu'on met de côté, donc par les

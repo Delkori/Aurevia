@@ -327,6 +327,7 @@ export default function HomePage() {
           nom: g.name,
           couleur: g.color,
           acquis: liees.reduce((s, pid) => s + valeurPlanete(pid), 0),
+          cible: Number(g.targetAmount) || 0,
           apport: flows.reduce((s, f) => {
             if (f.targetType === "goal" && f.targetId === g.id) return s + monthlyEquivalent(f);
             if (f.targetType === "portfolio" && f.targetId != null && liees.includes(f.targetId)) return s + monthlyEquivalent(f);
