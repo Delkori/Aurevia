@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { flows, goals, portfolios } from "@/db/schema";
+import { flows, goals, members, portfolios } from "@/db/schema";
 import { and, eq, or } from "drizzle-orm";
 import { ValidationError } from "@/lib/validate";
 
@@ -21,8 +21,8 @@ export async function assertFlowRefs(values: {
   const verifs: Promise<void>[] = [];
 
   const existe = async (
-    table: typeof portfolios | typeof goals,
-    colonne: typeof portfolios.id | typeof goals.id,
+    table: typeof portfolios | typeof goals | typeof members,
+    colonne: typeof portfolios.id | typeof goals.id | typeof members.id,
     id: number,
     libelle: string
   ) => {
@@ -38,6 +38,12 @@ export async function assertFlowRefs(values: {
   }
   if (values.sourceType === "portfolio" && values.sourceId != null) {
     verifs.push(existe(portfolios, portfolios.id, values.sourceId, "Planète source"));
+  }
+  // Le salaire d'une personne est une source comme une autre : il manquait au
+  // contrôle, si bien qu'un versement pouvait partir du salaire de quelqu'un
+  // qui n'est plus du foyer.
+  if (values.sourceType === "member_salary" && values.sourceId != null) {
+    verifs.push(existe(members, members.id, values.sourceId, "Personne source"));
   }
 
   await Promise.all(verifs);
@@ -67,5 +73,26 @@ export async function deleteFlowsReferencing(
       and(eq(flows.targetType, type), eq(flows.targetId, id)),
       and(eq(flows.sourceType, type), eq(flows.sourceId, id))
     )
+  );
+}
+
+/**
+ * Supprime les versements qui partaient du salaire d'une personne qu'on vient
+ * de retirer du foyer.
+ *
+ * `flows.member_id` a bien une clé étrangère — une dépense portée par cette
+ * personne revient au propriétaire du compte, ce qui est le bon comportement.
+ * Mais `source_id` est polymorphe, donc sans clé : un versement « salaire de
+ * Camille → PEA » survivait à Camille. La galaxie ne le traçait plus, faute de
+ * nœud de départ, mais il continuait de compter dans les versements mensuels,
+ * donc dans la projection, et de produire des échéances à pointer que plus rien
+ * ne rattachait à personne.
+ *
+ * On supprime plutôt que d'interdire le retrait de la personne : c'est déjà le
+ * choix fait pour les planètes et les objectifs.
+ */
+export async function deleteFlowsFromMember(memberId: number): Promise<void> {
+  await db.delete(flows).where(
+    and(eq(flows.sourceType, "member_salary"), eq(flows.sourceId, memberId))
   );
 }

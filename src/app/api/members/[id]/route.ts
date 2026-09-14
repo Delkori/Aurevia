@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { deleteFlowsFromMember } from "@/lib/flowRefs";
 import { db } from "@/db";
 import { members } from "@/db/schema";
 import { eq } from "drizzle-orm";
@@ -23,7 +24,9 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   if (unauthorized) return unauthorized;
   try {
     const { id } = await params;
-    await db.delete(members).where(eq(members.id, routeId(id)));
+    const cible = routeId(id);
+    await deleteFlowsFromMember(cible);
+    await db.delete(members).where(eq(members.id, cible));
     return NextResponse.json({ ok: true });
   } catch (err) { return handleApiError(err); }
 }
