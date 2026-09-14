@@ -57,7 +57,7 @@ function projectForward(received: DividendEvent[], now: Date): DividendEvent[] {
   return projected;
 }
 
-export async function getDividendInfo(ticker: string): Promise<DividendInfo | null> {
+async function getDividendInfo(ticker: string): Promise<DividendInfo | null> {
   const cached = cache.get(ticker);
   if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.data;
 

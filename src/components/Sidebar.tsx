@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Settings, Wallet, TrendingUp } from "lucide-react";
+import { Settings, Wallet, TrendingUp, LineChart, LogOut } from "lucide-react";
 
 export default function Sidebar() {
   const pathname = usePathname();
@@ -28,6 +28,27 @@ export default function Sidebar() {
       >
         <TrendingUp size={15} />
       </Link>
+      <Link
+        href="/projection"
+        title="Prévision"
+        className={`w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-hover ${pathname === "/projection" ? "bg-accent/15 text-accent" : ""}`}
+      >
+        <LineChart size={15} />
+      </Link>
+      <button
+        onClick={async () => {
+          await fetch("/api/session", { method: "DELETE" });
+          // Navigation complète, et non `router.push` : se déconnecter doit
+          // vider la mémoire du navigateur du patrimoine déjà chargé, pas
+          // seulement démonter l'arbre React en laissant les données derrière.
+          // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+          window.location.href = "/login";
+        }}
+        title="Se déconnecter"
+        className="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-negative hover:bg-surface-hover"
+      >
+        <LogOut size={15} />
+      </button>
       <Link
         href="/settings"
         title="Paramètres"

@@ -110,7 +110,7 @@ export function summarizeSinceLastVisit(input: SummaryInput): {
 
   // 3. Versements programmés dans les 7 jours.
   const upcoming = input.flows
-    .map((f) => ({ flow: f, date: nextOccurrenceDate(f.createdAt, f.frequency) }))
+    .map((f) => ({ flow: f, date: nextOccurrenceDate(f.createdAt, f.frequency, now) }))
     .filter((x): x is { flow: (typeof input.flows)[number]; date: Date } => x.date !== null)
     .filter((x) => x.date.getTime() - now.getTime() <= 7 * DAY_MS)
     .sort((a, b) => a.date.getTime() - b.date.getTime());

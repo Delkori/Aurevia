@@ -6,6 +6,8 @@ import GalaxyView from "@/components/GalaxyView";
 import SinceLastVisit from "@/components/SinceLastVisit";
 import MonthReview, { type Occurrence } from "@/components/MonthReview";
 import DemoIntro from "@/components/DemoIntro";
+import { monthlyEquivalent } from "@/lib/flows";
+import { type EntreesSystemes, type SystemeId } from "@/lib/systemes";
 import type { LayoutMode } from "@/lib/galaxyLayout";
 import { currentValue, goalProgress, isStale, totalDebt, type ValuationContext } from "@/lib/networth";
 import { formatMoney } from "@/lib/format";
@@ -18,9 +20,10 @@ type Portfolio = { id: number; name: string; color: string; skin: string | null;
 type Goal = { id: number; name: string; targetAmount: string; targetDate: string | null; color: string; memberId: number | null };
 type Loan = { id: number; name: string; remainingBalance: string; principal: string; interestRate: string | null; monthlyPayment: string | null; assetId: number | null; currency: string };
 type Member = { id: number; name: string; role: string; color: string; salary: string | null; accessory: string | null };
-type Flow = { id: number; name: string | null; sourceType: string; sourceId: number | null; targetType: string; targetId: number | null; amount: string; frequency: string; memberId: number | null; createdAt: string };
+type Flow = { id: number; name: string | null; sourceType: string; sourceId: number | null; targetType: string; targetId: number | null; amount: string; frequency: string; dueDay: number | null; memberId: number | null; createdAt: string };
 type GoalLink = { id: number; goalId: number; portfolioId: number };
 type PortfolioOwnership = { id: number; portfolioId: number; memberId: number | null; sharePercent: string };
+type ExpenseShare = { id: number; flowId: number | null; memberId: number | null; sharePercent: string };
 type Quote = { price: number; currency: string } | null;
 type Rates = Record<string, number>;
 
@@ -33,6 +36,7 @@ export default function HomePage() {
   const [flows, setFlows] = useState<Flow[]>([]);
   const [goalLinks, setGoalLinks] = useState<GoalLink[]>([]);
   const [portfolioOwnerships, setPortfolioOwnerships] = useState<PortfolioOwnership[]>([]);
+  const [expenseShares, setExpenseShares] = useState<ExpenseShare[]>([]);
   const [quotes, setQuotes] = useState<Record<string, Quote>>({});
   const [dividends, setDividends] = useState<Record<string, DividendInfo | null>>({});
   const [settings, setSettings] = useState<Record<string, string>>({});
@@ -51,16 +55,19 @@ export default function HomePage() {
   const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
   const [overdue, setOverdue] = useState(0);
   const [reviewOpen, setReviewOpen] = useState(false);
+  /** `null` = vue d'ensemble des systèmes ; sinon on est entré dans l'un d'eux. */
+  const [systeme, setSysteme] = useState<SystemeId | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [a, p, g, l, m, f, s, gl, po, fx, se, dm, oc] = await Promise.allSettled([
+      const [a, p, g, l, m, f, s, gl, po, fx, se, dm, oc, es] = await Promise.allSettled([
         apiFetch("/api/assets"), apiFetch("/api/portfolios"), apiFetch("/api/goals"),
         apiFetch("/api/loans"), apiFetch("/api/members"), apiFetch("/api/flows"),
         apiFetch("/api/settings"), apiFetch("/api/goal-links"), apiFetch("/api/portfolio-ownerships"),
         apiFetch("/api/exchange-rates"),
         apiFetch("/api/session"), apiFetch("/api/demo"), apiFetch("/api/occurrences"),
+        apiFetch("/api/expense-shares"),
       ]);
       const ad = a.status === "fulfilled" ? (a.value as Asset[]) : [];
       setAssets(ad);
@@ -72,6 +79,7 @@ export default function HomePage() {
       setSettings(s.status === "fulfilled" ? (s.value as Record<string, string>) : {});
       setGoalLinks(gl.status === "fulfilled" ? (gl.value as GoalLink[]) : []);
       setPortfolioOwnerships(po.status === "fulfilled" ? (po.value as PortfolioOwnership[]) : []);
+      setExpenseShares(es.status === "fulfilled" ? (es.value as ExpenseShare[]) : []);
       if (fx.status === "fulfilled") setRates(fx.value as Rates);
       setRole(se.status === "fulfilled" ? (se.value as { role: "owner" | "demo" }).role : "owner");
       if (oc.status === "fulfilled") {
@@ -240,16 +248,82 @@ export default function HomePage() {
     };
   }, [assets, loans, goals, goalLinks, flows, portfolios, quotes, dividends, rates, settings.display_currency]);
 
+  const rechargerEcheances = async () => {
+    const res = await apiFetch("/api/occurrences") as { occurrences: Occurrence[]; overdue: number };
+    setOccurrences(res.occurrences);
+    setOverdue(res.overdue);
+  };
+
   const updateOccurrence = async (id: number, patch: { status: string; actualAmount?: string | null }) => {
     await apiFetch(`/api/occurrences/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
     });
-    const res = await apiFetch("/api/occurrences") as { occurrences: Occurrence[]; overdue: number };
-    setOccurrences(res.occurrences);
-    setOverdue(res.overdue);
+    await rechargerEcheances();
   };
+
+  /** Mouvement exceptionnel : une dépense que rien n'avait prévue. */
+  const createOccurrence = async (d: { label: string; amount: string; dueDate: string; direction: string }) => {
+    await apiFetch("/api/occurrences", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(d),
+    });
+    await rechargerEcheances();
+  };
+
+  const editOccurrence = async (id: number, d: { label: string; amount: string; dueDate: string; direction: string }) => {
+    await apiFetch(`/api/occurrences/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label: d.label, expectedAmount: d.amount, dueDate: d.dueDate, direction: d.direction }),
+    });
+    await rechargerEcheances();
+  };
+
+  const deleteOccurrence = async (id: number) => {
+    await apiFetch(`/api/occurrences/${id}`, { method: "DELETE" });
+    await rechargerEcheances();
+  };
+
+  /** Ce que la vue d'ensemble a besoin de savoir, calculé une fois. */
+  const entreesSystemes: EntreesSystemes = useMemo(() => {
+    const ctx = { rates, displayCurrency: settings.display_currency || "EUR" };
+    const valeurPlanete = (pid: number) => assets
+      .filter(a => a.portfolioId === pid)
+      .reduce((s, a) => s + currentValue(a, a.ticker ? quotes[a.ticker] : null, ctx), 0);
+    const brut = assets.reduce((s, a) => s + currentValue(a, a.ticker ? quotes[a.ticker] : null, ctx), 0);
+    const depensesFlux = flows.filter(f => f.targetType === "expense");
+    const revenusFlux = flows.filter(f => f.targetType === "income");
+    const versementsFlux = flows.filter(f => f.targetType === "portfolio" || f.targetType === "goal");
+
+    return {
+      revenus: (Number(settings.monthly_salary) || 0)
+        + members.reduce((s, m) => s + (Number(m.salary) || 0), 0)
+        + revenusFlux.reduce((s, f) => s + monthlyEquivalent(f), 0),
+      depenses: depensesFlux.reduce((s, f) => s + monthlyEquivalent(f), 0),
+      patrimoine: brut - totalDebt(loans, ctx),
+      versements: versementsFlux.reduce((s, f) => s + monthlyEquivalent(f), 0),
+      planetes: portfolios.length,
+      lignesDepense: depensesFlux.length,
+      projets: goals.map(g => {
+        const liees = goalLinks.filter(gl => gl.goalId === g.id).map(gl => gl.portfolioId);
+        return {
+          goalId: g.id,
+          nom: g.name,
+          couleur: g.color,
+          acquis: liees.reduce((s, pid) => s + valeurPlanete(pid), 0),
+          apport: flows.reduce((s, f) => {
+            if (f.targetType === "goal" && f.targetId === g.id) return s + monthlyEquivalent(f);
+            if (f.targetType === "portfolio" && f.targetId != null && liees.includes(f.targetId)) return s + monthlyEquivalent(f);
+            return s;
+          }, 0),
+          planetes: liees.length,
+        };
+      }),
+    };
+  }, [assets, quotes, loans, flows, members, goals, goalLinks, portfolios, rates, settings]);
 
   const isEmpty =
     assets.length === 0 &&
@@ -289,6 +363,9 @@ export default function HomePage() {
           ])}
           displayCurrency={settings.display_currency || "EUR"}
           onUpdate={updateOccurrence}
+          onCreate={createOccurrence}
+          onEdit={editOccurrence}
+          onDelete={deleteOccurrence}
           onClose={() => setReviewOpen(false)}
           readOnly={readOnly}
         />
@@ -341,10 +418,11 @@ export default function HomePage() {
           </div>
         )}
         {readOnly && <DemoIntro />}
+
         {!isEmpty && !readOnly && <SinceLastVisit data={visitData} disabled={readOnly} />}
         <GalaxyView
           assets={assets} portfolios={portfolios} goals={goals} loans={loans}
-          members={members} flows={flows} goalLinks={goalLinks} portfolioOwnerships={portfolioOwnerships} quotes={quotes} dividends={dividends} actions={actions}
+          members={members} flows={flows} goalLinks={goalLinks} portfolioOwnerships={portfolioOwnerships} expenseShares={expenseShares} quotes={quotes} dividends={dividends} actions={actions}
           salary={Number(settings.monthly_salary) || 0}
           showCountdown={settings.show_payment_countdown !== "false"}
           ownerName={settings.owner_name || "Moi"}
@@ -366,6 +444,10 @@ export default function HomePage() {
           }}
           onUpdateSalary={updateSalary}
           onUpdateSelf={updateSelf}
+          systeme={systeme}
+          onSortirSysteme={() => setSysteme(null)}
+          onEntrerSysteme={setSysteme}
+          entreesSystemes={entreesSystemes}
           onRefresh={load}
         />
       </div>

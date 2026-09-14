@@ -45,7 +45,7 @@ type Seed = {
   previousSettings: Record<string, string | null>;
 };
 
-export async function readSeed(): Promise<Seed | null> {
+async function readSeed(): Promise<Seed | null> {
   const [row] = await db.select().from(settings).where(eq(settings.key, SEED_KEY));
   if (!row) return null;
   try {

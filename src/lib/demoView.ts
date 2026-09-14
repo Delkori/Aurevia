@@ -140,6 +140,9 @@ export function demoFlows(maintenant = new Date()) {
       targetId,
       amount: f.amount,
       frequency: f.frequency,
+      dueDay: jour,
+      // Le foyer d'exemple partage ses dépenses : c'est le cas d'usage à montrer.
+      shared: type === "expense",
       memberId: memberId(f.member),
       createdAt: new Date(debut.getFullYear(), debut.getMonth(), Math.min(jour, dernier)),
     };
@@ -222,4 +225,16 @@ export function demoOccurrences(maintenant = new Date()) {
 export function demoOverdue(maintenant = new Date()): number {
   const jour = `${maintenant.getFullYear()}-${String(maintenant.getMonth() + 1).padStart(2, "0")}-${String(maintenant.getDate()).padStart(2, "0")}`;
   return demoOccurrences(maintenant).filter((o) => o.status === "pending" && o.dueDate <= jour).length;
+}
+
+/**
+ * Règle du foyer de la démonstration : moitié-moitié entre Alex et Camille.
+ * C'est le cas d'usage que la démonstration doit montrer — l'appartement est
+ * déjà détenu 50/50, les dépenses le sont aussi.
+ */
+export function demoExpenseShares() {
+  return [
+    { id: 1, flowId: null, memberId: null, sharePercent: "50", createdAt: origine(new Date()) },
+    { id: 2, flowId: null, memberId: memberId("camille"), sharePercent: "50", createdAt: origine(new Date()) },
+  ];
 }

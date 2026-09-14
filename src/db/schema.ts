@@ -1,4 +1,5 @@
 import {
+  boolean,
   pgTable,
   serial,
   text,
@@ -91,9 +92,39 @@ export const flows = pgTable("flows", {
   targetId: integer("target_id"),
   amount: numeric("amount").notNull(),
   frequency: text("frequency").notNull().default("monthly"), // monthly | weekly | yearly | once
+  /**
+   * Dépense portée par le foyer et non par une seule personne. Voir
+   * `expense_shares` et `lib/expenseShares.ts` : `member_id` ne pouvait
+   * désigner qu'un seul porteur, ce qui rendait un loyer commun impossible à
+   * exprimer autrement qu'à 100 % sur l'un des deux.
+   */
+  shared: boolean("shared").notNull().default(false),
+  /**
+   * Jour du mois de l'échéance (1-31), ramené au dernier jour quand il n'existe
+   * pas. `null` = on prend le jour de `createdAt`, comme avant.
+   *
+   * Sans ce champ, toutes les échéances d'un foyer tombaient le jour où les
+   * flux avaient été saisis : une liste de pointage où dix prélèvements sont
+   * datés du même jour ne ressemble à aucun vrai mois.
+   */
+  dueDay: integer("due_day"),
   memberId: integer("member_id").references(() => members.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+// ── Répartition des dépenses entre les personnes du foyer ───────────────────
+// Même principe que `portfolio_ownerships` pour les biens : un loyer peut être
+// porté moitié-moitié. `flow_id` à NULL décrit la règle du foyer — celle qu'on
+// règle une fois — et les lignes rattachées à un flux en sont les exceptions.
+export const expenseShares = pgTable("expense_shares", {
+  id: serial("id").primaryKey(),
+  /** `null` : règle du foyer, applicable à toute dépense déclarée commune. */
+  flowId: integer("flow_id").references(() => flows.id, { onDelete: "cascade" }),
+  /** `null` = le propriétaire du foyer (« Moi »). */
+  memberId: integer("member_id").references(() => members.id, { onDelete: "cascade" }),
+  sharePercent: numeric("share_percent").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [index("expense_shares_flow_id_idx").on(t.flowId)]);
 
 // ── Paramètres (clé-valeur) ──────────────────────────────────────────────────
 export const settings = pgTable("settings", {
@@ -102,29 +133,6 @@ export const settings = pgTable("settings", {
   value: text("value").notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
-
-// ── Budget (réservé) ─────────────────────────────────────────────────────────
-// Ces deux tables ne sont exposées par aucune route : la section budget a été
-// retirée de l'interface. Elles sont conservées pour une v2 plutôt que
-// supprimées, pour ne pas détruire les données d'un déploiement existant.
-export const budgetCategories = pgTable("budget_categories", {
-  id: serial("id").primaryKey(),
-  name: text("name").notNull(),
-  kind: text("kind").notNull(),
-  monthlyTarget: numeric("monthly_target"),
-  color: text("color").notNull().default("#999999"),
-});
-
-export const budgetEntries = pgTable("budget_entries", {
-  id: serial("id").primaryKey(),
-  categoryId: integer("category_id")
-    .notNull()
-    .references(() => budgetCategories.id, { onDelete: "cascade" }),
-  amount: numeric("amount").notNull(),
-  note: text("note"),
-  date: date("date").notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (t) => [index("budget_entries_category_id_idx").on(t.categoryId)]);
 
 // ── Crédits / Prêts ──────────────────────────────────────────────────────────
 export const loans = pgTable("loans", {
@@ -162,7 +170,16 @@ export const netWorthSnapshots = pgTable("net_worth_snapshots", {
 // relancée autant de fois qu'on veut sans jamais créer de doublon.
 export const flowOccurrences = pgTable("flow_occurrences", {
   id: serial("id").primaryKey(),
-  flowId: integer("flow_id").notNull().references(() => flows.id, { onDelete: "cascade" }),
+  /**
+   * `null` pour un mouvement exceptionnel, saisi à la main depuis le pointage :
+   * une réparation de voiture n'est pas une règle et ne doit pas en devenir
+   * une. Il porte alors son propre libellé et son propre sens.
+   */
+  flowId: integer("flow_id").references(() => flows.id, { onDelete: "cascade" }),
+  /** Renseigné uniquement pour un mouvement sans règle. */
+  label: text("label"),
+  /** « in » ou « out ». Ne sert qu'aux mouvements sans règle ; sinon le flux décide. */
+  direction: text("direction"),
   dueDate: date("due_date").notNull(),
   expectedAmount: numeric("expected_amount").notNull(),
   /** Renseigné à la validation. `null` tant que l'échéance n'a pas été vérifiée. */

@@ -2,6 +2,29 @@ export function monthlyRateFromAnnual(annualPercent: number) {
   return Math.pow(1 + annualPercent / 100, 1 / 12) - 1;
 }
 
+/**
+ * Valeur d'un capital après `months` mois, versements mensuels et rendement
+ * composé compris.
+ *
+ * La même formule vivait en double, à l'octet près, dans `GalaxyView` et dans
+ * la page de frise — et `projectNetWorth` en était une troisième écriture. Une
+ * correction sur l'une aurait laissé les autres mentir, sans que rien ne le
+ * signale : deux écrans auraient affiché deux projections différentes pour la
+ * même hypothèse.
+ */
+export function futureValue(
+  capital: number,
+  versementMensuel: number,
+  tauxAnnuelPct: number,
+  mois: number
+): number {
+  if (mois <= 0) return capital;
+  const r = monthlyRateFromAnnual(tauxAnnuelPct);
+  if (r === 0) return capital + versementMensuel * mois;
+  const croissance = Math.pow(1 + r, mois);
+  return capital * croissance + versementMensuel * ((croissance - 1) / r);
+}
+
 /** Projette le patrimoine mois par mois avec versements mensuels et rendement composé. */
 export function projectNetWorth(
   current: number,

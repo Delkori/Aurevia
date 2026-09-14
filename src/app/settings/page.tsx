@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { AlertTriangle, X, Save } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
 import DemoLink from "@/components/DemoLink";
+import ReglePartage from "@/components/ReglePartage";
 
 const CURRENCIES = ["EUR", "USD", "GBP", "CHF", "JPY", "CAD", "AUD"];
 
@@ -132,6 +133,8 @@ export default function SettingsPage() {
           <Save size={14} /> {saved ? "Enregistré ✓" : "Sauvegarder"}
         </button>
       </section>
+
+      <ReglePartage ownerName={settings.owner_name || "Moi"} />
 
       <DemoLink />
     </div>

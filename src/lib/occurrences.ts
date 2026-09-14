@@ -84,7 +84,10 @@ export async function generateOccurrences(
 
 export type OccurrenceRow = {
   id: number;
-  flowId: number;
+  /** `null` pour un mouvement exceptionnel, sans règle derrière lui. */
+  flowId: number | null;
+  label: string | null;
+  direction: string | null;
   dueDate: string;
   expectedAmount: string;
   actualAmount: string | null;

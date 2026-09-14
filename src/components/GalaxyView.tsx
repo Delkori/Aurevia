@@ -8,12 +8,19 @@ import {
 import { FolderPlus, Plus, PlusCircle, Star, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, AlertTriangle, Bell, Clock, Menu, PanelRight, LayoutGrid, FlaskConical } from "lucide-react";
 import { findAccessory } from "@/lib/astronautAccessories";
 import { formatMoney } from "@/lib/format";
+import { futureValue } from "@/lib/projection";
+import { monthlyEquivalent } from "@/lib/flows";
+import { partDe, type PartLike } from "@/lib/expenseShares";
+import { proprietairesDe, arcsAnneau, type Proprietaire } from "@/lib/proprietaires";
+import { goalIdDeProjet, systemeDuNoeud, type EntreesSystemes, type SystemeId } from "@/lib/systemes";
+import SystemesView from "@/components/SystemesView";
 import { currentValue, gain, gainPercent, goalProgress, totalDebt, ownedShare, type Rates, type ValuationContext } from "@/lib/networth";
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
 import { getLogoUrl } from "@/lib/logos";
 import { NATURE_COLORS, NATURE_LABELS, NATURE_ORDER, natureOfPortfolio, type Nature } from "@/lib/natures";
 import { flowLayout, LAYOUT_MODES, type LayoutMode } from "@/lib/galaxyLayout";
-import { ClipboardCheck, Loader2 } from "lucide-react";
+import { ChevronLeft, ClipboardCheck, Loader2 } from "lucide-react";
+import DateDuJour from "@/components/DateDuJour";
 import { daysUntilNextOccurrence } from "@/lib/dates";
 import NodePanel, { PlanetModal, type Selection, type Actions } from "@/components/NodePanel";
 
@@ -22,7 +29,7 @@ type Portfolio = { id: number; name: string; color: string; skin: string | null;
 type Goal = { id: number; name: string; targetAmount: string; targetDate: string | null; color: string; memberId: number | null };
 type Loan = { id: number; name: string; remainingBalance: string; currency: string; assetId: number | null };
 type Member = { id: number; name: string; role: string; color: string; salary: string | null; accessory: string | null };
-type Flow = { id: number; name: string | null; sourceType: string; sourceId: number | null; targetType: string; targetId: number | null; amount: string; frequency: string; memberId: number | null; createdAt: string };
+type Flow = { id: number; name: string | null; sourceType: string; sourceId: number | null; targetType: string; targetId: number | null; amount: string; frequency: string; dueDay: number | null; shared?: boolean | null; memberId: number | null; createdAt: string };
 type GoalLink = { id: number; goalId: number; portfolioId: number };
 type PortfolioOwnership = { id: number; portfolioId: number; memberId: number | null; sharePercent: string };
 type DividendEvent = { date: string; amount: number };
@@ -30,6 +37,18 @@ type DividendInfo = { ticker: string; currency: string; received: DividendEvent[
 type Quote = { price: number; currency: string } | null;
 
 const W = 1200, H = 800, CX = W / 2, CY = H / 2, CENTER_R = 32;
+
+// Bornes et sensibilité du zoom à la molette.
+//
+// `SENSIBILITE_ZOOM` se lit ainsi : un cran de souris (deltaY ≈ 100) donne
+// `exp(100 × 0,0014) ≈ 1,15`, soit 15 % — la valeur qui « tombe juste » au
+// poignet. Un effleurement de pavé tactile (deltaY ≈ 4) donne 1,006 : il en
+// faut une bonne centaine pour doubler l'échelle, ce qui est exactement le
+// geste attendu.
+const ZOOM_MIN = 0.2, ZOOM_MAX = 6;
+const SENSIBILITE_ZOOM = 0.0014;
+/** Amplitude maximale retenue d'un seul événement, pour qu'aucun ne fasse bondir la vue. */
+const PAS_ZOOM_MAX = 180;
 function sr(v: number, mx: number, mn: number, mxx: number) { return mx <= 0 ? mn : mn + (mxx - mn) * Math.sqrt(Math.max(0, Math.min(1, v / mx))); }
 
 // Lightens (positive percent) or darkens (negative) a hex color, for building a
@@ -44,16 +63,6 @@ function shade(hex: string, percent: number): string {
   const g = clamp(Math.round(((num >> 8) & 0xff) * (1 - p) + t * p));
   const b = clamp(Math.round((num & 0xff) * (1 - p) + t * p));
   return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
-}
-
-// FV of a lump sum + regular monthly contributions, compounded monthly — same
-// simplified constant-rate model as the Projection section on /timeline.
-function projectedValue(p0: number, monthlyContribution: number, annualRatePct: number, months: number): number {
-  const r = annualRatePct / 100 / 12;
-  if (months <= 0) return p0;
-  if (r === 0) return p0 + monthlyContribution * months;
-  const growth = Math.pow(1 + r, months);
-  return p0 * growth + monthlyContribution * ((growth - 1) / r);
 }
 
 function hashSeed(a: string, b: string) { let h = 0; for (const c of a + b) h = (h * 31 + c.charCodeAt(0)) | 0; return h; }
@@ -160,6 +169,10 @@ interface GNode extends SimulationNodeDatum {
   portfolioKey?: number | "unassigned"; assetId?: number; goalId?: number; memberId?: number | null;
   gainVal?: number; gainPct?: number; sub?: string; logoUrl?: string | null; skin?: PlanetSkin; nature?: Nature;
   ownerExpenseTotal?: number; ownerRevenue?: number; flowId?: number; amount?: number; isProjected?: boolean; accessory?: string | null;
+  /** Dépense portée par plusieurs personnes : le nœud n'en montre qu'une part. */
+  partagee?: boolean;
+  /** À qui le nœud appartient — c'est ce qui teinte son anneau et ses flux. */
+  proprietaires?: Proprietaire[];
 }
 interface GLink { source: string; target: string }
 
@@ -234,10 +247,78 @@ const STARS = Array.from({ length: 260 }, (_, i) => ({
  * cinquantaine de marqueurs en mouvement obligeaient React à reconstruire les
  * ~1000 éléments de la galaxie 22 fois par seconde.
  */
+/** Contour sombre autour des lettres : lisible sur n'importe quel fond, photo comprise. */
+const HALO_TEXTE = { paintOrder: "stroke", stroke: "#07070d", strokeWidth: 3.5, strokeLinejoin: "round" } as const;
+
+type CoteEtiquette = "bas" | "gauche" | "droite";
+
+/** Les planètes qui portent une `EtiquettePlanete` — les autres écrivent leur nom dedans. */
+const PLANETES_ETIQUETEES = new Set(["portfolio", "goal", "salary", "member-salary", "expenses"]);
+
+/**
+ * Où écrire l'étiquette d'une planète. Sous elle, en général. En colonnes
+ * (« de gauche à droite »), les planètes s'empilent verticalement et la
+ * hauteur manque vite : l'étiquette va sur le côté, vers l'intérieur de
+ * l'écran, où l'espace entre les colonnes ne demande qu'à servir. C'est la
+ * position qui décide, pas la colonne théorique : quand un système n'a que
+ * deux colonnes, la seconde est collée au bord droit.
+ */
+function coteEtiquette(mode: LayoutMode, x: number | undefined): CoteEtiquette {
+  if (mode !== "horizontal") return "bas";
+  return x != null && x > CX ? "gauche" : "droite";
+}
+
+/** Le bouton « + » d'une planète, en haut et du côté opposé à l'étiquette. */
+function positionBouton(r: number, cote: CoteEtiquette): string {
+  const d = r + 14, signe = cote === "droite" ? -1 : 1;
+  return `translate(${signe * d * 0.866},${-d * 0.5})`;
+}
+
+/**
+ * Étiquette d'une planète, posée à côté d'elle et non plus par-dessus. Sur
+ * les habillages photographiques, un nom de 11 px en blanc se fondait dans
+ * l'image ; ici le nom est en gras avec un contour sombre, le montant juste
+ * dessous, et les lignes d'état (projection, gain, déficit) à la suite.
+ */
+function EtiquettePlanete({ r, cote = "bas", titre, sous, couleurSous, lignes = [] }: {
+  r: number; cote?: CoteEtiquette; titre: string; sous?: string | null; couleurSous?: string;
+  lignes?: { texte: string; couleur: string; className?: string }[];
+}) {
+  const nb = 1 + (sous ? 1 : 0) + lignes.length;
+  // Sous la planète : on descend depuis son bord. Sur le côté : le bloc est
+  // centré sur l'équateur, aligné vers la planète.
+  const x = cote === "bas" ? 0 : cote === "gauche" ? -(r + 10) : r + 10;
+  const y0 = cote === "bas" ? r + 16 : 4 - 6 * (nb - 1);
+  const ancre = cote === "bas" ? "middle" : cote === "gauche" ? "end" : "start";
+  return <>
+    <text x={x} y={y0} textAnchor={ancre} fontSize={12} fontWeight={700} fill="#fff" style={HALO_TEXTE}>{titre}</text>
+    {sous && <text x={x} y={y0 + 13} textAnchor={ancre} fontSize={10} fontWeight={600} fill={couleurSous ?? "rgba(255,255,255,0.92)"} style={HALO_TEXTE}>{sous}</text>}
+    {lignes.map((l, i) => <text key={i} x={x} y={y0 + 13 + 12 * (i + 1)} textAnchor={ancre} fontSize={9} fontWeight={700} fill={l.couleur} className={l.className} style={HALO_TEXTE}>{l.texte}</text>)}
+  </>;
+}
+
+/**
+ * Anneau à la couleur de la personne propriétaire — c'est lui qui distingue,
+ * au premier coup d'œil, la planète d'Alex de celle de Camille, quel que soit
+ * l'habillage. Un bien détenu à plusieurs porte un arc par personne,
+ * proportionnel à sa quote-part, en partant du haut et dans le sens horaire.
+ */
+function AnneauProprietaires({ r, proprietaires, epaisseur = 2.5 }: { r: number; proprietaires?: Proprietaire[]; epaisseur?: number }) {
+  if (!proprietaires?.length) return null;
+  const rayon = r + 3 + epaisseur / 2;
+  const C = 2 * Math.PI * rayon;
+  return <g transform="rotate(-90)" pointerEvents="none">
+    {arcsAnneau(proprietaires, rayon).map((a, i) => (
+      <circle key={i} r={rayon} fill="none" stroke={a.couleur} strokeWidth={epaisseur} strokeLinecap={proprietaires.length > 1 ? "round" : "butt"}
+        strokeDasharray={`${a.longueur} ${C}`} strokeDashoffset={-a.decalage} />
+    ))}
+  </g>;
+}
+
 function TravelingMarkers({
   flowLinks, links, goalLinkEdges, nodeById, totalRevenue, centerColor,
 }: {
-  flowLinks: { source: string; target: string; amount: number }[];
+  flowLinks: { source: string; target: string; amount: number; couleur: string }[];
   links: GLink[];
   goalLinkEdges: { source: string; target: string }[];
   nodeById: Map<string, GNode>;
@@ -260,7 +341,7 @@ function TravelingMarkers({
       const shipTier: "small" | "medium" | "large" = pct < 0.08 ? "small" : pct < 0.25 ? "medium" : "large";
       const d = SHIP_DIMS[shipTier];
       return <g key={`rk-${i}`}>
-        {trail.map((pt, ti) => <circle key={`tr-${i}-${ti}`} cx={pt.x} cy={pt.y} r={3.5 - ti * 0.7} fill={tg.color} opacity={0.5 - ti * 0.11} />)}
+        {trail.map((pt, ti) => <circle key={`tr-${i}-${ti}`} cx={pt.x} cy={pt.y} r={3.5 - ti * 0.7} fill={f.couleur} opacity={0.5 - ti * 0.11} />)}
         <g transform={`translate(${head.x},${head.y}) rotate(${head.angle})`}>
           <image href={SHIP_IMAGES[shipTier]} x={-d.w / 2} y={-d.h / 2} width={d.w} height={d.h} opacity={0.95} />
         </g>
@@ -293,7 +374,7 @@ function TravelingMarkers({
 }
 
 export default function GalaxyView({
-  assets, portfolios, goals, loans, members, flows, goalLinks, portfolioOwnerships, quotes, dividends, actions, salary, onUpdateSalary, onUpdateSelf, onRefresh, showCountdown, ownerName, centerColor, ownerAccessory, rates, displayCurrency, readOnly = false, layoutMode, onLayoutMode, overdueCount = 0, onOpenReview, demoLoaded = false, onRemoveDemo, demoBusy = false,
+  assets, portfolios, goals, loans, members, flows, goalLinks, portfolioOwnerships, quotes, dividends, actions, salary, onUpdateSalary, onUpdateSelf, onRefresh, showCountdown, ownerName, centerColor, ownerAccessory, rates, displayCurrency, readOnly = false, layoutMode, onLayoutMode, overdueCount = 0, onOpenReview, demoLoaded = false, onRemoveDemo, demoBusy = false, expenseShares = [], systeme = null, onSortirSysteme, onEntrerSysteme, entreesSystemes,
 }: {
   assets: Asset[]; portfolios: Portfolio[]; goals: Goal[]; loans: Loan[];
   members: Member[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; quotes: Record<string, Quote>; dividends: Record<string, DividendInfo | null>;
@@ -302,6 +383,13 @@ export default function GalaxyView({
   rates: Rates; displayCurrency: string; readOnly?: boolean;
   layoutMode: LayoutMode; onLayoutMode: (m: LayoutMode) => void;
   overdueCount?: number; onOpenReview: () => void;
+  /** Règle du foyer et exceptions : qui porte quelle part de chaque dépense. */
+  expenseShares?: PartLike[];
+  /** Système visité, ou `null` pour la galaxie entière. */
+  systeme?: SystemeId | null;
+  onSortirSysteme?: () => void;
+  onEntrerSysteme?: (id: SystemeId) => void;
+  entreesSystemes?: EntreesSystemes;
   /** Le foyer d'exemple est chargé : on propose de le retirer. */
   demoLoaded?: boolean; onRemoveDemo?: () => void; demoBusy?: boolean;
 }) {
@@ -342,6 +430,8 @@ export default function GalaxyView({
   const svgRef = useRef<SVGSVGElement | null>(null);
   const zoomRef = useRef<{ k: number; x: number; y: number }>({ k: 1, x: 0, y: 0 });
   const rootRef = useRef<SVGGElement | null>(null);
+  /** Cadre du SVG, mesuré aux changements plutôt qu'à chaque événement. */
+  const rectRef = useRef<DOMRect | null>(null);
   const layoutModeRef = useRef(layoutMode);
   layoutModeRef.current = layoutMode;
 
@@ -369,14 +459,9 @@ export default function GalaxyView({
   const grandTotal = grossTotal - debt;
   const scrubMonthlyContribution = flows.reduce((s, f) => {
     if (f.targetType !== "portfolio" && f.targetType !== "goal") return s;
-    const amt = Number(f.amount);
-    if (f.frequency === "monthly") return s + amt;
-    if (f.frequency === "daily") return s + amt * 30.44;
-    if (f.frequency === "weekly") return s + amt * 4.345;
-    if (f.frequency === "yearly") return s + amt / 12;
-    return s;
+    return s + monthlyEquivalent(f);
   }, 0);
-  const scrubProjectedTotal = scrubYears === 0 ? grandTotal : projectedValue(grandTotal, scrubMonthlyContribution, scrubGrowth, scrubYears * 12);
+  const scrubProjectedTotal = scrubYears === 0 ? grandTotal : futureValue(grandTotal, scrubMonthlyContribution, scrubGrowth, scrubYears * 12);
   const currentYearForScrub = new Date().getFullYear();
   const scrubYear = currentYearForScrub + scrubYears;
 
@@ -390,17 +475,18 @@ export default function GalaxyView({
   const { targetNodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows, totalRevenue, totalInvest } = useMemo(() => {
     const nodes: GNode[] = [];
     const links: GLink[] = [];
-    const flowLinks: { source: string; target: string; label: string; amount: number; days?: number; isSalarySource?: boolean }[] = [];
+    const flowLinks: { source: string; target: string; label: string; amount: number; couleur: string; days?: number; isSalarySource?: boolean }[] = [];
 
-    // Normalise un flux à son équivalent mensuel — même barème que scrubMonthlyContribution
-    // plus haut, dupliqué ici volontairement pour ne pas ajouter une dépendance externe à
-    // ce useMemo (qui casserait sa mémoïsation à chaque render).
-    const monthlyAmount = (f: Flow) =>
-      f.frequency === "monthly" ? Number(f.amount)
-      : f.frequency === "daily" ? Number(f.amount) * 30.44
-      : f.frequency === "weekly" ? Number(f.amount) * 4.345
-      : f.frequency === "yearly" ? Number(f.amount) / 12
-      : 0;
+    // La couleur d'une personne teinte tout ce qui lui appartient : anneau de
+    // ses planètes, halo, flux qui partent de chez elle. Le propriétaire du
+    // compte garde `centerColor`, choisie dans ses réglages.
+    const personne = (mid: number | null): Proprietaire => {
+      if (mid === null) return { memberId: null, nom: ownerName, couleur: centerColor, part: 1 };
+      const m = members.find(m => m.id === mid);
+      return { memberId: mid, nom: m?.name ?? "?", couleur: m?.color ?? "#8a8a99", part: 1 };
+    };
+
+    const monthlyAmount = monthlyEquivalent;
 
     // Simulateur "avance rapide" : projette la valeur de CE portefeuille (pas une moyenne
     // globale) à scrubYears, à partir de ses propres flux entrants réguliers — deux
@@ -410,7 +496,7 @@ export default function GalaxyView({
       const monthlyContribution = flows
         .filter(f => f.targetType === "portfolio" && f.targetId === g.key)
         .reduce((s, f) => s + monthlyAmount(f), 0);
-      return projectedValue(g.total, monthlyContribution, scrubGrowth, scrubYears * 12);
+      return futureValue(g.total, monthlyContribution, scrubGrowth, scrubYears * 12);
     };
     const maxPV = Math.max(1, ...groups.map(g => projectedGroupTotal(g)));
 
@@ -418,13 +504,13 @@ export default function GalaxyView({
     const totalIncomeItems = incomeFlows.reduce((s, f) => s + Number(f.amount), 0);
     const totalRevenue = salary + totalIncomeItems;
 
-    if (totalRevenue > 0) nodes.push({ id: "salary", kind: "salary", label: "Revenus", r: 32, color: "#34d399", sub: fmt(totalRevenue), amount: totalRevenue });
+    if (totalRevenue > 0) nodes.push({ id: "salary", kind: "salary", label: "Revenus", r: 32, color: "#34d399", sub: fmt(totalRevenue), amount: totalRevenue, proprietaires: [personne(null)] });
     // Le Soleil grossit lui aussi avec la projection globale (racine carrée, comme sr(),
     // pour une croissance visuelle proportionnée plutôt que linéaire — un patrimoine x4
     // ne doit pas donner un Soleil x4 en rayon, sinon il avale tout le reste).
     const grossNow = groups.reduce((s, g) => s + g.total, 0);
     const globalMonthlyContribution = flows.reduce((s, f) => (f.targetType === "portfolio" || f.targetType === "goal") ? s + monthlyAmount(f) : s, 0);
-    const sunProjectedTotal = scrubYears === 0 ? grossNow : projectedValue(grossNow, globalMonthlyContribution, scrubGrowth, scrubYears * 12);
+    const sunProjectedTotal = scrubYears === 0 ? grossNow : futureValue(grossNow, globalMonthlyContribution, scrubGrowth, scrubYears * 12);
     const growthRatio = scrubYears === 0 ? 1 : sunProjectedTotal / Math.max(1, grossNow);
     const centerR = CENTER_R * Math.max(0.85, Math.min(1.55, Math.sqrt(growthRatio)));
     nodes.push({ id: "center", kind: "center", label: "Patrimoine", r: centerR, color: "#7c6af5" });
@@ -458,26 +544,31 @@ export default function GalaxyView({
     // memberId (null = Moi) et on crée un nœud par propriétaire.
     const expFlows = flows.filter(f => f.targetType === "expense");
     const totalExpenseFlows = expFlows.reduce((s, f) => s + Number(f.amount), 0);
-    const myExpFlows = expFlows.filter(f => f.memberId == null);
-    const myExpenseTotal = myExpFlows.reduce((s, f) => s + Number(f.amount), 0);
+    // Chacun ne porte que sa part. Une dépense commune comptait auparavant
+    // entière sur son porteur déclaré : le taux d'épargne de celui-là
+    // s'effondrait, celui de l'autre était flatté, et aucun des deux n'était vrai.
+    const partDepense = (f: Flow, mid: number | null) => Number(f.amount) * partDe(f, expenseShares, mid);
+    const myExpFlows = expFlows.filter(f => partDe(f, expenseShares, null) > 0);
+    const myExpenseTotal = expFlows.reduce((s, f) => s + partDepense(f, null), 0);
     const salInvest = flows.filter(f => f.sourceType === "salary" && (f.targetType === "portfolio" || f.targetType === "goal"));
     const totalInvest = salInvest.reduce((s, f) => s + Number(f.amount), 0);
     const resteAInvestir = totalRevenue > 0 ? Math.max(0, totalRevenue - totalInvest - totalExpenseFlows) : 0;
 
     if (totalRevenue > 0) {
-      nodes.push({ id: "expenses", kind: "expenses", label: "Dépenses", r: 22 + Math.min(18, myExpenseTotal / 80), color: "#f87171", ownerExpenseTotal: myExpenseTotal, ownerRevenue: totalRevenue });
+      nodes.push({ id: "expenses", kind: "expenses", label: "Dépenses", r: 22 + Math.min(18, myExpenseTotal / 80), color: "#f87171", ownerExpenseTotal: myExpenseTotal, ownerRevenue: totalRevenue, proprietaires: [personne(null)] });
       links.push({ source: "salary", target: "expenses" });
-      if (myExpenseTotal > 0) flowLinks.push({ source: "salary", target: "expenses", label: fmt(myExpenseTotal), amount: myExpenseTotal });
+      if (myExpenseTotal > 0) flowLinks.push({ source: "salary", target: "expenses", label: fmt(myExpenseTotal), amount: myExpenseTotal, couleur: centerColor });
       myExpFlows.forEach(ef => {
         const eid = `exp-${ef.id}`;
-        nodes.push({ id: eid, kind: "expense-item", label: ef.name || "Dépense", r: 10 + Math.min(8, Number(ef.amount) / 100), color: "#f87171", sub: fmt(Number(ef.amount)), flowId: ef.id });
+        const part = partDepense(ef, null);
+        nodes.push({ id: eid, kind: "expense-item", label: ef.name || "Dépense", r: 10 + Math.min(8, part / 100), color: "#f87171", sub: fmt(part), flowId: ef.id, partagee: ef.shared === true });
         links.push({ source: "expenses", target: eid });
       });
     }
     if (totalRevenue > 0 && resteAInvestir > 0) {
       nodes.push({ id: "reste", kind: "reste", label: "Reste", r: 18, color: "#9585ff" });
       links.push({ source: "salary", target: "reste" });
-      flowLinks.push({ source: "salary", target: "reste", label: fmt(resteAInvestir), amount: resteAInvestir });
+      flowLinks.push({ source: "salary", target: "reste", label: fmt(resteAInvestir), amount: resteAInvestir, couleur: centerColor });
     }
 
     members.forEach(m => {
@@ -485,18 +576,19 @@ export default function GalaxyView({
       nodes.push({ id: `m-${m.id}`, kind: "member", label: m.name, r: sr(mTotal, maxPersonTotal, 20, 44), color: m.color, memberId: m.id, sub: fmt(mTotal), accessory: m.accessory });
       links.push({ source: "center", target: `m-${m.id}` });
       if (m.salary && Number(m.salary) > 0) {
-        nodes.push({ id: `ms-${m.id}`, kind: "member-salary", label: `Salaire de ${m.name}`, r: 22, color: m.color, memberId: m.id, sub: fmt(Number(m.salary)), amount: Number(m.salary) });
+        nodes.push({ id: `ms-${m.id}`, kind: "member-salary", label: `Salaire de ${m.name}`, r: 22, color: m.color, memberId: m.id, sub: fmt(Number(m.salary)), amount: Number(m.salary), proprietaires: [personne(m.id)] });
         links.push({ source: `m-${m.id}`, target: `ms-${m.id}` });
       }
-      const memberExpFlows = expFlows.filter(f => f.memberId === m.id);
-      const memberExpenseTotal = memberExpFlows.reduce((s, f) => s + Number(f.amount), 0);
+      const memberExpFlows = expFlows.filter(f => partDe(f, expenseShares, m.id) > 0);
+      const memberExpenseTotal = expFlows.reduce((s, f) => s + partDepense(f, m.id), 0);
       const memberRevenue = m.salary ? Number(m.salary) : 0;
       const meid = `exp-m-${m.id}`;
-      nodes.push({ id: meid, kind: "expenses", label: `Dépenses de ${m.name}`, r: 22 + Math.min(18, memberExpenseTotal / 80), color: "#f87171", memberId: m.id, ownerExpenseTotal: memberExpenseTotal, ownerRevenue: memberRevenue });
+      nodes.push({ id: meid, kind: "expenses", label: `Dépenses de ${m.name}`, r: 22 + Math.min(18, memberExpenseTotal / 80), color: "#f87171", memberId: m.id, ownerExpenseTotal: memberExpenseTotal, ownerRevenue: memberRevenue, proprietaires: [personne(m.id)] });
       links.push({ source: `m-${m.id}`, target: meid });
       memberExpFlows.forEach(ef => {
-        const eid = `exp-${ef.id}`;
-        nodes.push({ id: eid, kind: "expense-item", label: ef.name || "Dépense", r: 10 + Math.min(8, Number(ef.amount) / 100), color: "#f87171", sub: fmt(Number(ef.amount)), flowId: ef.id });
+        const eid = `exp-m${m.id}-${ef.id}`;
+        const part = partDepense(ef, m.id);
+        nodes.push({ id: eid, kind: "expense-item", label: ef.name || "Dépense", r: 10 + Math.min(8, part / 100), color: "#f87171", sub: fmt(part), flowId: ef.id, partagee: ef.shared === true });
         links.push({ source: meid, target: eid });
       });
     });
@@ -507,10 +599,11 @@ export default function GalaxyView({
       const totalGain = g.valued.reduce((s, v) => { const a = v.asset; return s + ((a.avgBuyPrice && Number(a.avgBuyPrice) > 0) ? gain(a, a.ticker ? quotes[a.ticker] : null, ctx) : 0); }, 0);
       const skin = planetSkin(g.portfolio.name, g.valued, g.portfolio.skin);
       const projTotal = projectedGroupTotal(g);
+      const proprietaires = proprietairesDe(g.key, g.portfolio.memberId, portfolioOwnerships, personne);
       // En simulation, le gain affiché (calculé sur les cours réels du jour) perdrait son
       // sens à côté d'une valeur projetée dans le futur — on le masque plutôt que d'afficher
       // un chiffre qui semblerait porter sur la projection alors qu'il ne la concerne pas.
-      nodes.push({ id: pid, kind: "portfolio", label: g.portfolio.name, r: sr(projTotal, maxPV, 20, 78), color: NATURE_COLORS[g.nature], nature: g.nature, portfolioKey: g.key, gainVal: scrubYears > 0 ? undefined : totalGain, sub: fmt(projTotal), skin, isProjected: scrubYears > 0 });
+      nodes.push({ id: pid, kind: "portfolio", label: g.portfolio.name, r: sr(projTotal, maxPV, 20, 78), color: NATURE_COLORS[g.nature], nature: g.nature, portfolioKey: g.key, gainVal: scrubYears > 0 ? undefined : totalGain, sub: fmt(projTotal), skin, isProjected: scrubYears > 0, proprietaires });
       links.push({ source: memberNode ?? "self", target: pid });
       if (expanded.has(g.key)) {
         const maxAV = Math.max(1, ...g.valued.map(v => v.value));
@@ -519,7 +612,7 @@ export default function GalaxyView({
           const q = a.ticker ? quotes[a.ticker] : null;
           const gn = hasG ? gain(a, q, ctx) : 0;
           const gp = hasG ? gainPercent(a, q, ctx) : undefined;
-          nodes.push({ id: `a-${a.id}`, kind: "asset", label: a.name, r: sr(v.value, maxAV, 10, 28), color: NATURE_COLORS[g.nature], nature: g.nature, portfolioKey: g.key, assetId: a.id, gainVal: hasG ? gn : undefined, gainPct: gp, sub: fmt(v.value), logoUrl: getLogoUrl(a.type, a.ticker) });
+          nodes.push({ id: `a-${a.id}`, kind: "asset", label: a.name, r: sr(v.value, maxAV, 10, 28), color: NATURE_COLORS[g.nature], nature: g.nature, portfolioKey: g.key, assetId: a.id, gainVal: hasG ? gn : undefined, gainPct: gp, sub: fmt(v.value), logoUrl: getLogoUrl(a.type, a.ticker), proprietaires });
           links.push({ source: pid, target: `a-${a.id}` });
         }
       }
@@ -530,7 +623,7 @@ export default function GalaxyView({
       const memberNode = goal.memberId ? `m-${goal.memberId}` : null;
       const linkedPortfolioIds = goalLinks.filter(gl => gl.goalId === goal.id).map(gl => gl.portfolioId);
       const prog = progressOf(goal);
-      nodes.push({ id: `g-${goal.id}`, kind: "goal", label: goal.name, r: 16 + Math.min(1, prog) * 44, color: goal.color, goalId: goal.id, sub: `${Math.round(prog * 100)}%` });
+      nodes.push({ id: `g-${goal.id}`, kind: "goal", label: goal.name, r: 16 + Math.min(1, prog) * 44, color: goal.color, goalId: goal.id, sub: `${Math.round(prog * 100)}%`, proprietaires: [personne(goal.memberId)] });
       links.push({ source: memberNode ?? "self", target: `g-${goal.id}` });
       linkedPortfolioIds.forEach(pid => { if (nodes.find(n => n.id === `p-${pid}`)) goalLinkEdges.push({ source: `g-${goal.id}`, target: `p-${pid}` }); });
     }
@@ -539,12 +632,61 @@ export default function GalaxyView({
       if (f.targetType === "expense" || f.targetType === "income") return;
       const sId = f.sourceType === "salary" ? "salary" : f.sourceType === "portfolio" ? `p-${f.sourceId}` : f.sourceType === "member_salary" ? `ms-${f.sourceId}` : null;
       const tId = f.targetType === "portfolio" ? `p-${f.targetId}` : f.targetType === "goal" ? `g-${f.targetId}` : null;
-      if (sId && tId && nodes.find(n => n.id === sId) && nodes.find(n => n.id === tId))
-        flowLinks.push({ source: sId, target: tId, label: fmt(Number(f.amount)), amount: Number(f.amount), days: daysUntilNextOccurrence(f.createdAt, f.frequency), isSalarySource: f.sourceType === "salary" || f.sourceType === "member_salary" });
+      const depart = nodes.find(n => n.id === sId);
+      if (sId && tId && depart && nodes.find(n => n.id === tId))
+        // Un flux prend la couleur de la personne dont l'argent part : le salaire
+        // de Camille qui alimente le livret de Jonas se lit vert vers un anneau bleu.
+        flowLinks.push({ source: sId, target: tId, label: fmt(Number(f.amount)), amount: Number(f.amount), couleur: depart.proprietaires?.[0]?.couleur ?? centerColor, days: daysUntilNextOccurrence(f.createdAt, f.frequency), isSalarySource: f.sourceType === "salary" || f.sourceType === "member_salary" });
     });
 
+    // Entrer dans un système ne change pas la façon de construire la galaxie :
+    // on la construit entière, puis on retire ce qui n'en fait pas partie.
+    // Restructurer la construction pour qu'elle filtre en amont aurait touché
+    // huit cents lignes pour le même résultat visible.
+    if (systeme) {
+      const objectifDuSysteme = goalIdDeProjet(systeme);
+      const garde = new Set<string>();
+      for (const n of nodes) {
+        const appartenance = systemeDuNoeud(n.kind);
+        if (appartenance === "contexte") { garde.add(n.id); continue; }
+        if (objectifDuSysteme != null) {
+          // Un projet montre son objectif et les planètes qui l'alimentent.
+          if (n.kind === "goal" && n.goalId === objectifDuSysteme) garde.add(n.id);
+          if (n.kind === "portfolio" && goalLinks.some(gl => gl.goalId === objectifDuSysteme && gl.portfolioId === n.portfolioKey)) garde.add(n.id);
+          continue;
+        }
+        if (appartenance === systeme) garde.add(n.id);
+      }
+      // Les satellites suivent leur parent : un actif n'a pas de sens sans sa
+      // planète. Uniquement les satellites : propager le long de *tous* les
+      // liens ramenait tout, puisque le foyer est du contexte et que chaque
+      // planète y est rattachée — « Dépenses » affichait les six planètes.
+      const parGenre = new Map(nodes.map(n => [n.id, n.kind]));
+      const estSatellite = (id: string) => {
+        const k = parGenre.get(id);
+        return k === "asset" || k === "expense-item" || k === "income-item";
+      };
+      for (const l of links) if (garde.has(l.source) && estSatellite(l.target)) garde.add(l.target);
+      // Le parcours de l'argent ne s'arrête pas à la frontière du système : une
+      // planète alimentée par un salaire garde ce salaire en vue, sinon les
+      // vaisseaux disparaissaient de toutes les vues. Seule la source suit —
+      // tirer aussi les destinations ramènerait toutes les planètes dans
+      // « Revenus ».
+      for (const f of flowLinks) if (garde.has(f.target) && !garde.has(f.source)) garde.add(f.source);
+
+      const retenus = nodes.filter(n => garde.has(n.id));
+      const dansLeSysteme = (l: { source: string; target: string }) => garde.has(l.source) && garde.has(l.target);
+      return {
+        targetNodes: retenus,
+        links: links.filter(dansLeSysteme),
+        flowLinks: flowLinks.filter(dansLeSysteme),
+        goalLinkEdges: goalLinkEdges.filter(dansLeSysteme),
+        resteAInvestir, totalExpenseFlows, totalRevenue, totalInvest,
+      };
+    }
+
     return { targetNodes: nodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows, totalRevenue, totalInvest };
-  }, [groups, expanded, goals, members, flows, quotes, salary, goalLinks, progressOf, scrubYears, scrubGrowth, ownerName, centerColor, ownerAccessory, ctx, portfolioOwnerships, fmt]);
+  }, [groups, expanded, goals, members, flows, quotes, salary, goalLinks, progressOf, scrubYears, scrubGrowth, ownerName, centerColor, ownerAccessory, ctx, portfolioOwnerships, expenseShares, systeme, fmt]);
   linksRef.current = links;
 
   // Simulation
@@ -643,11 +785,17 @@ export default function GalaxyView({
         if (!parent) continue;
         halo.set(l.source, Math.max(halo.get(l.source) ?? 0, parent.r + enfant.r * 2 + 12));
       }
+      // En rangées (« de haut en bas »), l'étiquette écrite sous une petite
+      // planète dépasse nettement du disque : c'est sa demi-largeur qu'il faut
+      // réserver de part et d'autre. En colonnes, elle est sur le côté et ne
+      // change rien à l'empilement.
+      const demiLargeurEtiquette = (node: GNode) =>
+        layoutMode === "vertical" && PLANETES_ETIQUETEES.has(node.kind) ? Math.min(node.label.length, 18) * 3.6 : 0;
       const cibles = flowLayout(
         [...nm.values()].map(node => ({
           id: node.id,
           kind: node.kind,
-          r: Math.max(node.r, halo.get(node.id) ?? 0),
+          r: Math.max(node.r, halo.get(node.id) ?? 0, demiLargeurEtiquette(node)),
           // Le poids reste le vrai rayon : on ordonne par taille de planète, pas
           // par nombre de satellites.
           weight: node.r,
@@ -734,11 +882,19 @@ export default function GalaxyView({
         const parent = nm.get(parentId);
         if (!parent || parent.x == null || parent.y == null) return;
         const sorted = [...childIds].sort();
+        // On laisse libre le secteur où est écrite l'étiquette de la planète, et
+        // on répartit les satellites sur le reste du tour, en partant juste
+        // après lui, dans le sens horaire.
+        const cote = coteEtiquette(layoutModeRef.current, parent.x);
+        const centreEtiquette = cote === "bas" ? Math.PI / 2 : cote === "gauche" ? Math.PI : 0;
+        const secteurEtiquette = 0.65;
+        const depart = centreEtiquette + secteurEtiquette;
+        const arc = Math.PI * 2 - secteurEtiquette * 2;
         sorted.forEach((childId, i) => {
           if (childId === dragIdRef.current) return;
           const child = nm.get(childId);
           if (!child) return;
-          const angle = (i / sorted.length) * Math.PI * 2;
+          const angle = depart + ((i + 0.5) / sorted.length) * arc;
           const R = parent.r + child.r + 12;
           child.x = parent.x! + Math.cos(angle) * R;
           child.y = parent.y! + Math.sin(angle) * R;
@@ -809,26 +965,83 @@ export default function GalaxyView({
 
   useEffect(() => { const sim = simRef.current; return () => { sim?.stop(); }; }, []);
 
-  // Zoom
+  /**
+   * Zoom à la molette.
+   *
+   * L'ancienne version multipliait l'échelle par un pas fixe de 12 % à *chaque*
+   * événement, sans regarder l'amplitude du geste. Une souris émet un événement
+   * par cran (deltaY ≈ 100) : le pas tombait à peu près juste. Un pavé tactile
+   * en émet des dizaines par seconde, minuscules (deltaY ≈ 4), et chacun valait
+   * aussi 12 % — mesuré : soixante effleurements faisaient passer l'échelle de
+   * 0,89 au plancher de 0,20 en quatre secondes. D'où la sensation de zoom qui
+   * part tout seul et par à-coups.
+   *
+   * Le facteur suit donc maintenant la distance réellement parcourue.
+   */
   useEffect(() => {
     const svg = svgRef.current, root = rootRef.current;
     if (!svg || !root) return;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const z = zoomRef.current, rect = svg.getBoundingClientRect();
-      const mx = (e.clientX - rect.left) / rect.width * W, my = (e.clientY - rect.top) / rect.height * H;
-      const nk = Math.max(0.2, Math.min(6, z.k * (e.deltaY < 0 ? 1.12 : 0.89)));
-      z.x = mx - (mx - z.x) * (nk / z.k); z.y = my - (my - z.y) * (nk / z.k); z.k = nk;
+
+    // `getBoundingClientRect` force un recalcul de mise en page. À plus de cent
+    // événements par seconde, autant ne mesurer qu'aux moments où ça change.
+    const remesurer = () => { rectRef.current = svg.getBoundingClientRect(); };
+    remesurer();
+    const ro = new ResizeObserver(remesurer);
+    ro.observe(svg);
+    window.addEventListener("scroll", remesurer, true);
+    window.addEventListener("resize", remesurer);
+
+    // Une écriture par image : le pavé tactile émet plus vite que l'écran
+    // n'affiche, et chaque écriture invalide la peinture de tout le SVG.
+    let trame = 0;
+    const peindre = () => {
+      trame = 0;
+      const z = zoomRef.current;
       root.setAttribute("transform", `translate(${z.x},${z.y}) scale(${z.k})`);
     };
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+
+      // `deltaMode` varie d'un navigateur à l'autre : Firefox compte en lignes
+      // là où Chrome compte en pixels. Sans conversion, le même geste zoome
+      // plusieurs fois moins vite ici que là.
+      const rect = rectRef.current ?? svg.getBoundingClientRect();
+      let dy = e.deltaY;
+      if (e.deltaMode === 1) dy *= 16;
+      else if (e.deltaMode === 2) dy *= rect.height || 400;
+      // Un événement isolé ne doit jamais faire faire un bond à la vue, même si
+      // le système en agrège plusieurs d'un coup.
+      dy = Math.max(-PAS_ZOOM_MAX, Math.min(PAS_ZOOM_MAX, dy));
+
+      const z = zoomRef.current;
+      const nk = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z.k * Math.exp(-dy * SENSIBILITE_ZOOM)));
+      if (nk === z.k) return; // déjà en butée : rien à redessiner
+
+      // Le point sous le curseur reste sous le curseur.
+      const mx = (e.clientX - rect.left) / rect.width * W;
+      const my = (e.clientY - rect.top) / rect.height * H;
+      z.x = mx - (mx - z.x) * (nk / z.k);
+      z.y = my - (my - z.y) * (nk / z.k);
+      z.k = nk;
+
+      if (!trame) trame = requestAnimationFrame(peindre);
+    };
+
     svg.addEventListener("wheel", onWheel, { passive: false });
-    return () => svg.removeEventListener("wheel", onWheel);
+    return () => {
+      svg.removeEventListener("wheel", onWheel);
+      ro.disconnect();
+      window.removeEventListener("scroll", remesurer, true);
+      window.removeEventListener("resize", remesurer);
+      if (trame) cancelAnimationFrame(trame);
+    };
   }, []);
 
   // Drag + Pan + Snap
   const panState = useRef<{ active: boolean; sx: number; sy: number; ox: number; oy: number } | null>(null);
   const screenToSvg = (cx: number, cy: number) => {
-    const svg = svgRef.current!; const rect = svg.getBoundingClientRect(); const z = zoomRef.current;
+    const svg = svgRef.current!; const rect = rectRef.current ?? svg.getBoundingClientRect(); const z = zoomRef.current;
     return { x: ((cx - rect.left) / rect.width * W - z.x) / z.k, y: ((cy - rect.top) / rect.height * H - z.y) / z.k };
   };
 
@@ -854,7 +1067,7 @@ export default function GalaxyView({
       return;
     }
     if (!panState.current?.active) return;
-    const p = panState.current, svg = svgRef.current!, rect = svg.getBoundingClientRect();
+    const p = panState.current, svg = svgRef.current!, rect = rectRef.current ?? svg.getBoundingClientRect();
     zoomRef.current.x = p.ox + (e.clientX - p.sx) / rect.width * W;
     zoomRef.current.y = p.oy + (e.clientY - p.sy) / rect.height * H;
     rootRef.current?.setAttribute("transform", `translate(${zoomRef.current.x},${zoomRef.current.y}) scale(${zoomRef.current.k})`);
@@ -1135,6 +1348,7 @@ export default function GalaxyView({
         </button>
         {/* Stats header */}
         <div className="px-4 pt-4 pb-3 border-b border-border space-y-1">
+          <DateDuJour className="mb-1.5" />
           <div>
             <p className="text-lg font-[family-name:var(--font-mono-num)] tabular font-semibold">{fmt(grandTotal)}</p>
             <p className="text-[10px] text-text-muted mt-0.5">Patrimoine net{debt > 0 && <span className="tabular"> · {fmt(grossTotal)} brut</span>}</p>
@@ -1212,7 +1426,14 @@ export default function GalaxyView({
             )}
           </button>
 
-          <button onClick={() => setShowScrubBar(v => !v)}
+          <button
+            onClick={() => setShowScrubBar(v => {
+              // Refermer le simulateur ramène à aujourd'hui. Sans ça, la galaxie
+              // restait projetée alors que plus aucun réglage n'était visible
+              // pour l'expliquer ni pour revenir en arrière.
+              if (v) setScrubYears(0);
+              return !v;
+            })}
             aria-pressed={showScrubBar}
             className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs mt-1 transition-colors ${
               showScrubBar ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text hover:bg-surface-hover"}`}>
@@ -1248,6 +1469,12 @@ export default function GalaxyView({
                   <p className="text-[9px] text-text-muted mt-0.5">
                     hypothèse, pas une prévision
                   </p>
+                  <button
+                    onClick={() => setScrubYears(0)}
+                    className="flex items-center gap-1.5 mt-2 w-full px-2 py-1 rounded-md text-[10px] text-text-muted hover:text-text hover:bg-surface-hover"
+                  >
+                    <RotateCcw size={11} className="shrink-0" />Revenir à aujourd&apos;hui
+                  </button>
                 </div>
               )}
             </div>
@@ -1362,6 +1589,28 @@ export default function GalaxyView({
             <PanelRight size={18} />
           </button>
         </div>
+        {systeme === null && entreesSystemes && onEntrerSysteme ? (
+          <div className="absolute inset-0 max-lg:top-11">
+            <SystemesView entrees={entreesSystemes} devise={displayCurrency} onEntrer={onEntrerSysteme} />
+          </div>
+        ) : (<>
+        {systeme !== null && onSortirSysteme && (
+          <button
+            onClick={onSortirSysteme}
+            className="absolute top-3 left-3 z-10 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg glass-panel border border-border text-xs text-text-muted hover:text-text max-lg:top-14"
+          >
+            <ChevronLeft size={13} />Vue d&apos;ensemble
+          </button>
+        )}
+        {/* Qui est de quelle couleur — l'anneau seul ne suffit pas, il faut le nom à côté. */}
+        {members.length > 0 && (
+          <div className="absolute bottom-3 left-3 z-10 hidden lg:flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg glass-panel border border-border text-[11px] pointer-events-none" aria-label="Couleur de chaque personne">
+            <span className="text-[10px] uppercase tracking-wide text-text-muted">Anneau = propriétaire</span>
+            {[{ nom: ownerName, couleur: centerColor }, ...members.map(m => ({ nom: m.name, couleur: m.color }))].map(p => (
+              <span key={p.nom} className="flex items-center gap-1 text-text"><span className="w-2.5 h-2.5 rounded-full border-2 shrink-0" style={{ borderColor: p.couleur }} />{p.nom}</span>
+            ))}
+          </div>
+        )}
         <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full h-full select-none touch-none block absolute inset-0"
           onPointerDown={onBgDown} onPointerMove={onBgMove} onPointerUp={onBgUp} onPointerLeave={onBgUp}
           onClick={() => { if (linkSourceNode) { setLinkSourceNode(null); return; } if (ownerSourceNode) { setOwnerSourceNode(null); return; } setSelected(null); setCreateMode(null); }}>
@@ -1426,8 +1675,11 @@ export default function GalaxyView({
               <circle cx="13" cy="12" r="0.9" fill="#8a84a0" opacity="0.35" />
             </pattern>
 
-            {nodes.filter(n => ["portfolio", "member", "goal"].includes(n.kind)).map(n => (
-              <React.Fragment key={`sph-grp-${n.id}`}>
+            {nodes.filter(n => ["portfolio", "member", "goal"].includes(n.kind)).map(n => {
+              // Le halo est à la couleur de la personne, pas de la nature : c'est
+              // le propriétaire qu'on cherche du regard, la nature est dans la légende.
+              const halo = n.proprietaires?.[0]?.couleur ?? n.color;
+              return <React.Fragment key={`sph-grp-${n.id}`}>
                 <radialGradient id={`sph-${n.id}`} cx="38%" cy="28%" r="60%">
                   <stop offset="0%" stopColor={n.color} stopOpacity={1} />
                   <stop offset="25%" stopColor={n.color} stopOpacity={0.9} />
@@ -1436,11 +1688,11 @@ export default function GalaxyView({
                   <stop offset="100%" stopColor={n.color} stopOpacity={0.06} />
                 </radialGradient>
                 <radialGradient id={`atmo-${n.id}`} cx="50%" cy="50%" r="50%">
-                  <stop offset="80%" stopColor="transparent" />
-                  <stop offset="100%" stopColor={n.color} stopOpacity={0.12} />
+                  <stop offset="70%" stopColor={halo} stopOpacity={0} />
+                  <stop offset="100%" stopColor={halo} stopOpacity={n.kind === "member" ? 0.12 : 0.3} />
                 </radialGradient>
-              </React.Fragment>
-            ))}
+              </React.Fragment>;
+            })}
           </defs>
 
           {/* Nébuleuse dérivante — profondeur derrière les planètes, mouvement à peine
@@ -1480,8 +1732,8 @@ export default function GalaxyView({
               const seed = hashSeed(f.source, f.target), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
               const mid = bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, 0.5);
               return <g key={`fl-${i}`}>
-                <path d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke={tg.color} strokeOpacity={0.45} strokeWidth={1.5} strokeDasharray="6 4" />
-                <text x={mid.x} y={mid.y - 12} textAnchor="middle" fontSize={10} fill={tg.color} opacity={0.9} fontWeight={600}>{mask(f.label)}</text>
+                <path d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke={f.couleur} strokeOpacity={0.55} strokeWidth={1.5} strokeDasharray="6 4" />
+                <text x={mid.x} y={mid.y - 12} textAnchor="middle" fontSize={10} fill={f.couleur} fontWeight={700} style={HALO_TEXTE}>{mask(f.label)}</text>
                 {showCountdown && f.days !== undefined && !Number.isNaN(f.days) && (
                   <text x={mid.x} y={mid.y + 2} textAnchor="middle" fontSize={8} fill="#fbbf24" opacity={0.85} fontWeight={600}>
                     {f.days === 0 ? "aujourd'hui" : `dans ${f.days}j`}
@@ -1518,6 +1770,7 @@ export default function GalaxyView({
               const gp = n.kind === "goal" && n.goalId != null ? (() => { const goal = goals.find(g => g.id === n.goalId); return goal ? progressOf(goal) : null; })() : null;
               const ts = { textShadow: "0 1px 3px rgba(0,0,0,0.95), 0 0 8px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,1)" } as const;
               const isHoveredNode = hoveredId === n.id;
+              const cote = coteEtiquette(layoutMode, n.x);
 
               return <g key={n.id} className="nd" data-node-id={n.id} data-kind={n.kind} transform={`translate(${n.x},${n.y}) scale(${isHoveredNode ? 1.08 : 1})`} style={{ cursor: "pointer", transition: "transform 0.15s ease-out" }}
                 onPointerDown={onNodeDown(n.id)} onClick={e => { e.stopPropagation(); handleClick(n, e as unknown as React.MouseEvent); }}
@@ -1568,11 +1821,10 @@ export default function GalaxyView({
                     <g clipPath={`url(#cp-${n.id})`}><circle r={n.r} fill="url(#sph-salary)" /><circle r={n.r} fill="url(#salary-land)" /></g>
                     <g clipPath="url(#clip-sal)">{Array.from({ length: 18 }, (_, i) => <line key={i} x1={-n.r + 3 + i * 3.5} y1={n.r - 1} x2={-n.r + 3 + i * 3.5 + (i % 2 ? 1 : -1)} y2={n.r - 1 - (3 + (i * 7 % 7))} stroke="#30e060" strokeWidth={1.3} strokeLinecap="round" opacity={0.4 + (i % 3) * 0.2} />)}</g>
                   </>}
-                  <circle r={n.r} fill="url(#sph-hl)" />
-                  {salImg && <rect x={-n.r * 0.95} y={-15} width={n.r * 1.9} height={27} rx={13.5} fill="rgba(6,6,10,0.55)" />}
-                  <text y={-5} textAnchor="middle" fontSize={11} fontWeight={600} fill="#fff" style={ts}>Revenus</text>
-                  <text y={9} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.9)" style={ts}>{n.sub && mask(n.sub)}/mois</text>
-                  <g transform={`translate(${(n.r + 13) * 0.7071},${(n.r + 13) * 0.7071})`} style={{ cursor: "pointer" }}
+                  <circle r={n.r} fill="url(#sph-hl)" stroke="rgba(0,0,0,0.4)" strokeWidth={1} />
+                  <AnneauProprietaires r={n.r} proprietaires={n.proprietaires} />
+                  <EtiquettePlanete r={n.r + 3} cote={cote} titre="Revenus" sous={n.sub && `${mask(n.sub)}/mois`} couleurSous="#6ee7b7" />
+                  <g transform={positionBouton(n.r, cote)} style={{ cursor: "pointer" }}
                     onPointerDown={e => e.stopPropagation()}
                     onClick={e => { e.stopPropagation(); setSelected(null); setCreateMode("income"); }}>
                     <circle r={11} fill="#12121a" stroke="#34d399" strokeWidth={1.2} />
@@ -1604,7 +1856,8 @@ export default function GalaxyView({
                     {tierImage ? (
                       <g clipPath={`url(#cp-${n.id})`}><image href={tierImage} x={-R} y={-R} width={R * 2} height={R * 2} preserveAspectRatio="xMidYMid slice" /></g>
                     ) : <circle r={R} fill="url(#sph-expenses)" />}
-                    <circle r={R} fill="url(#sph-hl)" />
+                    <circle r={R} fill="url(#sph-hl)" stroke="rgba(0,0,0,0.4)" strokeWidth={1} />
+                    <AnneauProprietaires r={R} proprietaires={n.proprietaires} />
 
                     {/* ── ERUPTION: fire particles (eruption/critical only) ── */}
                     {isOverBudget && Array.from({ length: tier === "critical" ? 16 : 12 }, (_, i) => {
@@ -1635,8 +1888,6 @@ export default function GalaxyView({
                           animationDelay: `${-i * 0.42}s`,
                         }} />;
                     })}
-                    {/* Warning shake effect on text */}
-                    {tierImage && <rect x={-R * 0.95} y={-15} width={R * 1.9} height={ownerRevenue > 0 ? 42 : 27} rx={ownerRevenue > 0 ? 21 : 13.5} fill="rgba(6,6,10,0.55)" />}
                     {overdueCount > 0 && n.memberId == null && (
                       <g transform={`translate(${R * 0.72},${-R * 0.72})`} style={{ cursor: "pointer" }}
                         onPointerDown={e => e.stopPropagation()}
@@ -1650,13 +1901,15 @@ export default function GalaxyView({
                       </g>
                     )}
                     <g className={isOverBudget ? "g-anim g-shake" : undefined}>
-                      <text y={-5} textAnchor="middle" fontSize={10} fontWeight={600} fill="#fff" style={ts}>{n.label}</text>
-                      <text y={9} textAnchor="middle" fontSize={9} fill={isOverBudget ? "#ffaa70" : tier === "warning" ? "#ffd280" : "rgba(255,255,255,0.85)"} style={ts}>{mask(ownerExpenseTotal > 0 ? fmt(ownerExpenseTotal) : "0 €")}/m</text>
-                      {ownerRevenue > 0 && <text y={22} textAnchor="middle" fontSize={8} fill={tier === "critical" ? "#ff2200" : tier === "eruption" ? "#ff6b35" : "#ffb84d"} fontWeight={600} style={ts}>{Math.round(ownerBudgetRatio * 100)}% des revenus</text>}
-                      {tier === "critical" && <text y={34} textAnchor="middle" fontSize={9} fill="#ff2200" fontWeight={700} className="g-blink-fast" style={ts}>DÉFICIT CRITIQUE</text>}
-                      {tier === "eruption" && <text y={34} textAnchor="middle" fontSize={9} fill="#ff6b35" fontWeight={700} className="g-blink" style={ts}>DÉFICIT</text>}
+                      <EtiquettePlanete r={R + 3} cote={cote} titre={n.label} sous={`${mask(ownerExpenseTotal > 0 ? fmt(ownerExpenseTotal) : "0 €")}/mois`}
+                        couleurSous={isOverBudget ? "#ffaa70" : tier === "warning" ? "#ffd280" : undefined}
+                        lignes={[
+                          ...(ownerRevenue > 0 ? [{ texte: `${Math.round(ownerBudgetRatio * 100)} % des revenus`, couleur: tier === "critical" ? "#ff4a30" : tier === "eruption" ? "#ff6b35" : "#ffb84d" }] : []),
+                          ...(tier === "critical" ? [{ texte: "DÉFICIT CRITIQUE", couleur: "#ff4a30", className: "g-blink-fast" }] : []),
+                          ...(tier === "eruption" ? [{ texte: "DÉFICIT", couleur: "#ff6b35", className: "g-blink" }] : []),
+                        ]} />
                     </g>
-                    <g transform={`translate(${(R + 13) * 0.7071},${(R + 13) * 0.7071})`} style={{ cursor: "pointer" }}
+                    <g transform={positionBouton(R, cote)} style={{ cursor: "pointer" }}
                       onPointerDown={e => e.stopPropagation()}
                       onClick={e => { e.stopPropagation(); setExpenseMemberId(n.memberId ?? null); setCreateMode("expense"); }}>
                       <circle r={11} fill="#12121a" stroke="#f87171" strokeWidth={1.2} />
@@ -1682,7 +1935,7 @@ export default function GalaxyView({
                     {n.isProjected && <circle r={n.r + 14} fill="none" stroke="#9585ff" strokeOpacity={0.35} strokeWidth={1.5} strokeDasharray="1 5" className="spin-ring" />}
                     <g opacity={n.isProjected ? 0.72 : 1}>
                     <clipPath id={`cp-${n.id}`}><circle r={n.r} /></clipPath>
-                    <circle r={n.r + 5} fill={`url(#atmo-${n.id})`} />
+                    <circle r={n.r + 12} fill={`url(#atmo-${n.id})`} />
                     {/* Anneau(x) d'objectif — un anneau par objectif lié à cette planète,
                         concentriques si plusieurs (le plus avancé à l'intérieur). Les
                         objectifs restent aussi des satellites cliquables à part entière
@@ -1739,15 +1992,17 @@ export default function GalaxyView({
                       <ellipse rx={n.r * 1.38} ry={n.r * 0.3} fill="none" stroke="#5cfff0" strokeOpacity={0.3} strokeWidth={1} className="g-anim g-spin-ring" />
                     </>}
 
-                    <circle r={n.r} fill="url(#sph-hl)" stroke={n.color} strokeOpacity={isExp ? 0.35 : 0.1} strokeWidth={isExp ? 1.5 : 0.5} />
-                    {imageHref && (() => { const avecGain = (n.gainVal ?? 0) !== 0 && n.r >= 34; return <rect x={-n.r * 0.95} y={-15} width={n.r * 1.9} height={avecGain ? 40 : 27} rx={avecGain ? 20 : 13.5} fill="rgba(6,6,10,0.55)" />; })()}
-                    <text y={-6} textAnchor="middle" fontSize={11} fontWeight={600} fill="#fff" style={ts}>{n.label}</text>
-                    <text y={9} textAnchor="middle" fontSize={9} fill={n.isProjected ? "#c8bfff" : "rgba(255,255,255,0.85)"} style={ts}>{n.sub && mask(n.sub)}</text>
-                    {n.isProjected && <text y={20} textAnchor="middle" fontSize={7} fontWeight={600} fill="#9585ff" style={ts}>projection {scrubYear}</text>}
-                    {!n.isProjected && (n.gainVal ?? 0) !== 0 && n.r >= 34 && <text y={22} textAnchor="middle" fontSize={8} fill={(n.gainVal ?? 0) >= 0 ? "#34d399" : "#fb7185"} style={ts}>{mask(`${(n.gainVal ?? 0) >= 0 ? "+" : ""}${fmt(n.gainVal ?? 0)}`)}</text>}
+                    <circle r={n.r} fill="url(#sph-hl)" stroke="rgba(0,0,0,0.4)" strokeWidth={1} />
+                    <AnneauProprietaires r={n.r} proprietaires={n.proprietaires} epaisseur={isExp ? 3.5 : 2.5} />
+                    <EtiquettePlanete r={n.r + 3} cote={cote} titre={n.label} sous={n.sub && mask(n.sub)} couleurSous={n.isProjected ? "#c8bfff" : undefined}
+                      lignes={[
+                        ...(n.isProjected ? [{ texte: `projection ${scrubYear}`, couleur: "#b8a5ff" }] : []),
+                        ...(!n.isProjected && (n.gainVal ?? 0) !== 0 ? [{ texte: mask(`${(n.gainVal ?? 0) >= 0 ? "+" : ""}${fmt(n.gainVal ?? 0)}`), couleur: (n.gainVal ?? 0) >= 0 ? "#34d399" : "#fb7185" }] : []),
+                        ...((n.proprietaires?.length ?? 0) > 1 ? [{ texte: n.proprietaires!.map(p => `${p.nom} ${Math.round(p.part * 100)} %`).join(" · "), couleur: "rgba(255,255,255,0.75)" }] : []),
+                      ]} />
                     </g>
                     {selected?.kind === "portfolio" && selected.id === n.portfolioKey && (
-                      <g transform={`translate(${(n.r + 13) * 0.7071},${(n.r + 13) * 0.7071})`} style={{ cursor: "pointer" }}
+                      <g transform={positionBouton(n.r, cote)} style={{ cursor: "pointer" }}
                         onPointerDown={e => e.stopPropagation()}
                         onClick={e => { e.stopPropagation(); setCreateMode("asset"); }}>
                         <circle r={11} fill="#12121a" stroke="#9585ff" strokeWidth={1.2} />
@@ -1761,19 +2016,17 @@ export default function GalaxyView({
                   const isVacation = isVacationGoal(n.label);
                   return <>
                     <clipPath id={`cp-${n.id}`}><circle r={n.r} /></clipPath>
-                    <circle r={n.r + 5} fill={`url(#atmo-${n.id})`} />
-                    <circle r={n.r + 3} fill="none" stroke={n.color} strokeOpacity={0.1} strokeDasharray="3 4" />
+                    <circle r={n.r + 12} fill={`url(#atmo-${n.id})`} />
                     {isVacation ? (
                       <g clipPath={`url(#cp-${n.id})`}><image href={VACANCES_IMAGE} x={-n.r} y={-n.r} width={n.r * 2} height={n.r * 2} preserveAspectRatio="xMidYMid slice" /></g>
                     ) : <>
                       <circle r={n.r} fill={`url(#sph-${n.id})`} />
                       <g clipPath={`url(#cp-${n.id})`}><circle r={n.r} fill={`url(#sph-${n.id})`} opacity={0.6} /></g>
                     </>}
-                    <circle r={n.r} fill="url(#sph-hl)" />
-                    {(gp ?? 0) >= 1 && <circle r={n.r + 6} fill="none" stroke="#34d399" strokeOpacity={0.45} strokeWidth={1.5} />}
-                    {isVacation && <rect x={-n.r * 0.95} y={-13} width={n.r * 1.9} height={26} rx={13} fill="rgba(6,6,10,0.55)" />}
-                    <text y={-4} textAnchor="middle" fontSize={10} fontWeight={600} fill="#fff" style={ts}>{n.label.length > 12 ? n.label.slice(0, 11) + "…" : n.label}</text>
-                    <text y={10} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.85)" style={ts}>{n.sub}</text>
+                    <circle r={n.r} fill="url(#sph-hl)" stroke="rgba(0,0,0,0.4)" strokeWidth={1} />
+                    <AnneauProprietaires r={n.r} proprietaires={n.proprietaires} />
+                    {(gp ?? 0) >= 1 && <circle r={n.r + 10} fill="none" stroke="#34d399" strokeOpacity={0.6} strokeWidth={1.5} strokeDasharray="3 3" />}
+                    <EtiquettePlanete r={n.r + 3} cote={cote} titre={n.label.length > 18 ? n.label.slice(0, 17) + "…" : n.label} sous={n.sub && `${n.sub} atteint`} couleurSous={(gp ?? 0) >= 1 ? "#6ee7b7" : undefined} />
                   </>;
                 })()}
 
@@ -1861,10 +2114,9 @@ export default function GalaxyView({
                   {salImg ? (
                     <g clipPath={`url(#cp-${n.id})`}><image href={salImg} x={-n.r} y={-n.r} width={n.r * 2} height={n.r * 2} preserveAspectRatio="xMidYMid slice" /></g>
                   ) : <circle r={n.r} fill="url(#sph-salary)" />}
-                  <circle r={n.r} fill="url(#sph-hl)" />
-                  {salImg && <rect x={-n.r * 0.95} y={-15} width={n.r * 1.9} height={27} rx={13.5} fill="rgba(6,6,10,0.55)" />}
-                  <text y={-4} textAnchor="middle" fontSize={9} fontWeight={600} fill="#fff" style={ts}>Salaire</text>
-                  <text y={9} textAnchor="middle" fontSize={8} fill="rgba(255,255,255,0.85)" style={ts}>{n.sub && mask(n.sub)}/mois</text>
+                  <circle r={n.r} fill="url(#sph-hl)" stroke="rgba(0,0,0,0.4)" strokeWidth={1} />
+                  <AnneauProprietaires r={n.r} proprietaires={n.proprietaires} />
+                  <EtiquettePlanete r={n.r + 3} cote={cote} titre={n.label} sous={n.sub && `${mask(n.sub)}/mois`} couleurSous="#6ee7b7" />
                 </>; })()}
               </g>;
             })}
@@ -1892,6 +2144,7 @@ export default function GalaxyView({
           <rect x={0} y={0} width={W} height={H} fill="url(#vignette)" pointerEvents="none" />
         </svg>
         <p className="hidden lg:block absolute bottom-3 left-1/2 -translate-x-1/2 text-[10px] text-white/20 pointer-events-none">Molette = zoom · glisser pour déplacer · glisser un actif vers un portefeuille pour le réassigner</p>
+        </>)}
 
         {/* Curseur chronologique : projette le Patrimoine à une date future, hypothèse à taux constant */}
         {showScrubBar && (

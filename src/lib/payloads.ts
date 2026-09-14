@@ -8,6 +8,7 @@ import {
   jsonBody,
   oneOf,
   optColor,
+  optDueDay,
   optDate,
   optId,
   optNumeric,
@@ -104,6 +105,9 @@ export async function flowValues(req: Request) {
         : optId(body.targetId, "Destination"),
     amount: reqNumeric(body.amount, "Montant", { min: 0 }),
     frequency: oneOf(body.frequency, "Fréquence", FLOW_FREQUENCIES, "monthly"),
+    dueDay: optDueDay(body.dueDay),
+    // Dépense portée par le foyer plutôt que par une seule personne.
+    shared: body.shared === true || body.shared === "true",
     memberId: optId(body.memberId, "Membre"),
     ...(body.createdAt ? { createdAt: new Date(String(body.createdAt)) } : {}),
   };

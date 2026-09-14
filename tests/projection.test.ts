@@ -150,3 +150,33 @@ describe("échéance de la période en cours", () => {
     assert.ok(j >= 27 && j <= 32, `attendu ~30, reçu ${j}`);
   });
 });
+
+describe("date de référence injectée", () => {
+  // Régression : `nextOccurrenceDate` appelait `new Date()` en dur. Le résumé
+  // « depuis ta dernière visite » lui passait pourtant sa propre date de
+  // référence, si bien que deux « maintenant » différents cohabitaient dans le
+  // même calcul. Résultat : trois tests qui ne dépendaient d'aucune horloge en
+  // apparence se sont mis à échouer au simple changement de jour.
+  const LE_11 = new Date("2026-09-11T10:00:00Z");
+
+  test("une échéance future est rendue telle quelle, quelle que soit l'heure réelle", () => {
+    const d = nextOccurrenceDate("2026-09-13T00:00:00Z", "monthly", LE_11)!;
+    assert.equal(d.toISOString().slice(0, 10), "2026-09-13");
+  });
+
+  test("le nombre de jours se compte depuis la date fournie, pas depuis aujourd'hui", () => {
+    assert.equal(daysUntilNextOccurrence("2026-09-13T00:00:00Z", "monthly", LE_11), 2);
+  });
+
+  test("deux appels à des dates de référence différentes ne donnent pas le même résultat", () => {
+    const depuisLe11 = daysUntilNextOccurrence("2026-09-13T00:00:00Z", "monthly", LE_11);
+    const depuisLe12 = daysUntilNextOccurrence("2026-09-13T00:00:00Z", "monthly", new Date("2026-09-12T10:00:00Z"));
+    assert.equal(depuisLe11, 2);
+    assert.equal(depuisLe12, 1);
+  });
+
+  test("sans date fournie, l'horloge réelle sert toujours de référence", () => {
+    const loin = new Date(Date.now() + 30 * 86400000).toISOString();
+    assert.equal(nextOccurrenceDate(loin, "monthly")!.toISOString(), loin);
+  });
+});
