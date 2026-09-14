@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ChevronRight } from "lucide-react";
 import { formatMoney } from "@/lib/format";
 import {
@@ -10,6 +10,7 @@ import {
 import {
   SHIP_DIMS, SHIP_IMAGES, imageSatellite, imageSysteme, palierVaisseau, type GenreSysteme,
 } from "@/lib/skins";
+import { brancherMolette, transformeDe, type Vue } from "@/lib/molette";
 
 /**
  * La vue d'ensemble : cinq ou six corps, et ce qui circule entre eux.
@@ -119,6 +120,54 @@ export default function SystemesView({
   const anime = useAnimations();
   const fmt = (v: number) => formatMoney(v, devise);
 
+  // Zoom et déplacement, comme dans la galaxie détaillée : on pouvait entrer
+  // dans un système mais pas s'approcher de la vue d'ensemble, alors qu'elle
+  // porte désormais des satellites nommés de huit pixels.
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const racineRef = useRef<SVGGElement | null>(null);
+  const vueRef = useRef<Vue>({ k: 1, x: 0, y: 0 });
+  const rectRef = useRef<DOMRect | null>(null);
+  const glisse = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
+
+  useEffect(() => {
+    const svg = svgRef.current, racine = racineRef.current;
+    if (!svg || !racine) return;
+    const remesurer = () => { rectRef.current = svg.getBoundingClientRect(); };
+    remesurer();
+    const ro = new ResizeObserver(remesurer);
+    ro.observe(svg);
+    window.addEventListener("resize", remesurer);
+    const detacher = brancherMolette({
+      svg, racine, vue: vueRef.current, largeur: W, hauteur: H,
+      rect: () => rectRef.current ?? svg.getBoundingClientRect(),
+    });
+    return () => { detacher(); ro.disconnect(); window.removeEventListener("resize", remesurer); };
+  }, []);
+
+  const auDoigtPose = (e: React.PointerEvent) => {
+    // Un corps reste cliquable : seul le fond déplace la vue, sinon on ne
+    // pourrait plus voyager vers un système sans le déplacer d'abord.
+    if ((e.target as Element).closest("g[role=button]")) return;
+    glisse.current = { sx: e.clientX, sy: e.clientY, ox: vueRef.current.x, oy: vueRef.current.y };
+    (e.currentTarget as SVGSVGElement).setPointerCapture(e.pointerId);
+  };
+  const auDoigtBouge = (e: React.PointerEvent) => {
+    const g = glisse.current;
+    if (!g) return;
+    const r = rectRef.current ?? svgRef.current!.getBoundingClientRect();
+    vueRef.current.x = g.ox + (e.clientX - g.sx) / r.width * W;
+    vueRef.current.y = g.oy + (e.clientY - g.sy) / r.height * H;
+    racineRef.current?.setAttribute("transform", transformeDe(vueRef.current));
+  };
+  const auDoigtLeve = (e: React.PointerEvent) => {
+    glisse.current = null;
+    (e.currentTarget as SVGSVGElement).releasePointerCapture?.(e.pointerId);
+  };
+  const recadrer = () => {
+    vueRef.current = { k: 1, x: 0, y: 0 };
+    racineRef.current?.setAttribute("transform", "");
+  };
+
   const { corps, traits } = useMemo(() => {
     const { systemes, flux } = construireSystemes(entrees);
 
@@ -182,7 +231,10 @@ export default function SystemesView({
   const maxTrait = Math.max(1, ...traits.map(t => t.montant));
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-full select-none">
+    <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full h-full select-none touch-none"
+      onPointerDown={auDoigtPose} onPointerMove={auDoigtBouge}
+      onPointerUp={auDoigtLeve} onPointerCancel={auDoigtLeve}
+      onDoubleClick={recadrer}>
       <defs>
         {/* Le reflet sphérique et le liseré d'ombre sont les mêmes pour tous :
             c'est ce qui fait passer un disque plat pour une planète, image ou
@@ -224,6 +276,8 @@ export default function SystemesView({
         })}
       </defs>
 
+      {/* Tout ce qui se déplace et se met à l'échelle d'un bloc. */}
+      <g ref={racineRef}>
       {traits.map(t => {
         const largeur = 1.5 + (t.montant / maxTrait) * 5;
         const mx = (t.a.x + t.b.x) / 2;
@@ -374,6 +428,7 @@ export default function SystemesView({
           </g>
         );
       })}
+      </g>
     </svg>
   );
 }
