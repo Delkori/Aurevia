@@ -5,7 +5,7 @@ import {
   forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY,
   type Simulation, type SimulationNodeDatum,
 } from "d3-force";
-import { FolderPlus, Plus, PlusCircle, Star, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, AlertTriangle, Bell, Clock, Menu, PanelRight, LayoutGrid, FlaskConical } from "lucide-react";
+import { FolderPlus, Plus, PlusCircle, Star, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, AlertTriangle, Bell, Clock, Menu, PanelRight, FlaskConical, ArrowRight, ArrowDown, Orbit } from "lucide-react";
 import { findAccessory } from "@/lib/astronautAccessories";
 import { deNom, formatMoney } from "@/lib/format";
 import { futureValue } from "@/lib/projection";
@@ -22,8 +22,8 @@ import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodeP
 import { getLogoUrl } from "@/lib/logos";
 import { brancherMolette, transformeDe } from "@/lib/molette";
 import {
-  EXPENSES_IMAGES, SHIP_DIMS, SHIP_IMAGES, VACANCES_IMAGE, isVacationGoal, palierDepenses,
-  planetSkin, salaryImage, skinImageForValue, type PlanetSkin,
+  FILTRE_ETEINT, SHIP_DIMS, SHIP_IMAGES, VACANCES_IMAGE, imageDepenses, isVacationGoal,
+  palierDepenses, planetSkin, salaryImage, skinImageForValue, type PlanetSkin,
 } from "@/lib/skins";
 import { NATURE_COLORS, NATURE_LABELS, NATURE_ORDER, natureOfPortfolio, type Nature } from "@/lib/natures";
 import { flowLayout, LAYOUT_MODES, type LayoutMode } from "@/lib/galaxyLayout";
@@ -1298,22 +1298,10 @@ export default function GalaxyView({
           )}
         </div>
 
-        {/* ── Lecture : disposition et simulateur ── */}
+        {/* ── Lecture : pointage et simulateur. La disposition, elle, est posée
+             sur la galaxie : elle change ce qu'on regarde, sa place est là où
+             on regarde. ── */}
         <div className="px-3 py-3 border-b border-border space-y-2">
-          <p className="text-[9px] text-text-muted uppercase tracking-wider px-1 flex items-center gap-1.5">
-            <LayoutGrid size={10} />Disposition
-          </p>
-          <div className="space-y-0.5">
-            {LAYOUT_MODES.map(({ mode, label, hint }) => (
-              <button key={mode} onClick={() => onLayoutMode(mode)} title={hint}
-                aria-pressed={layoutMode === mode}
-                className={`w-full text-left px-2 py-1.5 rounded-md text-[11px] leading-tight transition-colors ${
-                  layoutMode === mode ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text hover:bg-surface-hover"}`}>
-                {label}
-              </button>
-            ))}
-          </div>
-
           <button onClick={onOpenReview}
             className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-muted hover:text-text hover:bg-surface-hover">
             <ClipboardCheck size={13} className="shrink-0" />
@@ -1515,9 +1503,27 @@ export default function GalaxyView({
             )}
           </div>
         )}
+        {/* Le sens de lecture, en flèches : « De gauche à droite » écrit en toutes
+            lettres dans un menu disait le geste, pas le résultat. Une flèche le
+            montre, et la commande est là où elle agit. */}
+        <div className="absolute bottom-3 left-3 z-10 flex items-center gap-0.5 p-1 rounded-lg glass-panel border border-border"
+          role="group" aria-label="Sens de lecture de la galaxie">
+          {LAYOUT_MODES.map(({ mode, label, hint, icone }) => {
+            const Icone = icone === "fleche-droite" ? ArrowRight : icone === "fleche-bas" ? ArrowDown : Orbit;
+            return (
+              <button key={mode} onClick={() => onLayoutMode(mode)} title={`${label} — ${hint}`}
+                aria-label={label} aria-pressed={layoutMode === mode}
+                className={`p-1.5 rounded-md transition-colors ${
+                  layoutMode === mode ? "bg-accent/20 text-accent" : "text-text-muted hover:text-text hover:bg-surface-hover"}`}>
+                <Icone size={15} />
+              </button>
+            );
+          })}
+        </div>
+
         {/* Qui est de quelle couleur — l'anneau seul ne suffit pas, il faut le nom à côté. */}
         {members.length > 0 && (
-          <div className="absolute bottom-3 left-3 z-10 hidden lg:flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg glass-panel border border-border text-[11px] pointer-events-none" aria-label="Couleur de chaque personne">
+          <div className="absolute bottom-3 right-3 z-10 hidden lg:flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg glass-panel border border-border text-[11px] pointer-events-none" aria-label="Couleur de chaque personne">
             <span className="text-[10px] uppercase tracking-wide text-text-muted">Anneau = propriétaire</span>
             {[{ nom: ownerName, couleur: centerColor }, ...members.map(m => ({ nom: m.name, couleur: m.color }))].map(p => (
               <span key={p.nom} className="flex items-center gap-1 text-text"><span className="w-2.5 h-2.5 rounded-full border-2 shrink-0" style={{ borderColor: p.couleur }} />{p.nom}</span>
@@ -1759,7 +1765,7 @@ export default function GalaxyView({
                   const ownerRevenue = n.ownerRevenue ?? 0;
                   const ownerBudgetRatio = ownerRevenue > 0 ? ownerExpenseTotal / ownerRevenue : 0;
                   const tier = palierDepenses(ownerExpenseTotal, ownerRevenue);
-                  const tierImage = tier !== "calm" ? EXPENSES_IMAGES[tier] : null;
+                  const tierImage = imageDepenses(tier);
                   const isOverBudget = tier === "eruption" || tier === "critical";
                   return <>
                     {/* Heat glow */}
@@ -1768,9 +1774,9 @@ export default function GalaxyView({
                     {tier === "warning" && <circle r={R + 10} fill="url(#glow-lava)" opacity={0.4} />}
                     {/* Planet body */}
                     <clipPath id={`cp-${n.id}`}><circle r={R} /></clipPath>
-                    {tierImage ? (
-                      <g clipPath={`url(#cp-${n.id})`}><image href={tierImage} x={-R} y={-R} width={R * 2} height={R * 2} preserveAspectRatio="xMidYMid slice" /></g>
-                    ) : <circle r={R} fill="url(#sph-expenses)" />}
+                    <g clipPath={`url(#cp-${n.id})`} style={tier === "calm" ? { filter: FILTRE_ETEINT } : undefined}>
+                      <image href={tierImage} x={-R} y={-R} width={R * 2} height={R * 2} preserveAspectRatio="xMidYMid slice" />
+                    </g>
                     <circle r={R} fill="url(#sph-hl)" stroke="rgba(0,0,0,0.4)" strokeWidth={1} />
                     <AnneauProprietaires r={R} proprietaires={n.proprietaires} />
 

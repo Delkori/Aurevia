@@ -19,10 +19,14 @@
 
 export type LayoutMode = "radial" | "horizontal" | "vertical";
 
-export const LAYOUT_MODES: { mode: LayoutMode; label: string; hint: string }[] = [
-  { mode: "horizontal", label: "De gauche à droite", hint: "Revenus → personnes → planètes" },
-  { mode: "vertical", label: "De haut en bas", hint: "Revenus en haut, planètes en bas" },
-  { mode: "radial", label: "En orbite", hint: "Patrimoine au centre, tout autour" },
+/**
+ * `icone` nomme le pictogramme, il ne l'importe pas : ce module ne connaît ni
+ * React ni la bibliothèque d'icônes, et n'a pas à commencer maintenant.
+ */
+export const LAYOUT_MODES: { mode: LayoutMode; label: string; hint: string; icone: "fleche-droite" | "fleche-bas" | "orbite" }[] = [
+  { mode: "horizontal", label: "De gauche à droite", hint: "Revenus → personnes → planètes", icone: "fleche-droite" },
+  { mode: "vertical", label: "De haut en bas", hint: "Revenus en haut, planètes en bas", icone: "fleche-bas" },
+  { mode: "radial", label: "En orbite", hint: "Patrimoine au centre, tout autour", icone: "orbite" },
 ];
 
 export type LayoutNode = {

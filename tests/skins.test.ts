@@ -1,6 +1,8 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { imageSatellite, imageSysteme, palierDepenses, skinFromName } from "../src/lib/skins.ts";
+import {
+  FILTRE_ETEINT, imageDepenses, imageSatellite, imageSysteme, palierDepenses, skinFromName,
+} from "../src/lib/skins.ts";
 
 describe("palierDepenses", () => {
   test("sans dépense, la planète est au calme", () => {
@@ -28,9 +30,16 @@ describe("imageSysteme", () => {
     assert.match(gros!, /salary-3/);
   });
 
-  test("les dépenses prennent leur palier, et rien du tout à zéro", () => {
+  test("les dépenses prennent leur palier", () => {
     assert.match(imageSysteme({ ...base, genre: "depenses", montant: 2500, revenus: 3000 })!, /expenses-eruption/);
-    assert.equal(imageSysteme({ ...base, genre: "depenses", montant: 0, revenus: 3000 }), undefined);
+  });
+
+  test("à zéro, la planète du premier palier — c'est le filtre qui l'éteint", () => {
+    // Une sphère nue au milieu de planètes texturées se lisait comme un défaut
+    // d'affichage ; le volcan éteint se lit comme un budget vide.
+    assert.match(imageSysteme({ ...base, genre: "depenses", montant: 0, revenus: 3000 })!, /expenses-warning/);
+    assert.equal(imageDepenses("calm"), imageDepenses("warning"));
+    assert.match(FILTRE_ETEINT, /grayscale/);
   });
 
   test("le patrimoine prend le visage de sa plus grosse planète", () => {
