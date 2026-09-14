@@ -1,7 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
-  construireSystemes, goalIdDeProjet, projetId, systemeDuNoeud,
+  construireSystemes, contexteUtile, goalIdDeProjet, projetId, systemeDuNoeud,
   SYSTEME_DEPENSES, SYSTEME_INVESTISSEMENTS, SYSTEME_REVENUS,
   type EntreesSystemes,
 } from "../src/lib/systemes.ts";
@@ -115,5 +115,21 @@ describe("nature des montants", () => {
     const japon = systemes.find(s => s.id === "projet-1")!;
     assert.equal(japon.parMois, false);
     assert.equal(japon.montant, 32628);
+  });
+});
+
+describe("contexteUtile", () => {
+  test("le patrimoine n'a de sens que là où il est la somme : les investissements", () => {
+    assert.equal(contexteUtile("center", SYSTEME_INVESTISSEMENTS), true);
+    assert.equal(contexteUtile("center", SYSTEME_REVENUS), false);
+    assert.equal(contexteUtile("center", SYSTEME_DEPENSES), false);
+    assert.equal(contexteUtile("center", projetId(7)), false);
+  });
+
+  test("les personnes disparaissent des dépenses : chaque planète porte déjà leur nom", () => {
+    assert.equal(contexteUtile("member", SYSTEME_DEPENSES), false);
+    assert.equal(contexteUtile("member", SYSTEME_REVENUS), true);
+    assert.equal(contexteUtile("member", SYSTEME_INVESTISSEMENTS), true);
+    assert.equal(contexteUtile("member", projetId(7)), true);
   });
 });

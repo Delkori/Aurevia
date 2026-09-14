@@ -12,7 +12,10 @@ import { futureValue } from "@/lib/projection";
 import { monthlyEquivalent } from "@/lib/flows";
 import { partDe, type PartLike } from "@/lib/expenseShares";
 import { proprietairesDe, arcsAnneau, type Proprietaire } from "@/lib/proprietaires";
-import { goalIdDeProjet, systemeDuNoeud, type EntreesSystemes, type SystemeId } from "@/lib/systemes";
+import {
+  construireSystemes, contexteUtile, goalIdDeProjet, systemeDuNoeud,
+  type EntreesSystemes, type SystemeId,
+} from "@/lib/systemes";
 import SystemesView from "@/components/SystemesView";
 import { currentValue, gain, gainPercent, goalProgress, totalDebt, ownedShare, type Rates, type ValuationContext } from "@/lib/networth";
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
@@ -572,7 +575,7 @@ export default function GalaxyView({
       const garde = new Set<string>();
       for (const n of nodes) {
         const appartenance = systemeDuNoeud(n.kind);
-        if (appartenance === "contexte") { garde.add(n.id); continue; }
+        if (appartenance === "contexte") { if (contexteUtile(n.kind, systeme)) garde.add(n.id); continue; }
         if (objectifDuSysteme != null) {
           // Un projet montre son objectif et les planètes qui l'alimentent.
           if (n.kind === "goal" && n.goalId === objectifDuSysteme) garde.add(n.id);
@@ -612,6 +615,12 @@ export default function GalaxyView({
     return { targetNodes: nodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows, totalRevenue, totalInvest };
   }, [groups, expanded, goals, members, flows, quotes, salary, goalLinks, progressOf, scrubYears, scrubGrowth, ownerName, centerColor, ownerAccessory, ctx, portfolioOwnerships, expenseShares, systeme, fmt]);
   linksRef.current = links;
+
+  // Le corps du système où l'on a voyagé, pour l'annoncer en haut de la vue.
+  const systemeCourant = useMemo(() => {
+    if (systeme === null || !entreesSystemes) return null;
+    return construireSystemes(entreesSystemes).systemes.find(s => s.id === systeme) ?? null;
+  }, [systeme, entreesSystemes]);
 
   // Simulation
   useEffect(() => {
@@ -1518,13 +1527,27 @@ export default function GalaxyView({
             <SystemesView entrees={entreesSystemes} devise={displayCurrency} onEntrer={onEntrerSysteme} />
           </div>
         ) : (<>
+        {/* Où suis-je : sans ce titre, rien ne rappelait dans quel système on
+            avait voyagé — on lisait des planètes sans savoir ce qu'elles
+            racontaient. Le point reprend la couleur du système. */}
         {systeme !== null && onSortirSysteme && (
-          <button
-            onClick={onSortirSysteme}
-            className="absolute top-3 left-3 z-10 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg glass-panel border border-border text-xs text-text-muted hover:text-text max-lg:top-14"
-          >
-            <ChevronLeft size={13} />Vue d&apos;ensemble
-          </button>
+          <div className="absolute top-3 left-3 z-10 flex items-center gap-2 max-lg:top-14">
+            <button
+              onClick={onSortirSysteme}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg glass-panel border border-border text-xs text-text-muted hover:text-text"
+            >
+              <ChevronLeft size={13} />Vue d&apos;ensemble
+            </button>
+            {systemeCourant && (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg glass-panel border border-border">
+                <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: systemeCourant.couleur }} />
+                <span className="text-sm font-semibold text-text">{systemeCourant.label}</span>
+                <span className="text-xs text-text-muted tabular">
+                  {mask(fmt(systemeCourant.montant))}{systemeCourant.parMois ? "/mois" : ""}
+                </span>
+              </div>
+            )}
+          </div>
         )}
         {/* Qui est de quelle couleur — l'anneau seul ne suffit pas, il faut le nom à côté. */}
         {members.length > 0 && (

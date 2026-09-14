@@ -26,7 +26,9 @@ import {
  *
  * Chaque corps tourne avec ce qu'il contient, et des points remontent le long
  * des flux. Immobile, la vue ne disait pas qu'elle était vivante ni qu'on
- * pouvait entrer dans un système ; c'est le mouvement qui le dit.
+ * pouvait voyager vers un système ; c'est le mouvement qui le dit. Survolé,
+ * un corps s'allume franchement — auréole, habillage éclairci, liseré appuyé —
+ * pour qu'on sache lequel s'ouvrira sous le clic.
  */
 
 const W = 1000, H = 620;
@@ -37,7 +39,7 @@ const ORBITE = 30;
 const DEBORD_ETIQUETTE = 18;
 /**
  * Secteur laissé libre en bas de l'anneau, en radians. C'est là qu'est écrit
- * « entrer » : sans ce trou, un satellite venait s'asseoir dessus.
+ * « voyager » : sans ce trou, un satellite venait s'asseoir dessus.
  */
 const SECTEUR_LIBRE = 1.15;
 
@@ -196,6 +198,16 @@ export default function SystemesView({
             <stop offset="100%" stopColor={c.couleur} stopOpacity="0.42" />
           </radialGradient>
         ))}
+        {/* L'auréole qui s'allume au survol. Un dégradé plutôt qu'un flou : il
+            coûte le même prix qu'un cercle, là où un filtre de flou repeint la
+            zone à chaque image — et la scène en a déjà six en rotation. */}
+        {corps.map(c => (
+          <radialGradient key={`l-${c.id}`} id={`${id}-lueur-${c.id}`} cx="50%" cy="50%" r="50%">
+            <stop offset="30%" stopColor={c.couleur} stopOpacity="0.55" />
+            <stop offset="62%" stopColor={c.couleur} stopOpacity="0.22" />
+            <stop offset="100%" stopColor={c.couleur} stopOpacity="0" />
+          </radialGradient>
+        ))}
         {corps.filter(c => c.image).map(c => (
           <clipPath key={c.id} id={`${id}-cp-${c.id}`}><circle r={c.r} cx={c.x} cy={c.y} /></clipPath>
         ))}
@@ -260,7 +272,12 @@ export default function SystemesView({
             onClick={() => onEntrer(c.id)}
             role="button" tabIndex={0}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onEntrer(c.id); } }}
-            aria-label={`${c.label}, ${fmt(c.montant)}${c.parMois ? " par mois" : ""}${c.contenu > 0 ? `, ${c.contenu} élément${c.contenu > 1 ? "s" : ""}` : ""}. Entrer dans ce système.`}>
+            aria-label={`${c.label}, ${fmt(c.montant)}${c.parMois ? " par mois" : ""}${c.contenu > 0 ? `, ${c.contenu} élément${c.contenu > 1 ? "s" : ""}` : ""}. Voyager vers ce système.`}>
+
+            {/* Toujours dans le DOM, à opacité nulle au repos : une auréole
+                montée au survol n'aurait pas eu de fondu, elle aurait claqué. */}
+            <circle r={c.r + 46} fill={`url(#${id}-lueur-${c.id})`} pointerEvents="none"
+              opacity={actif ? 1 : 0} style={{ transition: "opacity 0.2s ease-out" }} />
 
             {/* Les satellites ne se cliquent pas séparément : c'est le système
                 entier qu'on ouvre, et laisser un point avaler le clic donnerait
@@ -302,19 +319,25 @@ export default function SystemesView({
               </g>
             )}
 
-            <circle r={c.r + 7} fill={c.couleur} opacity={actif ? 0.22 : 0.1} />
-            {c.image ? (
-              // Le détourage est posé dans les coordonnées du SVG, pas dans
-              // celles du groupe : on annule donc la translation du corps.
-              <g clipPath={`url(#${id}-cp-${c.id})`} transform={`translate(${-c.x},${-c.y})`}>
-                <image href={c.image} x={c.x - c.r} y={c.y - c.r} width={c.r * 2} height={c.r * 2}
-                  preserveAspectRatio="xMidYMid slice" />
-              </g>
-            ) : (
-              <circle r={c.r} fill={`url(#${id}-sph-${c.id})`} />
-            )}
-            <circle r={c.r} fill={`url(#${id}-reflet)`} />
-            <circle r={c.r} fill="none" stroke={c.couleur} strokeOpacity={actif ? 0.95 : 0.6} strokeWidth={2} />
+            <circle r={c.r + 7} fill={c.couleur} opacity={actif ? 0.34 : 0.1}
+              style={{ transition: "opacity 0.2s ease-out" }} />
+            {/* Le corps lui-même s'éclaire : sans ça, seul son pourtour changeait
+                et l'habillage restait aussi terne qu'au repos. */}
+            <g style={{ filter: actif ? "brightness(1.22) saturate(1.12)" : "none", transition: "filter 0.2s ease-out" }}>
+              {c.image ? (
+                // Le détourage est posé dans les coordonnées du SVG, pas dans
+                // celles du groupe : on annule donc la translation du corps.
+                <g clipPath={`url(#${id}-cp-${c.id})`} transform={`translate(${-c.x},${-c.y})`}>
+                  <image href={c.image} x={c.x - c.r} y={c.y - c.r} width={c.r * 2} height={c.r * 2}
+                    preserveAspectRatio="xMidYMid slice" />
+                </g>
+              ) : (
+                <circle r={c.r} fill={`url(#${id}-sph-${c.id})`} />
+              )}
+              <circle r={c.r} fill={`url(#${id}-reflet)`} />
+            </g>
+            <circle r={c.r} fill="none" stroke={c.couleur} strokeOpacity={actif ? 1 : 0.6}
+              strokeWidth={actif ? 3 : 2} style={{ transition: "stroke-opacity 0.2s ease-out, stroke-width 0.2s ease-out" }} />
             <circle r={c.r - 1} fill="none" stroke="rgba(0,0,0,0.45)" strokeWidth={1.5} />
 
             {/* Un nom de projet est libre : « Apport résidence principale » dépasse
@@ -343,10 +366,10 @@ export default function SystemesView({
                 dessus — et rien du tout au doigt. Posé entre le corps et son
                 anneau : au-delà, il allait chevaucher le corps voisin. */}
             <g transform={`translate(0,${c.r + 17})`} pointerEvents="none"
-              opacity={actif ? 1 : 0.5} style={{ transition: "opacity 0.15s ease-out" }}>
-              <text textAnchor="middle" fontSize={11} fontWeight={actif ? 600 : 400}
-                fill={actif ? "#fff" : "var(--text-muted)"} style={HALO_TEXTE}>entrer</text>
-              <ChevronRight x={26} y={-9} size={11} color={actif ? "#fff" : "var(--text-muted)"} />
+              opacity={actif ? 1 : 0.55} style={{ transition: "opacity 0.2s ease-out" }}>
+              <text textAnchor="middle" fontSize={actif ? 12 : 11} fontWeight={actif ? 700 : 500}
+                fill={actif ? "#fff" : "var(--text-muted)"} style={HALO_TEXTE}>voyager</text>
+              <ChevronRight x={30} y={-9} size={11} color={actif ? "#fff" : "var(--text-muted)"} />
             </g>
           </g>
         );

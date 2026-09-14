@@ -31,9 +31,8 @@ export const goalIdDeProjet = (id: SystemeId): number | null => {
 /**
  * À quel système appartient un nœud de la galaxie détaillée.
  *
- * `null` : le nœud est du contexte partagé — le total du foyer et les
- * personnes — visible dans tous les systèmes. Les retirer donnerait des vues
- * flottantes, sans point d'attache.
+ * `"contexte"` : le total du foyer et les personnes. Ils ne valent pas pour
+ * tous les systèmes — voir `contexteUtile`.
  */
 export function systemeDuNoeud(kind: string): SystemeId | null | "contexte" {
   switch (kind) {
@@ -53,6 +52,25 @@ export function systemeDuNoeud(kind: string): SystemeId | null | "contexte" {
     default:
       return "contexte"; // center, member
   }
+}
+
+/**
+ * Un nœud de contexte mérite-t-il sa place dans ce système ?
+ *
+ * Le patrimoine n'a de sens que dans « Investissements » : c'est sa somme.
+ * Posé au milieu de dépenses mensuelles, « Patrimoine 297 837 € » ne répond à
+ * aucune question de la vue.
+ *
+ * Les personnes servent de relais là où elles portent quelque chose : elles
+ * reçoivent les revenus, elles détiennent les planètes, elles poursuivent les
+ * projets. Dans « Dépenses », chaque planète porte déjà le nom de la sienne et
+ * la couleur de son anneau : les montrer en plus ajoutait des sphères
+ * dimensionnées au patrimoine au beau milieu d'une vue sur des montants
+ * mensuels — on croyait voir des dépenses.
+ */
+export function contexteUtile(kind: string, systeme: SystemeId): boolean {
+  if (kind === "center") return systeme === SYSTEME_INVESTISSEMENTS;
+  return systeme !== SYSTEME_DEPENSES;
 }
 
 /** Un élément contenu dans un système, dessiné en orbite autour de lui. */
