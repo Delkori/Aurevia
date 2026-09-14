@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Check, ChevronLeft, ChevronRight, Minus, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
+import { Check, CheckCheck, ChevronLeft, ChevronRight, Minus, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { formatMoney } from "@/lib/format";
 
 type Flow = {
@@ -133,7 +133,8 @@ function FormulaireMouvement({ initial, mois, onValider, onAnnuler }: {
 export type SaisieMouvement = { label: string; amount: string; dueDate: string; direction: string };
 
 export default function MonthReview({
-  occurrences, flows, destinations, displayCurrency, onUpdate, onCreate, onEdit, onDelete, onClose, readOnly,
+  occurrences, flows, destinations, displayCurrency, onUpdate, onCreate, onEdit, onDelete,
+  onUpdateMany, onClose, readOnly, ephemere,
 }: {
   occurrences: Occurrence[];
   flows: Flow[];
@@ -145,8 +146,17 @@ export default function MonthReview({
   onCreate: (d: SaisieMouvement) => Promise<void>;
   onEdit: (id: number, d: SaisieMouvement) => Promise<void>;
   onDelete: (id: number) => Promise<void>;
+  /**
+   * Pointer tout un mois d'un coup. Sans ça, « Tout pointer » enchaînait un
+   * aller-retour réseau *et* un rechargement complet des échéances par ligne :
+   * quinze mouvements, trente requêtes en file, plusieurs secondes de fenêtre
+   * figée. L'appelant regroupe.
+   */
+  onUpdateMany?: (majs: { id: number; status: string; actualAmount?: string | null }[]) => Promise<void>;
   onClose: () => void;
   readOnly?: boolean;
+  /** Démonstration : tout est manipulable, rien n'est enregistré. */
+  ephemere?: boolean;
 }) {
   const [mois, setMois] = useState(() => new Date());
   const [saisie, setSaisie] = useState<Record<number, string>>({});
@@ -210,6 +220,35 @@ export default function MonthReview({
     }
   };
 
+  /**
+   * Pointer d'un coup tout ce qui reste à vérifier, au montant prévu.
+   *
+   * C'est le cas courant : sur douze prélèvements, onze sont passés pour le
+   * montant attendu et un seul a bougé. Ligne à ligne, il fallait douze clics
+   * pour n'en corriger qu'un. On pointe tout, puis on rectifie le seul qui
+   * diffère — « Annuler le pointage » est à côté de chaque ligne.
+   *
+   * Ce qui a déjà un montant saisi garde ce montant : on ne va pas écraser une
+   * correction en cours sous prétexte qu'on valide le reste.
+   */
+  const [pointageEnMasse, setPointageEnMasse] = useState(false);
+  const aPointer = duMois.filter((o) => o.status === "pending");
+  const pointerTout = async () => {
+    if (aPointer.length === 0) return;
+    setPointageEnMasse(true);
+    try {
+      const majs = aPointer.map((o) => ({
+        id: o.id,
+        status: "confirmed",
+        actualAmount: saisie[o.id]?.trim() || o.expectedAmount,
+      }));
+      if (onUpdateMany) await onUpdateMany(majs);
+      else for (const m of majs) await onUpdate(m.id, { status: m.status, actualAmount: m.actualAmount });
+    } finally {
+      setPointageEnMasse(false);
+    }
+  };
+
   const decaler = (n: number) =>
     setMois((m) => new Date(m.getFullYear(), m.getMonth() + n, 1));
 
@@ -239,6 +278,13 @@ export default function MonthReview({
                 : duMois.length > 0 ? "Tout est pointé" : "Aucun mouvement ce mois-ci"}
             </p>
           </div>
+          {!readOnly && aPointer.length > 0 && (
+            <button onClick={pointerTout} disabled={pointageEnMasse}
+              title="Pointer au montant prévu tout ce qui reste à vérifier"
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium shrink-0 bg-accent text-white hover:opacity-90 disabled:opacity-50">
+              <CheckCheck size={13} />Tout pointer
+            </button>
+          )}
           {!readOnly && (
             <button onClick={() => setFormulaire(formulaire === "nouveau" ? null : "nouveau")}
               aria-pressed={formulaire === "nouveau"}
@@ -380,6 +426,7 @@ export default function MonthReview({
                           type="text" inputMode="decimal"
                           value={saisie[o.id] ?? ""}
                           onChange={(e) => setSaisie((s) => ({ ...s, [o.id]: e.target.value }))}
+                          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); valider(o, "confirmed"); } }}
                           placeholder={String(attendu)}
                           aria-label={`Montant constaté pour ${nomDe(o)}`}
                           className="w-24 bg-bg border border-border rounded-md px-2 py-1 text-xs tabular text-right"
@@ -404,6 +451,7 @@ export default function MonthReview({
         <footer className="px-5 py-2.5 border-t border-border shrink-0">
           <p className="text-[10px] text-text-muted">
             Laisse le champ vide pour pointer au montant prévu ; saisis-en un autre s&apos;il a changé.
+            {ephemere && " Version de démonstration : les pointages restent dans cet onglet."}
           </p>
         </footer>
       </div>
