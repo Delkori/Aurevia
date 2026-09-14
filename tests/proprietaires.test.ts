@@ -35,6 +35,21 @@ test("une ligne à 0 % disparaît ; des lignes toutes à 0 % rendent au proprié
     [{ memberId: 2, nom: "M2", couleur: "#c2", part: 1 }]);
 });
 
+test("à parts égales, l'ordre ne bouge pas d'un appel à l'autre", () => {
+  // La galaxie tire un fil par propriétaire mais n'accroche la planète qu'au
+  // premier de la liste. Sur un bien détenu moitié-moitié, si l'ordre dépendait
+  // de celui des lignes en base, la planète changerait de colonne à chaque
+  // rechargement.
+  const a = [
+    { portfolioId: 1, memberId: null, sharePercent: "50" },
+    { portfolioId: 1, memberId: 2, sharePercent: "50" },
+  ];
+  const b = [a[1], a[0]];
+  const ordre = (lignes: typeof a) => proprietairesDe(1, 2, lignes, personne).map(p => p.memberId);
+  assert.deepEqual(ordre(a), [null, 2]);
+  assert.deepEqual(ordre(b), [null, 2]);
+});
+
 test("les lignes d'une même personne s'additionnent", () => {
   const r = proprietairesDe(1, null, [
     { portfolioId: 1, memberId: 2, sharePercent: "25" },

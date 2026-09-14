@@ -335,6 +335,8 @@ export default function GalaxyView({
   const [scrubGrowth, setScrubGrowth] = useState(5);
   const [linkSourceNode, setLinkSourceNode] = useState<{ id: string; kind: string; portfolioKey?: number | "unassigned"; memberId?: number; label: string } | null>(null);
   const [pendingLink, setPendingLink] = useState<{ sourceType: string; sourceId: number | null; sourceLabel: string; targetType: string; targetId: number; targetLabel: string } | null>(null);
+  /** Message court quand un geste n'a pas pu faire ce qu'il promettait. */
+  const [noteGeste, setNoteGeste] = useState<string | null>(null);
   const [linkAmount, setLinkAmount] = useState("");
   const [linkFrequency, setLinkFrequency] = useState("monthly");
   const simRef = useRef<Simulation<GNode, GLink> | null>(null);
@@ -349,6 +351,18 @@ export default function GalaxyView({
   const [snapTarget, setSnapTarget] = useState<string | null>(null);
   const dragStartPos = useRef<{ x: number; y: number } | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
+  /**
+   * Le SVG de la galaxie n'existe pas toujours : la vue d'ensemble le remplace
+   * entièrement. L'effet du zoom ne tournait donc qu'une fois, au montage, alors
+   * que `svgRef` était encore vide — et il n'avait aucune raison de retourner
+   * ensuite. Résultat : la molette restait morte dans chaque système. Ce témoin,
+   * posé par la ref de rappel, redéclenche le branchement à chaque apparition.
+   */
+  const [svgMonte, setSvgMonte] = useState(false);
+  const attacheSvg = useCallback((el: SVGSVGElement | null) => {
+    svgRef.current = el;
+    setSvgMonte(Boolean(el));
+  }, []);
   const zoomRef = useRef<{ k: number; x: number; y: number }>({ k: 1, x: 0, y: 0 });
   const rootRef = useRef<SVGGElement | null>(null);
   /** Cadre du SVG, mesuré aux changements plutôt qu'à chaque événement. */
@@ -459,7 +473,7 @@ export default function GalaxyView({
 
     incomeFlows.forEach(inf => {
       const iid = `inc-${inf.id}`;
-      nodes.push({ id: iid, kind: "income-item", label: inf.name || "Revenu", r: 10 + Math.min(8, Number(inf.amount) / 200), color: "#34d399", sub: fmt(Number(inf.amount)), flowId: inf.id });
+      nodes.push({ id: iid, kind: "income-item", label: inf.name || "Revenu", r: 10 + Math.min(8, Number(inf.amount) / 200), color: "#34d399", sub: fmt(Number(inf.amount)), flowId: inf.id, proprietaires: [personne(null)] });
       links.push({ source: "salary", target: iid });
     });
 
@@ -487,7 +501,7 @@ export default function GalaxyView({
         const eid = `exp-${ef.id}`;
         const part = partDepense(ef, null);
         nodes.push({ id: eid, kind: "expense-item", label: ef.name || "Dépense", r: 10 + Math.min(8, part / 100), color: "#f87171", sub: fmt(part), flowId: ef.id,
-          partagee: ef.shared === true, partPct: Math.round(partDe(ef, expenseShares, null) * 100), totalPartage: monthlyAmount(ef) });
+          partagee: ef.shared === true, partPct: Math.round(partDe(ef, expenseShares, null) * 100), totalPartage: monthlyAmount(ef), proprietaires: [personne(null)] });
         links.push({ source: "expenses", target: eid });
       });
     }
@@ -518,14 +532,13 @@ export default function GalaxyView({
         const eid = `exp-m${m.id}-${ef.id}`;
         const part = partDepense(ef, m.id);
         nodes.push({ id: eid, kind: "expense-item", label: ef.name || "Dépense", r: 10 + Math.min(8, part / 100), color: "#f87171", sub: fmt(part), flowId: ef.id,
-          partagee: ef.shared === true, partPct: Math.round(partDe(ef, expenseShares, m.id) * 100), totalPartage: monthlyAmount(ef) });
+          partagee: ef.shared === true, partPct: Math.round(partDe(ef, expenseShares, m.id) * 100), totalPartage: monthlyAmount(ef), proprietaires: [personne(m.id)] });
         links.push({ source: meid, target: eid });
       });
     });
 
     for (const g of groups) {
       const pid = `p-${g.key}`;
-      const memberNode = g.portfolio.memberId ? `m-${g.portfolio.memberId}` : null;
       const totalGain = g.valued.reduce((s, v) => { const a = v.asset; return s + ((a.avgBuyPrice && Number(a.avgBuyPrice) > 0) ? gain(a, a.ticker ? quotes[a.ticker] : null, ctx) : 0); }, 0);
       const skin = planetSkin(g.portfolio.name, g.valued, g.portfolio.skin);
       const projTotal = projectedGroupTotal(g);
@@ -534,7 +547,19 @@ export default function GalaxyView({
       // sens à côté d'une valeur projetée dans le futur — on le masque plutôt que d'afficher
       // un chiffre qui semblerait porter sur la projection alors qu'il ne la concerne pas.
       nodes.push({ id: pid, kind: "portfolio", label: g.portfolio.name, r: sr(projTotal, maxPV, 20, 78), color: NATURE_COLORS[g.nature], nature: g.nature, portfolioKey: g.key, gainVal: scrubYears > 0 ? undefined : totalGain, sub: fmt(projTotal), skin, isProjected: scrubYears > 0, proprietaires });
-      links.push({ source: memberNode ?? "self", target: pid });
+      // Un fil par personne qui détient la planète, pas un seul vers le
+      // propriétaire déclaré : Camille possédait la moitié de l'appartement
+      // sans qu'aucun trait ne l'y relie. Les quotes-parts servaient déjà aux
+      // totaux et à l'anneau — elles manquaient au seul endroit où le lien se
+      // voit. Chaque fil prend la couleur de sa personne, donc un bien commun
+      // en montre deux.
+      for (const p of proprietaires) {
+        // Une quote-part peut nommer quelqu'un qui n'est plus du foyer ; d3
+        // lève alors « missing: m-7 » et la galaxie entière disparaît. La part
+        // reste comptée dans l'anneau, mais sans fil vers un absent.
+        if (p.memberId != null && !members.some(m => m.id === p.memberId)) continue;
+        links.push({ source: p.memberId == null ? "self" : `m-${p.memberId}`, target: pid });
+      }
       if (expanded.has(g.key)) {
         const maxAV = Math.max(1, ...g.valued.map(v => v.value));
         for (const v of g.valued) {
@@ -670,6 +695,14 @@ export default function GalaxyView({
     for (const l of links) {
       const tgt = nm.get(l.target);
       if (tgt && (tgt.kind === "portfolio" || tgt.kind === "goal" || tgt.kind === "member" || tgt.kind === "member-salary" || tgt.kind === "salary")) {
+        // Un bien détenu à plusieurs a désormais plusieurs fils : c'est le plus
+        // gros porteur qui l'accroche, sinon le dernier lien rencontré décidait
+        // de sa place et elle sautait d'un rendu à l'autre.
+        if (structuralParent.has(l.target)) {
+          const principal = tgt.proprietaires?.[0];
+          const attendu = principal ? (principal.memberId == null ? "self" : `m-${principal.memberId}`) : null;
+          if (l.source !== attendu) continue;
+        }
         structuralParent.set(l.target, l.source);
       }
     }
@@ -919,6 +952,13 @@ export default function GalaxyView({
 
   useEffect(() => { const sim = simRef.current; return () => { sim?.stop(); }; }, []);
 
+  // La note s'efface seule : elle explique un geste, elle n'attend pas de réponse.
+  useEffect(() => {
+    if (!noteGeste) return;
+    const t = setTimeout(() => setNoteGeste(null), 6000);
+    return () => clearTimeout(t);
+  }, [noteGeste]);
+
   /**
    * Zoom à la molette.
    *
@@ -935,6 +975,8 @@ export default function GalaxyView({
   useEffect(() => {
     const svg = svgRef.current, root = rootRef.current;
     if (!svg || !root) return;
+
+    Object.assign(zoomRef.current, { k: 1, x: 0, y: 0 });
 
     // `getBoundingClientRect` force un recalcul de mise en page. À plus de cent
     // événements par seconde, autant ne mesurer qu'aux moments où ça change.
@@ -957,7 +999,7 @@ export default function GalaxyView({
       window.removeEventListener("scroll", remesurer, true);
       window.removeEventListener("resize", remesurer);
     };
-  }, []);
+  }, [svgMonte]);
 
   // Drag + Pan + Snap
   const panState = useRef<{ active: boolean; sx: number; sy: number; ox: number; oy: number } | null>(null);
@@ -1045,7 +1087,19 @@ export default function GalaxyView({
       const newMemberId = ownerSourceNode.kind === "center" ? null : (ownerSourceNode.memberId as number);
       if (isPortfolio) {
         const g = groups.find(gr => gr.key === n.portfolioKey);
-        if (g && g.key !== "unassigned") actions.updatePortfolio(g.key as number, { name: g.portfolio.name, color: g.portfolio.color, skin: g.portfolio.skin, memberId: newMemberId });
+        // Une planète déjà répartie ne se réattribue pas d'un trait : ses
+        // quotes-parts font foi partout — totaux, anneau, fils de propriété.
+        // Écrire le propriétaire déclaré ne changeait alors rien à l'écran, et
+        // le geste avait l'air d'échouer sans rien dire. On ouvre plutôt
+        // l'endroit où la répartition se décide.
+        const dejaRepartie = g && portfolioOwnerships.some(o => o.portfolioId === g.key);
+        if (g && dejaRepartie) {
+          setSelected({ kind: "portfolio", id: g.key, name: g.portfolio.name, color: g.portfolio.color, skin: g.portfolio.skin, total: g.total, count: g.valued.length, memberId: g.portfolio.memberId });
+          setDrawer("details");
+          setNoteGeste(`« ${g.portfolio.name} » est partagée : ce sont ses quotes-parts qui décident, dans le panneau.`);
+        } else if (g && g.key !== "unassigned") {
+          actions.updatePortfolio(g.key as number, { name: g.portfolio.name, color: g.portfolio.color, skin: g.portfolio.skin, memberId: newMemberId });
+        }
       } else if (isGoal) {
         const goal = goals.find(gg => gg.id === n.goalId);
         if (goal) actions.updateGoal(goal.id, { name: goal.name, targetAmount: goal.targetAmount, targetDate: goal.targetDate, color: goal.color, memberId: newMemberId });
@@ -1113,7 +1167,7 @@ export default function GalaxyView({
     }
   };
 
-  const autoLayout = () => { clearAllPositions(layoutModeRef.current); nodesMapRef.current.forEach(n => { if (n.id !== "center") { n.fx = null; n.fy = null; } }); zoomRef.current = { k: 1, x: 0, y: 0 }; rootRef.current?.setAttribute("transform", ""); simRef.current?.alpha(1).restart(); };
+  const autoLayout = () => { clearAllPositions(layoutModeRef.current); nodesMapRef.current.forEach(n => { if (n.id !== "center") { n.fx = null; n.fy = null; } }); Object.assign(zoomRef.current, { k: 1, x: 0, y: 0 }); rootRef.current?.setAttribute("transform", ""); simRef.current?.alpha(1).restart(); };
 
   const exportPdf = async () => {
     const svg = svgRef.current; if (!svg) return;
@@ -1552,7 +1606,7 @@ export default function GalaxyView({
             ))}
           </div>
         )}
-        <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full h-full select-none touch-none block absolute inset-0"
+        <svg ref={attacheSvg} viewBox={`0 0 ${W} ${H}`} className="w-full h-full select-none touch-none block absolute inset-0"
           onPointerDown={onBgDown} onPointerMove={onBgMove} onPointerUp={onBgUp} onPointerLeave={onBgUp}
           onClick={() => { if (linkSourceNode) { setLinkSourceNode(null); return; } if (ownerSourceNode) { setOwnerSourceNode(null); return; } setSelected(null); setCreateMode(null); }}>
           <defs>
@@ -2120,6 +2174,13 @@ export default function GalaxyView({
             <button title="Masquer la simulation" onClick={() => setShowScrubBar(false)} className="shrink-0 text-text-muted hover:text-negative">
               <X size={13} />
             </button>
+          </div>
+        )}
+
+        {noteGeste && (
+          <div role="status" className="absolute left-1/2 top-3 -translate-x-1/2 z-20 max-w-[22rem] flex items-start gap-2 px-3 py-2 rounded-lg glass-panel border border-border text-xs text-text shadow-lg">
+            <span className="flex-1">{noteGeste}</span>
+            <button onClick={() => setNoteGeste(null)} aria-label="Fermer" className="shrink-0 text-text-muted hover:text-text"><X size={13} /></button>
           </div>
         )}
 
