@@ -23,7 +23,9 @@ describe("rangées", () => {
     assert.equal(layerOf("member-salary"), 0);
     assert.equal(layerOf("center"), 1);
     assert.equal(layerOf("member"), 1);
-    assert.equal(layerOf("expenses"), 1);
+    // Une dépense est une destination : l'argent y part, comme vers une planète.
+    assert.equal(layerOf("expenses"), 2);
+    assert.equal(layerOf("reste"), 2);
     assert.equal(layerOf("portfolio"), 2);
     assert.equal(layerOf("goal"), 2);
   });
@@ -52,8 +54,30 @@ describe("lecture de gauche à droite", () => {
 
   test("une rangée partage la même abscisse", () => {
     assert.equal(pos.get("center")!.x, pos.get("self")!.x);
-    assert.equal(pos.get("self")!.x, pos.get("expenses")!.x);
     assert.equal(pos.get("p-1")!.x, pos.get("g-1")!.x);
+    assert.equal(pos.get("expenses")!.x, pos.get("p-1")!.x);
+  });
+
+  test("les dépenses quittent la colonne des personnes pour celle des destinations", () => {
+    assert.ok(pos.get("self")!.x < pos.get("expenses")!.x,
+      "une dépense empilée sur sa personne rendait le système « Dépenses » illisible");
+  });
+
+  test("le bloc de rangées est centré, et deux rangées ne sont pas jetées aux deux bords", () => {
+    const deuxRangees = flowLayout(
+      [n("salary", "salary"), n("center", "center"), n("self", "member")],
+      "horizontal", { width: W, height: H },
+    );
+    const gauche = deuxRangees.get("salary")!.x, droite = deuxRangees.get("center")!.x;
+    assert.ok(gauche > 150, `la colonne de gauche colle au bord (x=${gauche})`);
+    assert.ok(droite < W - 150, `la colonne de droite colle au bord (x=${droite})`);
+    assert.ok(Math.abs((gauche + droite) / 2 - W / 2) < 1, "le bloc n'est pas centré");
+  });
+
+  test("trois rangées restent centrées elles aussi", () => {
+    const xs = ["salary", "center", "p-1"].map(id => pos.get(id)!.x);
+    assert.ok(Math.abs((xs[0] + xs[2]) / 2 - W / 2) < 1, `bloc décentré : ${xs.join(", ")}`);
+    assert.ok(Math.abs((xs[1] - xs[0]) - (xs[2] - xs[1])) < 1, "pas irrégulier");
   });
 
   test("tout tient dans le cadre, rayon compris", () => {

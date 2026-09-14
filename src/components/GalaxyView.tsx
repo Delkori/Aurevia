@@ -7,16 +7,20 @@ import {
 } from "d3-force";
 import { FolderPlus, Plus, PlusCircle, Star, Download, RotateCcw, RefreshCw, Wallet, TrendingUp, TrendingDown, Users, Link2, X, Eye, EyeOff, AlertTriangle, Bell, Clock, Menu, PanelRight, LayoutGrid, FlaskConical } from "lucide-react";
 import { findAccessory } from "@/lib/astronautAccessories";
-import { formatMoney } from "@/lib/format";
+import { deNom, formatMoney } from "@/lib/format";
 import { futureValue } from "@/lib/projection";
 import { monthlyEquivalent } from "@/lib/flows";
 import { partDe, type PartLike } from "@/lib/expenseShares";
 import { proprietairesDe, arcsAnneau, type Proprietaire } from "@/lib/proprietaires";
-import { goalIdDeProjet, systemeDuNoeud, type EntreesSystemes, type SystemeId } from "@/lib/systemes";
+import {
+  construireSystemes, contexteUtile, goalIdDeProjet, systemeDuNoeud,
+  type EntreesSystemes, type SystemeId,
+} from "@/lib/systemes";
 import SystemesView from "@/components/SystemesView";
 import { currentValue, gain, gainPercent, goalProgress, totalDebt, ownedShare, type Rates, type ValuationContext } from "@/lib/networth";
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
 import { getLogoUrl } from "@/lib/logos";
+import { brancherMolette, transformeDe } from "@/lib/molette";
 import {
   EXPENSES_IMAGES, SHIP_DIMS, SHIP_IMAGES, VACANCES_IMAGE, isVacationGoal, palierDepenses,
   planetSkin, salaryImage, skinImageForValue, type PlanetSkin,
@@ -44,15 +48,7 @@ const W = 1200, H = 800, CX = W / 2, CY = H / 2, CENTER_R = 32;
 
 // Bornes et sensibilité du zoom à la molette.
 //
-// `SENSIBILITE_ZOOM` se lit ainsi : un cran de souris (deltaY ≈ 100) donne
-// `exp(100 × 0,0014) ≈ 1,15`, soit 15 % — la valeur qui « tombe juste » au
-// poignet. Un effleurement de pavé tactile (deltaY ≈ 4) donne 1,006 : il en
-// faut une bonne centaine pour doubler l'échelle, ce qui est exactement le
-// geste attendu.
 const ZOOM_MIN = 0.2, ZOOM_MAX = 6;
-const SENSIBILITE_ZOOM = 0.0014;
-/** Amplitude maximale retenue d'un seul événement, pour qu'aucun ne fasse bondir la vue. */
-const PAS_ZOOM_MAX = 180;
 function sr(v: number, mx: number, mn: number, mxx: number) { return mx <= 0 ? mn : mn + (mxx - mn) * Math.sqrt(Math.max(0, Math.min(1, v / mx))); }
 
 // Lightens (positive percent) or darkens (negative) a hex color, for building a
@@ -92,6 +88,10 @@ interface GNode extends SimulationNodeDatum {
   ownerExpenseTotal?: number; ownerRevenue?: number; flowId?: number; amount?: number; isProjected?: boolean; accessory?: string | null;
   /** Dépense portée par plusieurs personnes : le nœud n'en montre qu'une part. */
   partagee?: boolean;
+  /** Part de cette personne dans une dépense partagée, de 0 à 100. */
+  partPct?: number;
+  /** Montant mensuel total d'une dépense partagée, toutes personnes confondues. */
+  totalPartage?: number;
   /** À qui le nœud appartient — c'est ce qui teinte son anneau et ses flux. */
   proprietaires?: Proprietaire[];
 }
@@ -476,13 +476,14 @@ export default function GalaxyView({
     const resteAInvestir = totalRevenue > 0 ? Math.max(0, totalRevenue - totalInvest - totalExpenseFlows) : 0;
 
     if (totalRevenue > 0) {
-      nodes.push({ id: "expenses", kind: "expenses", label: "Dépenses", r: 22 + Math.min(18, myExpenseTotal / 80), color: "#f87171", ownerExpenseTotal: myExpenseTotal, ownerRevenue: totalRevenue, proprietaires: [personne(null)] });
+      nodes.push({ id: "expenses", kind: "expenses", label: `Dépenses ${deNom(ownerName)}`, r: 22 + Math.min(18, myExpenseTotal / 80), color: "#f87171", ownerExpenseTotal: myExpenseTotal, ownerRevenue: totalRevenue, proprietaires: [personne(null)] });
       links.push({ source: "salary", target: "expenses" });
       if (myExpenseTotal > 0) flowLinks.push({ source: "salary", target: "expenses", label: fmt(myExpenseTotal), amount: myExpenseTotal, couleur: centerColor });
       myExpFlows.forEach(ef => {
         const eid = `exp-${ef.id}`;
         const part = partDepense(ef, null);
-        nodes.push({ id: eid, kind: "expense-item", label: ef.name || "Dépense", r: 10 + Math.min(8, part / 100), color: "#f87171", sub: fmt(part), flowId: ef.id, partagee: ef.shared === true });
+        nodes.push({ id: eid, kind: "expense-item", label: ef.name || "Dépense", r: 10 + Math.min(8, part / 100), color: "#f87171", sub: fmt(part), flowId: ef.id,
+          partagee: ef.shared === true, partPct: Math.round(partDe(ef, expenseShares, null) * 100), totalPartage: monthlyAmount(ef) });
         links.push({ source: "expenses", target: eid });
       });
     }
@@ -504,12 +505,16 @@ export default function GalaxyView({
       const memberExpenseTotal = expFlows.reduce((s, f) => s + partDepense(f, m.id), 0);
       const memberRevenue = m.salary ? Number(m.salary) : 0;
       const meid = `exp-m-${m.id}`;
-      nodes.push({ id: meid, kind: "expenses", label: `Dépenses de ${m.name}`, r: 22 + Math.min(18, memberExpenseTotal / 80), color: "#f87171", memberId: m.id, ownerExpenseTotal: memberExpenseTotal, ownerRevenue: memberRevenue, proprietaires: [personne(m.id)] });
+      nodes.push({ id: meid, kind: "expenses", label: `Dépenses ${deNom(m.name)}`, r: 22 + Math.min(18, memberExpenseTotal / 80), color: "#f87171", memberId: m.id, ownerExpenseTotal: memberExpenseTotal, ownerRevenue: memberRevenue, proprietaires: [personne(m.id)] });
       links.push({ source: `m-${m.id}`, target: meid });
+      if (memberExpenseTotal > 0 && memberRevenue > 0) {
+        flowLinks.push({ source: `ms-${m.id}`, target: meid, label: fmt(memberExpenseTotal), amount: memberExpenseTotal, couleur: m.color });
+      }
       memberExpFlows.forEach(ef => {
         const eid = `exp-m${m.id}-${ef.id}`;
         const part = partDepense(ef, m.id);
-        nodes.push({ id: eid, kind: "expense-item", label: ef.name || "Dépense", r: 10 + Math.min(8, part / 100), color: "#f87171", sub: fmt(part), flowId: ef.id, partagee: ef.shared === true });
+        nodes.push({ id: eid, kind: "expense-item", label: ef.name || "Dépense", r: 10 + Math.min(8, part / 100), color: "#f87171", sub: fmt(part), flowId: ef.id,
+          partagee: ef.shared === true, partPct: Math.round(partDe(ef, expenseShares, m.id) * 100), totalPartage: monthlyAmount(ef) });
         links.push({ source: meid, target: eid });
       });
     });
@@ -569,7 +574,7 @@ export default function GalaxyView({
       const garde = new Set<string>();
       for (const n of nodes) {
         const appartenance = systemeDuNoeud(n.kind);
-        if (appartenance === "contexte") { garde.add(n.id); continue; }
+        if (appartenance === "contexte") { if (contexteUtile(n.kind, systeme)) garde.add(n.id); continue; }
         if (objectifDuSysteme != null) {
           // Un projet montre son objectif et les planètes qui l'alimentent.
           if (n.kind === "goal" && n.goalId === objectifDuSysteme) garde.add(n.id);
@@ -609,6 +614,12 @@ export default function GalaxyView({
     return { targetNodes: nodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows, totalRevenue, totalInvest };
   }, [groups, expanded, goals, members, flows, quotes, salary, goalLinks, progressOf, scrubYears, scrubGrowth, ownerName, centerColor, ownerAccessory, ctx, portfolioOwnerships, expenseShares, systeme, fmt]);
   linksRef.current = links;
+
+  // Le corps du système où l'on a voyagé, pour l'annoncer en haut de la vue.
+  const systemeCourant = useMemo(() => {
+    if (systeme === null || !entreesSystemes) return null;
+    return construireSystemes(entreesSystemes).systemes.find(s => s.id === systeme) ?? null;
+  }, [systeme, entreesSystemes]);
 
   // Simulation
   useEffect(() => {
@@ -912,50 +923,17 @@ export default function GalaxyView({
     window.addEventListener("scroll", remesurer, true);
     window.addEventListener("resize", remesurer);
 
-    // Une écriture par image : le pavé tactile émet plus vite que l'écran
-    // n'affiche, et chaque écriture invalide la peinture de tout le SVG.
-    let trame = 0;
-    const peindre = () => {
-      trame = 0;
-      const z = zoomRef.current;
-      root.setAttribute("transform", `translate(${z.x},${z.y}) scale(${z.k})`);
-    };
+    const detacher = brancherMolette({
+      svg, racine: root, vue: zoomRef.current, largeur: W, hauteur: H,
+      min: ZOOM_MIN, max: ZOOM_MAX,
+      rect: () => rectRef.current ?? svg.getBoundingClientRect(),
+    });
 
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-
-      // `deltaMode` varie d'un navigateur à l'autre : Firefox compte en lignes
-      // là où Chrome compte en pixels. Sans conversion, le même geste zoome
-      // plusieurs fois moins vite ici que là.
-      const rect = rectRef.current ?? svg.getBoundingClientRect();
-      let dy = e.deltaY;
-      if (e.deltaMode === 1) dy *= 16;
-      else if (e.deltaMode === 2) dy *= rect.height || 400;
-      // Un événement isolé ne doit jamais faire faire un bond à la vue, même si
-      // le système en agrège plusieurs d'un coup.
-      dy = Math.max(-PAS_ZOOM_MAX, Math.min(PAS_ZOOM_MAX, dy));
-
-      const z = zoomRef.current;
-      const nk = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z.k * Math.exp(-dy * SENSIBILITE_ZOOM)));
-      if (nk === z.k) return; // déjà en butée : rien à redessiner
-
-      // Le point sous le curseur reste sous le curseur.
-      const mx = (e.clientX - rect.left) / rect.width * W;
-      const my = (e.clientY - rect.top) / rect.height * H;
-      z.x = mx - (mx - z.x) * (nk / z.k);
-      z.y = my - (my - z.y) * (nk / z.k);
-      z.k = nk;
-
-      if (!trame) trame = requestAnimationFrame(peindre);
-    };
-
-    svg.addEventListener("wheel", onWheel, { passive: false });
     return () => {
-      svg.removeEventListener("wheel", onWheel);
+      detacher();
       ro.disconnect();
       window.removeEventListener("scroll", remesurer, true);
       window.removeEventListener("resize", remesurer);
-      if (trame) cancelAnimationFrame(trame);
     };
   }, []);
 
@@ -991,7 +969,7 @@ export default function GalaxyView({
     const p = panState.current, svg = svgRef.current!, rect = rectRef.current ?? svg.getBoundingClientRect();
     zoomRef.current.x = p.ox + (e.clientX - p.sx) / rect.width * W;
     zoomRef.current.y = p.oy + (e.clientY - p.sy) / rect.height * H;
-    rootRef.current?.setAttribute("transform", `translate(${zoomRef.current.x},${zoomRef.current.y}) scale(${zoomRef.current.k})`);
+    rootRef.current?.setAttribute("transform", transformeDe(zoomRef.current));
   };
   const onBgUp = () => {
     if (dragId) {
@@ -1515,13 +1493,27 @@ export default function GalaxyView({
             <SystemesView entrees={entreesSystemes} devise={displayCurrency} onEntrer={onEntrerSysteme} />
           </div>
         ) : (<>
+        {/* Où suis-je : sans ce titre, rien ne rappelait dans quel système on
+            avait voyagé — on lisait des planètes sans savoir ce qu'elles
+            racontaient. Le point reprend la couleur du système. */}
         {systeme !== null && onSortirSysteme && (
-          <button
-            onClick={onSortirSysteme}
-            className="absolute top-3 left-3 z-10 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg glass-panel border border-border text-xs text-text-muted hover:text-text max-lg:top-14"
-          >
-            <ChevronLeft size={13} />Vue d&apos;ensemble
-          </button>
+          <div className="absolute top-3 left-3 z-10 flex items-center gap-2 max-lg:top-14">
+            <button
+              onClick={onSortirSysteme}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg glass-panel border border-border text-xs text-text-muted hover:text-text"
+            >
+              <ChevronLeft size={13} />Vue d&apos;ensemble
+            </button>
+            {systemeCourant && (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg glass-panel border border-border">
+                <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: systemeCourant.couleur }} />
+                <span className="text-sm font-semibold text-text">{systemeCourant.label}</span>
+                <span className="text-xs text-text-muted tabular">
+                  {mask(fmt(systemeCourant.montant))}{systemeCourant.parMois ? "/mois" : ""}
+                </span>
+              </div>
+            )}
+          </div>
         )}
         {/* Qui est de quelle couleur — l'anneau seul ne suffit pas, il faut le nom à côté. */}
         {members.length > 0 && (
@@ -1651,7 +1643,13 @@ export default function GalaxyView({
               const s = nodeById.get(f.source), tg = nodeById.get(f.target);
               if (!s || !tg || s.x == null || tg.x == null) return null;
               const seed = hashSeed(f.source, f.target), c = curveControl({ x: s.x!, y: s.y! }, { x: tg.x!, y: tg.y! }, seed);
-              const mid = bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, 0.5);
+              // Tous les montants écrits au milieu de leur courbe se rassemblaient
+              // au même endroit quand plusieurs flux partent de la même source :
+              // « 100 € », « 50 € » et « dans 19j » s'empilaient par-dessus la
+              // personne. On les échelonne le long de la courbe, à un point
+              // stable pour un flux donné.
+              const t = 0.32 + ((seed >>> 0) % 7) * 0.06;
+              const mid = bezierPoint({ x: s.x!, y: s.y! }, c, { x: tg.x!, y: tg.y! }, t);
               return <g key={`fl-${i}`}>
                 <path d={`M ${s.x} ${s.y} Q ${c.x} ${c.y} ${tg.x} ${tg.y}`} fill="none" stroke={f.couleur} strokeOpacity={0.55} strokeWidth={1.5} strokeDasharray="6 4" />
                 <text x={mid.x} y={mid.y - 12} textAnchor="middle" fontSize={10} fill={f.couleur} fontWeight={700} style={HALO_TEXTE}>{mask(f.label)}</text>
@@ -1835,7 +1833,21 @@ export default function GalaxyView({
                   </>;
                 })()}
 
-                {n.kind === "expense-item" && <><circle r={n.r} fill="rgba(248,113,113,0.1)" stroke="rgba(248,113,113,0.2)" strokeWidth={0.5} /><text y={-1} textAnchor="middle" fontSize={8} fill="rgba(255,255,255,0.65)">{n.label.length > 10 ? n.label.slice(0, 9) + "…" : n.label}</text><text y={8} textAnchor="middle" fontSize={7} fill="rgba(248,113,113,0.75)">{n.sub && mask(n.sub)}</text></>}
+                {n.kind === "expense-item" && (() => {
+                  // Une dépense du foyer apparaît autour de chaque personne, à
+                  // sa part. Sans le pourcentage, « Loyer 575 € » deux fois se
+                  // lisait comme deux loyers : la répartition ne se voyait pas.
+                  const partagee = n.partagee === true && n.partPct != null && n.partPct < 100;
+                  return <>
+                    <circle r={n.r} fill="rgba(248,113,113,0.1)" stroke={partagee ? "rgba(248,113,113,0.45)" : "rgba(248,113,113,0.2)"} strokeWidth={partagee ? 1 : 0.5} strokeDasharray={partagee ? "3 2" : undefined} />
+                    <title>{partagee
+                      ? `${n.label} — ${mask(fmt(n.totalPartage ?? 0))}/mois partagés, dont ${mask(n.sub ?? "")} pour cette personne (${n.partPct} %)`
+                      : `${n.label} — ${mask(n.sub ?? "")}/mois`}</title>
+                    <text y={-1} textAnchor="middle" fontSize={8} fill="rgba(255,255,255,0.65)">{n.label.length > 10 ? n.label.slice(0, 9) + "…" : n.label}</text>
+                    <text y={8} textAnchor="middle" fontSize={7} fill="rgba(248,113,113,0.75)">{n.sub && mask(n.sub)}</text>
+                    {partagee && <text y={16} textAnchor="middle" fontSize={6.5} fontWeight={600} fill="rgba(255,190,160,0.9)">{n.partPct} % du foyer</text>}
+                  </>;
+                })()}
 
                 {n.kind === "reste" && <><circle r={n.r} fill="url(#sph-reste)" /><circle r={n.r} fill="url(#sph-hl)" /><text y={-4} textAnchor="middle" fontSize={10} fontWeight={500} fill="#e0d8ff">Reste</text><text y={9} textAnchor="middle" fontSize={9} fill="rgba(200,185,255,0.8)">{mask(fmt(resteAInvestir))}/m</text></>}
 
