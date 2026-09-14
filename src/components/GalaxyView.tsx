@@ -20,7 +20,7 @@ import SystemesView from "@/components/SystemesView";
 import { currentValue, gain, gainPercent, goalProgress, totalDebt, ownedShare, type Rates, type ValuationContext } from "@/lib/networth";
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
 import { getLogoUrl } from "@/lib/logos";
-import { brancherMolette, transformeDe } from "@/lib/molette";
+import { brancherZoom, transformeDe, vueDOuverture } from "@/lib/zoom";
 import {
   FILTRE_ETEINT, SHIP_DIMS, SHIP_IMAGES, VACANCES_IMAGE, imageDepenses, isVacationGoal,
   palierDepenses, planetSkin, salaryImage, skinImageForValue, type PlanetSkin,
@@ -372,6 +372,12 @@ export default function GalaxyView({
   }, []);
   const zoomRef = useRef<{ k: number; x: number; y: number }>({ k: 1, x: 0, y: 0 });
   const rootRef = useRef<SVGGElement | null>(null);
+  /**
+   * Interroge le module de zoom : deux doigts posés ? Le déplacement s'efface
+   * alors, sinon le premier doigt traînait la vue pendant que les deux la
+   * mettaient à l'échelle.
+   */
+  const pinceRef = useRef<(() => boolean) | null>(null);
   /** Cadre du SVG, mesuré aux changements plutôt qu'à chaque événement. */
   const rectRef = useRef<DOMRect | null>(null);
   const layoutModeRef = useRef(layoutMode);
@@ -977,8 +983,6 @@ export default function GalaxyView({
     const svg = svgRef.current, root = rootRef.current;
     if (!svg || !root) return;
 
-    Object.assign(zoomRef.current, { k: 1, x: 0, y: 0 });
-
     // `getBoundingClientRect` force un recalcul de mise en page. À plus de cent
     // événements par seconde, autant ne mesurer qu'aux moments où ça change.
     const remesurer = () => { rectRef.current = svg.getBoundingClientRect(); };
@@ -988,14 +992,26 @@ export default function GalaxyView({
     window.addEventListener("scroll", remesurer, true);
     window.addEventListener("resize", remesurer);
 
-    const detacher = brancherMolette({
+    // Sur un écran étroit, la vue s'ouvre de plus près : à l'échelle du cadre,
+    // le texte tombe sous trois pixels. Ailleurs, `vueDOuverture` rend la vue
+    // neutre et rien ne change.
+    const cadre = rectRef.current;
+    Object.assign(zoomRef.current, vueDOuverture({
+      largeurPx: cadre?.width ?? 0, hauteurPx: cadre?.height ?? 0,
+      largeur: W, hauteur: H, max: ZOOM_MAX,
+    }));
+    root.setAttribute("transform", transformeDe(zoomRef.current));
+
+    const zoom = brancherZoom({
       svg, racine: root, vue: zoomRef.current, largeur: W, hauteur: H,
       min: ZOOM_MIN, max: ZOOM_MAX,
       rect: () => rectRef.current ?? svg.getBoundingClientRect(),
     });
+    pinceRef.current = zoom.pince;
 
     return () => {
-      detacher();
+      zoom.detacher();
+      pinceRef.current = null;
       ro.disconnect();
       window.removeEventListener("scroll", remesurer, true);
       window.removeEventListener("resize", remesurer);
@@ -1011,10 +1027,12 @@ export default function GalaxyView({
 
   const onBgDown = (e: React.PointerEvent) => {
     if ((e.target as Element).closest(".nd")) return;
+    if (pinceRef.current?.()) { panState.current = null; return; }
     panState.current = { active: true, sx: e.clientX, sy: e.clientY, ox: zoomRef.current.x, oy: zoomRef.current.y };
   };
   const onBgMove = (e: React.PointerEvent) => {
     if (dragId) {
+      if (pinceRef.current?.()) { setDragId(null); setSnapTarget(null); return; }
       const node = nodesMapRef.current.get(dragId);
       if (!node) return;
       const { x, y } = screenToSvg(e.clientX, e.clientY);
@@ -1031,6 +1049,7 @@ export default function GalaxyView({
       return;
     }
     if (!panState.current?.active) return;
+    if (pinceRef.current?.()) { panState.current = null; return; }
     const p = panState.current, svg = svgRef.current!, rect = rectRef.current ?? svg.getBoundingClientRect();
     zoomRef.current.x = p.ox + (e.clientX - p.sx) / rect.width * W;
     zoomRef.current.y = p.oy + (e.clientY - p.sy) / rect.height * H;
@@ -1062,6 +1081,9 @@ export default function GalaxyView({
 
   const onNodeDown = (id: string) => (e: React.PointerEvent) => {
     e.stopPropagation();
+    // Pincer en posant les doigts sur une planète ne doit pas l'emporter avec
+    // soi : à deux doigts, c'est la vue qu'on met à l'échelle, pas la planète.
+    if (pinceRef.current?.()) { setDragId(null); return; }
     dragStartPos.current = { x: e.clientX, y: e.clientY };
     setDragId(id);
     simRef.current?.alphaTarget(0.3).restart();
@@ -1603,18 +1625,19 @@ export default function GalaxyView({
             avait voyagé — on lisait des planètes sans savoir ce qu'elles
             racontaient. Le point reprend la couleur du système. */}
         {systeme !== null && onSortirSysteme && (
-          <div className="absolute top-3 left-3 z-10 flex items-center gap-2 max-lg:top-14">
+          <div className="absolute top-3 left-3 right-3 z-10 flex items-center gap-2 max-lg:top-14">
             <button
               onClick={onSortirSysteme}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg glass-panel border border-border text-xs text-text-muted hover:text-text"
+              aria-label="Revenir à la vue d'ensemble"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg glass-panel border border-border text-xs text-text-muted hover:text-text shrink-0"
             >
-              <ChevronLeft size={13} />Vue d&apos;ensemble
+              <ChevronLeft size={13} /><span className="max-sm:sr-only">Vue d&apos;ensemble</span>
             </button>
             {systemeCourant && (
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg glass-panel border border-border">
+              <div className="flex items-center gap-2 min-w-0 px-3 py-1.5 rounded-lg glass-panel border border-border">
                 <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: systemeCourant.couleur }} />
-                <span className="text-sm font-semibold text-text">{systemeCourant.label}</span>
-                <span className="text-xs text-text-muted tabular">
+                <span className="text-sm font-semibold text-text truncate">{systemeCourant.label}</span>
+                <span className="text-xs text-text-muted tabular shrink-0">
                   {mask(fmt(systemeCourant.montant))}{systemeCourant.parMois ? "/mois" : ""}
                 </span>
               </div>

@@ -149,8 +149,14 @@ export function demoFlows(maintenant = new Date()) {
   });
 }
 
+/**
+ * La disposition n'est pas imposée : sans valeur, l'interface choisit selon la
+ * largeur de l'écran — de gauche à droite sur un poste, de haut en bas sur un
+ * téléphone, où une lecture en colonnes ne tient pas. Forcer « horizontal »
+ * ici enfermait la démonstration dans la lecture large sur tous les écrans.
+ */
 export function demoSettings(): Record<string, string> {
-  return { ...DEMO_SETTINGS, layout_mode: "horizontal" };
+  return { ...DEMO_SETTINGS };
 }
 
 /**

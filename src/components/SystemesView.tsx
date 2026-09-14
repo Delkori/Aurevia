@@ -11,7 +11,7 @@ import {
   FILTRE_ETEINT, SHIP_DIMS, SHIP_IMAGES, imageSatellite, imageSysteme, palierDepenses,
   palierVaisseau, type GenreSysteme,
 } from "@/lib/skins";
-import { brancherMolette, transformeDe, type Vue } from "@/lib/molette";
+import { brancherZoom, transformeDe, vueDOuverture, type Vue } from "@/lib/zoom";
 
 /**
  * La vue d'ensemble : cinq ou six corps, et ce qui circule entre eux.
@@ -112,6 +112,25 @@ function useAnimations(): boolean {
   );
 }
 
+/**
+ * Milieu de ce qui est réellement dessiné, mesuré sur le groupe racine.
+ *
+ * Les corps n'occupent pas tout le repère : ouvrir de près sur son milieu
+ * géométrique montrait une bande vide au-dessus des systèmes. `getBBox` rend
+ * le cadre du contenu dans le repère du groupe, avant sa propre transformation
+ * — c'est exactement ce qu'il faut ici, puisqu'on cherche où centrer celle-ci.
+ */
+function milieuDessine(racine: SVGGElement): { x: number; y: number } | undefined {
+  try {
+    const b = racine.getBBox();
+    if (!(b.width > 0) || !(b.height > 0)) return undefined;
+    return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  } catch {
+    // `getBBox` lève sur un élément non rendu ; la vue s'ouvrira au milieu.
+    return undefined;
+  }
+}
+
 export default function SystemesView({
   entrees, devise, onEntrer,
 }: {
@@ -132,6 +151,8 @@ export default function SystemesView({
   const vueRef = useRef<Vue>({ k: 1, x: 0, y: 0 });
   const rectRef = useRef<DOMRect | null>(null);
   const glisse = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
+  /** Deux doigts posés : le déplacement se tait, le pincement mène. */
+  const pinceRef = useRef<(() => boolean) | null>(null);
 
   useEffect(() => {
     const svg = svgRef.current, racine = racineRef.current;
@@ -141,23 +162,40 @@ export default function SystemesView({
     const ro = new ResizeObserver(remesurer);
     ro.observe(svg);
     window.addEventListener("resize", remesurer);
-    const detacher = brancherMolette({
+    // Écran étroit : on ouvre de plus près, sinon les six corps et leurs
+    // satellites nommés se réduisent à une bande illisible.
+    const cadre = rectRef.current;
+    Object.assign(vueRef.current, vueDOuverture({
+      largeurPx: cadre?.width ?? 0, hauteurPx: cadre?.height ?? 0, largeur: W, hauteur: H,
+      centre: milieuDessine(racine),
+    }));
+    racine.setAttribute("transform", transformeDe(vueRef.current));
+
+    const zoom = brancherZoom({
       svg, racine, vue: vueRef.current, largeur: W, hauteur: H,
       rect: () => rectRef.current ?? svg.getBoundingClientRect(),
     });
-    return () => { detacher(); ro.disconnect(); window.removeEventListener("resize", remesurer); };
+    pinceRef.current = zoom.pince;
+    return () => {
+      zoom.detacher();
+      pinceRef.current = null;
+      ro.disconnect();
+      window.removeEventListener("resize", remesurer);
+    };
   }, []);
 
   const auDoigtPose = (e: React.PointerEvent) => {
     // Un corps reste cliquable : seul le fond déplace la vue, sinon on ne
     // pourrait plus voyager vers un système sans le déplacer d'abord.
     if ((e.target as Element).closest("g[role=button]")) return;
+    if (pinceRef.current?.()) { glisse.current = null; return; }
     glisse.current = { sx: e.clientX, sy: e.clientY, ox: vueRef.current.x, oy: vueRef.current.y };
     (e.currentTarget as SVGSVGElement).setPointerCapture(e.pointerId);
   };
   const auDoigtBouge = (e: React.PointerEvent) => {
     const g = glisse.current;
     if (!g) return;
+    if (pinceRef.current?.()) { glisse.current = null; return; }
     const r = rectRef.current ?? svgRef.current!.getBoundingClientRect();
     vueRef.current.x = g.ox + (e.clientX - g.sx) / r.width * W;
     vueRef.current.y = g.oy + (e.clientY - g.sy) / r.height * H;
@@ -168,7 +206,9 @@ export default function SystemesView({
     (e.currentTarget as SVGSVGElement).releasePointerCapture?.(e.pointerId);
   };
   const recadrer = () => {
-    vueRef.current = { k: 1, x: 0, y: 0 };
+    // Modifié sur place : le module de zoom garde l'objet qu'on lui a passé,
+    // et le remplacer le laisserait écrire dans l'ancien.
+    Object.assign(vueRef.current, { k: 1, x: 0, y: 0 });
     racineRef.current?.setAttribute("transform", "");
   };
 
