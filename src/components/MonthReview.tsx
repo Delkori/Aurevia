@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Check, CheckCheck, ChevronLeft, ChevronRight, Minus, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
+import { Check, CheckCheck, ChevronLeft, Loader2, ChevronRight, Minus, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { formatMoney } from "@/lib/format";
 
 type Flow = {
@@ -160,7 +160,15 @@ export default function MonthReview({
 }) {
   const [mois, setMois] = useState(() => new Date());
   const [saisie, setSaisie] = useState<Record<number, string>>({});
-  const [enCours, setEnCours] = useState<number | null>(null);
+  /**
+   * Pointages décidés mais pas encore enregistrés.
+   *
+   * Chaque ligne partait au serveur au clic, sans retour possible : une fois
+   * « Tout pointer » cliqué par erreur, il fallait annuler douze lignes une à
+   * une. Les décisions s'accumulent donc ici, la fenêtre en montre l'effet sur
+   * les totaux, et rien n'est écrit avant « Enregistrer ».
+   */
+  const [brouillon, setBrouillon] = useState<Record<number, { status: string; actualAmount: string | null }>>({});
   /** `"nouveau"` pour une saisie vierge, un identifiant pour une correction. */
   const [formulaire, setFormulaire] = useState<"nouveau" | number | null>(null);
 
@@ -184,12 +192,23 @@ export default function MonthReview({
       .sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.id - b.id);
   }, [occurrences, mois]);
 
+  /**
+   * Ce que la fenêtre montre : l'état enregistré, recouvert du brouillon. Tout
+   * le reste — bilan, boutons, compteur — lit cette liste et non `duMois`,
+   * pour que l'écart se recalcule à mesure qu'on pointe.
+   */
+  const duMoisVu = useMemo(
+    () => duMois.map((o) => (brouillon[o.id] ? { ...o, ...brouillon[o.id] } : o)),
+    [duMois, brouillon]
+  );
+  const enAttente = Object.keys(brouillon).length;
+
   const bilan = useMemo(() => {
     // L'écart ne compare que ce qui est pointé. Confronter le prévu du mois
     // entier au constaté partiel donnait un chiffre faux — et flatteur : tant
     // qu'une seule dépense sur dix était pointée, l'écart s'affichait en vert.
     let prevuTotal = 0, prevuPointe = 0, constate = 0, aVerifier = 0;
-    for (const o of duMois) {
+    for (const o of duMoisVu) {
       if (o.status === "skipped") continue;
       const signe = estRevenu(o) ? 1 : -1;
       const attendu = signe * Number(o.expectedAmount);
@@ -203,21 +222,17 @@ export default function MonthReview({
     }
     return { prevuTotal, ecart: constate - prevuPointe, constate, aVerifier, toutPointe: aVerifier === 0 };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [duMois, flows]);
+  }, [duMoisVu, flows]);
 
   const aujourdhui = new Date().toISOString().slice(0, 10);
 
-  const valider = async (o: Occurrence, status: string) => {
-    setEnCours(o.id);
-    try {
-      const brut = saisie[o.id];
-      await onUpdate(o.id, {
-        status,
-        actualAmount: status === "confirmed" ? (brut?.trim() || o.expectedAmount) : null,
-      });
-    } finally {
-      setEnCours(null);
-    }
+  /** Note la décision sans l'envoyer : c'est « Enregistrer » qui écrit. */
+  const valider = (o: Occurrence, status: string) => {
+    const brut = saisie[o.id];
+    setBrouillon((b) => ({
+      ...b,
+      [o.id]: { status, actualAmount: status === "confirmed" ? (brut?.trim() || o.expectedAmount) : null },
+    }));
   };
 
   /**
@@ -231,22 +246,40 @@ export default function MonthReview({
    * Ce qui a déjà un montant saisi garde ce montant : on ne va pas écraser une
    * correction en cours sous prétexte qu'on valide le reste.
    */
-  const [pointageEnMasse, setPointageEnMasse] = useState(false);
-  const aPointer = duMois.filter((o) => o.status === "pending");
-  const pointerTout = async () => {
+  const aPointer = duMoisVu.filter((o) => o.status === "pending");
+  const pointerTout = () => {
     if (aPointer.length === 0) return;
-    setPointageEnMasse(true);
+    setBrouillon((b) => {
+      const suivant = { ...b };
+      for (const o of aPointer) {
+        suivant[o.id] = { status: "confirmed", actualAmount: saisie[o.id]?.trim() || o.expectedAmount };
+      }
+      return suivant;
+    });
+  };
+
+  /** Envoie tout le brouillon, en une fois. */
+  const [enregistrement, setEnregistrement] = useState(false);
+  const enregistrer = async () => {
+    const majs = Object.entries(brouillon).map(([id, v]) => ({ id: Number(id), ...v }));
+    if (majs.length === 0) return;
+    setEnregistrement(true);
     try {
-      const majs = aPointer.map((o) => ({
-        id: o.id,
-        status: "confirmed",
-        actualAmount: saisie[o.id]?.trim() || o.expectedAmount,
-      }));
       if (onUpdateMany) await onUpdateMany(majs);
       else for (const m of majs) await onUpdate(m.id, { status: m.status, actualAmount: m.actualAmount });
+      setBrouillon({});
+      setSaisie({});
     } finally {
-      setPointageEnMasse(false);
+      setEnregistrement(false);
     }
+  };
+
+  const annuler = () => { setBrouillon({}); setSaisie({}); };
+
+  /** Fermer en laissant des pointages non enregistrés les perdrait. */
+  const fermer = () => {
+    if (enAttente > 0 && !confirm(`${enAttente} pointage${enAttente > 1 ? "s" : ""} non enregistré${enAttente > 1 ? "s" : ""}. Fermer quand même ?`)) return;
+    onClose();
   };
 
   const decaler = (n: number) =>
@@ -275,11 +308,11 @@ export default function MonthReview({
             <p className="text-[11px] text-text-muted">
               {bilan.aVerifier > 0
                 ? `${bilan.aVerifier} mouvement${bilan.aVerifier > 1 ? "s" : ""} à vérifier`
-                : duMois.length > 0 ? "Tout est pointé" : "Aucun mouvement ce mois-ci"}
+                : duMoisVu.length > 0 ? "Tout est pointé" : "Aucun mouvement ce mois-ci"}
             </p>
           </div>
           {!readOnly && aPointer.length > 0 && (
-            <button onClick={pointerTout} disabled={pointageEnMasse}
+            <button onClick={pointerTout}
               title="Pointer au montant prévu tout ce qui reste à vérifier"
               className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium shrink-0 bg-accent text-white hover:opacity-90 disabled:opacity-50">
               <CheckCheck size={13} />Tout pointer
@@ -295,7 +328,7 @@ export default function MonthReview({
               <Plus size={13} />Ajouter
             </button>
           )}
-          <button onClick={onClose} aria-label="Fermer"
+          <button onClick={fermer} aria-label="Fermer"
             className="p-1 rounded text-text-muted hover:text-text hover:bg-surface-hover">
             <X size={16} />
           </button>
@@ -309,7 +342,7 @@ export default function MonthReview({
           />
         )}
 
-        {duMois.length > 0 && (
+        {duMoisVu.length > 0 && (
           <div className="grid grid-cols-3 gap-px bg-border border-b border-border shrink-0">
             <div className="bg-surface px-4 py-2.5">
               <p className="text-[10px] uppercase tracking-wide text-text-muted">Prévu au mois</p>
@@ -332,14 +365,14 @@ export default function MonthReview({
         )}
 
         <div className="flex-1 min-h-0 overflow-y-auto">
-          {duMois.length === 0 ? (
+          {duMoisVu.length === 0 ? (
             <p className="p-6 text-sm text-text-muted text-center">
               Rien de programmé sur ce mois. Les mouvements récurrents viennent des liens
               que tu crées dans la galaxie ; « Ajouter » sert à tout le reste.
             </p>
           ) : (
             <ul className="divide-y divide-border">
-              {duMois.map((o) => {
+              {duMoisVu.map((o) => {
                 const attendu = Number(o.expectedAmount);
                 const constate = o.actualAmount != null ? Number(o.actualAmount) : null;
                 const ecart = constate != null ? constate - attendu : 0;
@@ -401,7 +434,7 @@ export default function MonthReview({
                           )}
                         </span>
                         {!readOnly && (
-                          <button onClick={() => valider(o, "pending")} disabled={enCours === o.id}
+                          <button onClick={() => valider(o, "pending")}
                             className="ml-auto text-text-muted hover:text-text" title="Annuler le pointage">
                             <RotateCcw size={12} />
                           </button>
@@ -412,7 +445,7 @@ export default function MonthReview({
                         <Minus size={13} className="shrink-0" />
                         <span>Ignoré ce mois-ci</span>
                         {!readOnly && (
-                          <button onClick={() => valider(o, "pending")} disabled={enCours === o.id}
+                          <button onClick={() => valider(o, "pending")}
                             className="ml-auto hover:text-text" title="Remettre à vérifier">
                             <RotateCcw size={12} />
                           </button>
@@ -431,11 +464,11 @@ export default function MonthReview({
                           aria-label={`Montant constaté pour ${nomDe(o)}`}
                           className="w-24 bg-bg border border-border rounded-md px-2 py-1 text-xs tabular text-right"
                         />
-                        <button onClick={() => valider(o, "confirmed")} disabled={enCours === o.id}
+                        <button onClick={() => valider(o, "confirmed")}
                           className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-accent text-white text-xs font-medium hover:opacity-90 disabled:opacity-50">
                           <Check size={12} />Pointer
                         </button>
-                        <button onClick={() => valider(o, "skipped")} disabled={enCours === o.id}
+                        <button onClick={() => valider(o, "skipped")}
                           className="px-2.5 py-1 rounded-md border border-border text-xs text-text-muted hover:text-text disabled:opacity-50">
                           Ignorer
                         </button>
@@ -448,9 +481,26 @@ export default function MonthReview({
           )}
         </div>
 
-        <footer className="px-5 py-2.5 border-t border-border shrink-0">
+        <footer className="px-5 py-2.5 border-t border-border shrink-0 space-y-2">
+          {enAttente > 0 && !readOnly && (
+            <div className="flex items-center gap-2">
+              <p className="flex-1 min-w-0 text-[11px] text-accent font-medium">
+                {enAttente} pointage{enAttente > 1 ? "s" : ""} à enregistrer
+              </p>
+              <button onClick={annuler} disabled={enregistrement}
+                className="px-3 py-1.5 rounded-md border border-border text-xs text-text-muted hover:text-text disabled:opacity-50">
+                Annuler
+              </button>
+              <button onClick={enregistrer} disabled={enregistrement}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-accent text-white text-xs font-medium hover:opacity-90 disabled:opacity-50">
+                {enregistrement ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                Enregistrer
+              </button>
+            </div>
+          )}
           <p className="text-[10px] text-text-muted">
             Laisse le champ vide pour pointer au montant prévu ; saisis-en un autre s&apos;il a changé.
+            {" Rien n\u2019est écrit avant « Enregistrer »."}
             {ephemere && " Version de démonstration : les pointages restent dans cet onglet."}
           </p>
         </footer>

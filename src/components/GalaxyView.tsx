@@ -31,6 +31,7 @@ import { ChevronLeft, ClipboardCheck, Loader2 } from "lucide-react";
 import DateDuJour from "@/components/DateDuJour";
 import { daysUntilNextOccurrence } from "@/lib/dates";
 import NodePanel, { PlanetModal, type Selection, type Actions } from "@/components/NodePanel";
+import { etiquettesPlanetes } from "@/lib/nomsPlanetes";
 
 type Asset = { id: number; name: string; type: string; ticker: string | null; quantity: string | null; avgBuyPrice: string | null; manualValue: string | null; yieldRate: string | null; currency: string; portfolioId: number | null };
 type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null };
@@ -336,6 +337,14 @@ export default function GalaxyView({
   const [linkSourceNode, setLinkSourceNode] = useState<{ id: string; kind: string; portfolioKey?: number | "unassigned"; memberId?: number; label: string } | null>(null);
   const [pendingLink, setPendingLink] = useState<{ sourceType: string; sourceId: number | null; sourceLabel: string; targetType: string; targetId: number; targetLabel: string } | null>(null);
   /**
+   * L'astronaute qui salue, et le rang du salut.
+   *
+   * Le rang sert de clé de rendu : recliquer la même planète doit rejouer
+   * l'animation, or une animation CSS ne repart pas si la classe est déjà là.
+   * Changer la clé remonte l'élément, ce qui la relance depuis le début.
+   */
+  const [salut, setSalut] = useState<{ id: string; rang: number } | null>(null);
+  /**
    * Quote-part en cours d'attribution, au geste : une personne a été posée sur
    * une planète, reste à dire quelle part elle en détient.
    */
@@ -390,6 +399,14 @@ export default function GalaxyView({
     [rates, displayCurrency]
   );
   const fmt = useCallback((v: number) => formatMoney(v, displayCurrency), [displayCurrency]);
+  // Un PEA par conjoint, c'est l'usage — mais deux cercles nommés « PEA » ne se
+  // distinguent plus. On n'ajoute le propriétaire qu'aux noms partagés : le
+  // préciser sur une planète unique n'apprendrait rien et allongerait
+  // l'étiquette pour rien.
+  const etiquettesPlanete = useMemo(
+    () => etiquettesPlanetes(portfolios, members, ownerName),
+    [portfolios, members, ownerName]
+  );
 
   const groups = useMemo(() => {
     const byP = new Map<number | "unassigned", Asset[]>();
@@ -449,7 +466,12 @@ export default function GalaxyView({
     const maxPV = Math.max(1, ...groups.map(g => projectedGroupTotal(g)));
 
     const incomeFlows = flows.filter(f => f.targetType === "income");
-    const totalIncomeItems = incomeFlows.reduce((s, f) => s + Number(f.amount), 0);
+    // Tout est ramené au mois, ici comme partout ailleurs dans la galaxie : un
+    // loyer annuel de 12 000 € vaut 1 000 € par mois. Compter le montant brut
+    // multipliait un revenu annuel par douze — et avec lui le taux d'épargne,
+    // le reste à investir et le palier des dépenses, qui se comparent tous aux
+    // revenus.
+    const totalIncomeItems = incomeFlows.reduce((s, f) => s + monthlyAmount(f), 0);
     const totalRevenue = salary + totalIncomeItems;
 
     // Le revenu du propriétaire porte son nom comme celui des autres : « Revenus »
@@ -486,7 +508,8 @@ export default function GalaxyView({
 
     incomeFlows.forEach(inf => {
       const iid = `inc-${inf.id}`;
-      nodes.push({ id: iid, kind: "income-item", label: inf.name || "Revenu", r: 10 + Math.min(8, Number(inf.amount) / 200), color: "#34d399", sub: fmt(Number(inf.amount)), flowId: inf.id, proprietaires: [personne(null)] });
+      const parMois = monthlyAmount(inf);
+      nodes.push({ id: iid, kind: "income-item", label: inf.name || "Revenu", r: 10 + Math.min(8, parMois / 200), color: "#34d399", sub: fmt(parMois), flowId: inf.id, proprietaires: [personne(null)] });
       links.push({ source: "salary", target: iid });
     });
 
@@ -495,15 +518,15 @@ export default function GalaxyView({
     // impossible à dupliquer pour un conjoint. On regroupe donc les flux de dépense par
     // memberId (null = Moi) et on crée un nœud par propriétaire.
     const expFlows = flows.filter(f => f.targetType === "expense");
-    const totalExpenseFlows = expFlows.reduce((s, f) => s + Number(f.amount), 0);
+    const totalExpenseFlows = expFlows.reduce((s, f) => s + monthlyAmount(f), 0);
     // Chacun ne porte que sa part. Une dépense commune comptait auparavant
     // entière sur son porteur déclaré : le taux d'épargne de celui-là
     // s'effondrait, celui de l'autre était flatté, et aucun des deux n'était vrai.
-    const partDepense = (f: Flow, mid: number | null) => Number(f.amount) * partDe(f, expenseShares, mid);
+    const partDepense = (f: Flow, mid: number | null) => monthlyAmount(f) * partDe(f, expenseShares, mid);
     const myExpFlows = expFlows.filter(f => partDe(f, expenseShares, null) > 0);
     const myExpenseTotal = expFlows.reduce((s, f) => s + partDepense(f, null), 0);
     const salInvest = flows.filter(f => f.sourceType === "salary" && (f.targetType === "portfolio" || f.targetType === "goal"));
-    const totalInvest = salInvest.reduce((s, f) => s + Number(f.amount), 0);
+    const totalInvest = salInvest.reduce((s, f) => s + monthlyAmount(f), 0);
     const resteAInvestir = totalRevenue > 0 ? Math.max(0, totalRevenue - totalInvest - totalExpenseFlows) : 0;
 
     if (totalRevenue > 0) {
@@ -559,7 +582,7 @@ export default function GalaxyView({
       // En simulation, le gain affiché (calculé sur les cours réels du jour) perdrait son
       // sens à côté d'une valeur projetée dans le futur — on le masque plutôt que d'afficher
       // un chiffre qui semblerait porter sur la projection alors qu'il ne la concerne pas.
-      nodes.push({ id: pid, kind: "portfolio", label: g.portfolio.name, r: sr(projTotal, maxPV, 20, 78), color: NATURE_COLORS[g.nature], nature: g.nature, portfolioKey: g.key, gainVal: scrubYears > 0 ? undefined : totalGain, sub: fmt(projTotal), skin, isProjected: scrubYears > 0, proprietaires });
+      nodes.push({ id: pid, kind: "portfolio", label: etiquettesPlanete.get(g.key as number) ?? g.portfolio.name, r: sr(projTotal, maxPV, 20, 78), color: NATURE_COLORS[g.nature], nature: g.nature, portfolioKey: g.key, gainVal: scrubYears > 0 ? undefined : totalGain, sub: fmt(projTotal), skin, isProjected: scrubYears > 0, proprietaires });
       // Un fil par personne qui détient la planète, pas un seul vers le
       // propriétaire déclaré : Camille possédait la moitié de l'appartement
       // sans qu'aucun trait ne l'y relie. Les quotes-parts servaient déjà aux
@@ -604,7 +627,7 @@ export default function GalaxyView({
       if (sId && tId && depart && nodes.find(n => n.id === tId))
         // Un flux prend la couleur de la personne dont l'argent part : le salaire
         // de Camille qui alimente le livret de Jonas se lit vert vers un anneau bleu.
-        flowLinks.push({ source: sId, target: tId, label: fmt(Number(f.amount)), amount: Number(f.amount), couleur: depart.proprietaires?.[0]?.couleur ?? centerColor, days: daysUntilNextOccurrence(f.createdAt, f.frequency), isSalarySource: f.sourceType === "salary" || f.sourceType === "member_salary" });
+        flowLinks.push({ source: sId, target: tId, label: fmt(monthlyAmount(f)), amount: monthlyAmount(f), couleur: depart.proprietaires?.[0]?.couleur ?? centerColor, days: daysUntilNextOccurrence(f.createdAt, f.frequency), isSalarySource: f.sourceType === "salary" || f.sourceType === "member_salary" });
     });
 
     // Entrer dans un système ne change pas la façon de construire la galaxie :
@@ -654,7 +677,7 @@ export default function GalaxyView({
     }
 
     return { targetNodes: nodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows, totalRevenue, totalInvest };
-  }, [groups, expanded, goals, members, flows, quotes, salary, goalLinks, progressOf, scrubYears, scrubGrowth, ownerName, centerColor, ownerAccessory, ctx, portfolioOwnerships, expenseShares, systeme, fmt]);
+  }, [groups, expanded, goals, members, flows, quotes, salary, goalLinks, progressOf, scrubYears, scrubGrowth, ownerName, centerColor, ownerAccessory, ctx, portfolioOwnerships, expenseShares, systeme, fmt, etiquettesPlanete]);
   linksRef.current = links;
 
   // Le corps du système où l'on a voyagé, pour l'annoncer en haut de la vue.
@@ -965,6 +988,14 @@ export default function GalaxyView({
 
   useEffect(() => { const sim = simRef.current; return () => { sim?.stop(); }; }, []);
 
+  // Le bras retombe de lui-même : la classe part quand l'animation est finie,
+  // sinon elle resterait et le salut suivant ne se verrait pas.
+  useEffect(() => {
+    if (!salut) return;
+    const t = setTimeout(() => setSalut(null), 1500);
+    return () => clearTimeout(t);
+  }, [salut]);
+
 
   /**
    * Zoom à la molette.
@@ -1157,6 +1188,13 @@ export default function GalaxyView({
         setLinkMode(false);
       }
       return;
+    }
+
+    // Les deux corps qui portent un astronaute lui font lever le bras. Le geste
+    // n'ouvre rien et n'empêche rien : il accompagne le clic, il ne le remplace
+    // pas. Un vrai glissement est déjà écarté plus haut.
+    if (n.kind === "center" || n.kind === "member") {
+      setSalut(s => ({ id: n.id, rang: (s?.rang ?? 0) + 1 }));
     }
 
     setCreateMode(null);
@@ -1866,6 +1904,7 @@ export default function GalaxyView({
                 {n.kind === "center" && (() => {
                   const R = n.r;
                   const bob = 0; // la respiration est désormais une animation CSS (.g-bob)
+                  const salue = salut?.id === "center";
                   return <>
                     <circle r={R + 25} fill="url(#glow-center)" />
                     <circle r={R} fill="url(#sph-center)" filter="url(#glow-strong)" />
@@ -1884,13 +1923,18 @@ export default function GalaxyView({
                           bonhomme sans mains. Ils passent derrière le corps,
                           qui est redessiné juste après, pour que l'épaule soit
                           nette. */}
-                      <path d="M -3.4 0.6 q -2.6 1.9 -2.2 5.2" fill="none" stroke="#e8e8ee" strokeWidth={1.9} strokeLinecap="round" />
-                      <path d="M 3.4 0.6 q 2.6 1.9 2.2 5.2" fill="none" stroke="#e8e8ee" strokeWidth={1.9} strokeLinecap="round" />
                       {/* Body */}
                       <rect x={-4} y={-2} width={8} height={11} rx={3} fill="#f0f0f5" stroke="#c8c8d5" strokeWidth={0.5} />
-                      {/* Mains */}
-                      <circle cx={-5.3} cy={6.2} r={1.45} fill="#f5f5fa" stroke="#c8c8d5" strokeWidth={0.4} />
-                      <circle cx={5.3} cy={6.2} r={1.45} fill="#f5f5fa" stroke="#c8c8d5" strokeWidth={0.4} />
+                      {/* Chaque bras porte sa main : le groupe tourne d'un bloc
+                          autour de l'épaule quand l'astronaute fait signe. */}
+                      <g>
+                        <path d="M -3.4 0.6 q -2.6 1.9 -2.2 5.2" fill="none" stroke="#e8e8ee" strokeWidth={1.9} strokeLinecap="round" />
+                        <circle cx={-5.3} cy={6.2} r={1.45} fill="#f5f5fa" stroke="#c8c8d5" strokeWidth={0.4} />
+                      </g>
+                      <g key={`bras-${salue ? salut!.rang : 0}`} className={salue ? "g-salut" : undefined}>
+                        <path d="M 3.4 0.6 q 2.6 1.9 2.2 5.2" fill="none" stroke="#e8e8ee" strokeWidth={1.9} strokeLinecap="round" />
+                        <circle cx={5.3} cy={6.2} r={1.45} fill="#f5f5fa" stroke="#c8c8d5" strokeWidth={0.4} />
+                      </g>
                       {/* Helmet */}
                       <circle cy={-6} r={5} fill="#f5f5fa" stroke="#c8c8d5" strokeWidth={0.6} />
                       {/* Visor */}
@@ -2192,6 +2236,7 @@ export default function GalaxyView({
 
                 {n.kind === "member" && (() => {
                   const bob = 0; // idem (.g-bob-slow-t)
+                  const salue = salut?.id === n.id;
                   const accessory = findAccessory(n.accessory);
                   return <>
                     <circle r={n.r} fill={`url(#sph-${n.id})`} />
@@ -2199,11 +2244,15 @@ export default function GalaxyView({
                     <g className="g-bob-slow-t" style={{ ["--g-y" as string]: `${-n.r - 13 + bob}px` }}>
                       <line x1={-2.2} y1={7} x2={-2.6} y2={12} stroke="#e8e8ee" strokeWidth={2} strokeLinecap="round" />
                       <line x1={2.2} y1={7} x2={2.6} y2={12} stroke="#e8e8ee" strokeWidth={2} strokeLinecap="round" />
-                      <path d="M -2.9 0.5 q -2.2 1.6 -1.9 4.4" fill="none" stroke="#e8e8ee" strokeWidth={1.65} strokeLinecap="round" />
-                      <path d="M 2.9 0.5 q 2.2 1.6 1.9 4.4" fill="none" stroke="#e8e8ee" strokeWidth={1.65} strokeLinecap="round" />
                       <rect x={-3.4} y={-2} width={6.8} height={9.5} rx={2.6} fill="#f0f0f5" stroke={n.color} strokeWidth={0.7} />
-                      <circle cx={-4.6} cy={5.3} r={1.25} fill="#f5f5fa" stroke={n.color} strokeWidth={0.5} />
-                      <circle cx={4.6} cy={5.3} r={1.25} fill="#f5f5fa" stroke={n.color} strokeWidth={0.5} />
+                      <g>
+                        <path d="M -2.9 0.5 q -2.2 1.6 -1.9 4.4" fill="none" stroke="#e8e8ee" strokeWidth={1.65} strokeLinecap="round" />
+                        <circle cx={-4.6} cy={5.3} r={1.25} fill="#f5f5fa" stroke={n.color} strokeWidth={0.5} />
+                      </g>
+                      <g key={`bras-${salue ? salut!.rang : 0}`} className={salue ? "g-salut" : undefined}>
+                        <path d="M 2.9 0.5 q 2.2 1.6 1.9 4.4" fill="none" stroke="#e8e8ee" strokeWidth={1.65} strokeLinecap="round" />
+                        <circle cx={4.6} cy={5.3} r={1.25} fill="#f5f5fa" stroke={n.color} strokeWidth={0.5} />
+                      </g>
                       <circle cy={-5.2} r={4.3} fill="#f5f5fa" stroke={n.color} strokeWidth={0.6} />
                       <ellipse cx={0.4} cy={-5.2} rx={2.7} ry={2.4} fill="#2a3550" />
                       <ellipse cx={-0.4} cy={-6} rx={0.8} ry={0.6} fill="rgba(255,255,255,0.5)" />
@@ -2393,7 +2442,7 @@ export default function GalaxyView({
         </div>
       </div>
       {showPlanetModal && (
-        <PlanetModal members={members} ownerName={ownerName}
+        <PlanetModal portfolios={portfolios} members={members} ownerName={ownerName}
           onSubmit={async d => { const p = await actions.createPortfolio(d); setSelected({ kind: "portfolio", id: p.id, name: p.name, color: p.color, skin: p.skin, total: 0, count: 0, memberId: p.memberId }); }}
           onClose={() => setShowPlanetModal(false)} />
       )}

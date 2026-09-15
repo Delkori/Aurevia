@@ -55,9 +55,14 @@ export default function SinceLastVisit({
   );
   const [dismissed, setDismissed] = useState(false);
 
+  // Le patrimoine mémorisé ne bouge pas tant que des cours manquent : il vaut
+  // alors le prix de revient des lignes concernées, et l'enregistrer ferait de
+  // ce repli le nouveau point de comparaison — la prochaine visite, cours
+  // revenus, annoncerait une hausse tout aussi imaginaire. La date et les
+  // objectifs avancent, eux : ils ne dépendent d'aucune cotation.
   const nextMemory = (): VisitMemory => ({
     date: new Date().toISOString().slice(0, 10),
-    netWorth: data.netWorth,
+    netWorth: data.staleCount > 0 && memory ? memory.netWorth : data.netWorth,
     goalProgress: Object.fromEntries(data.goals.map((g) => [String(g.id), g.progress])),
   });
 

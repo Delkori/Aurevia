@@ -15,6 +15,7 @@ import { formatMoney } from "@/lib/format";
 import { apiFetch, ApiError } from "@/lib/api";
 import { fetchAllQuotes } from "@/lib/allQuotes";
 import { fetchAllDividends, type DividendInfo } from "@/lib/allDividends";
+import { etiquettesPlanetes } from "@/lib/nomsPlanetes";
 
 type Asset = { id: number; name: string; type: string; ticker: string | null; quantity: string | null; avgBuyPrice: string | null; manualValue: string | null; yieldRate: string | null; currency: string; portfolioId: number | null };
 type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null };
@@ -208,6 +209,14 @@ export default function HomePage() {
     }
   };
 
+  // Rien n'interdit deux planètes du même nom — un PEA par conjoint, c'est
+  // même l'usage. Partout où elles sont seulement listées, le propriétaire est
+  // ajouté aux homonymes pour qu'on sache laquelle est laquelle.
+  const nomPlanete = useMemo(() => {
+    const e = etiquettesPlanetes(portfolios, members, settings.owner_name || "Moi");
+    return (p: Portfolio) => e.get(p.id) ?? p.name;
+  }, [portfolios, members, settings.owner_name]);
+
   // Données du résumé « depuis ta dernière visite ». Les mêmes fonctions de
   // valorisation que la galaxie, pour que les deux ne puissent pas diverger.
   const visitData = useMemo(() => {
@@ -228,7 +237,7 @@ export default function HomePage() {
 
     const labelFor = (f: Flow) =>
       f.targetType === "portfolio"
-        ? portfolios.find((p) => p.id === f.targetId)?.name ?? "une planète"
+        ? (() => { const p = portfolios.find((x) => x.id === f.targetId); return p ? nomPlanete(p) : "une planète"; })()
         : f.targetType === "goal"
           ? goals.find((g) => g.id === f.targetId)?.name ?? "un objectif"
           : f.name || "une dépense";
@@ -269,7 +278,7 @@ export default function HomePage() {
       staleCount,
       formatMoney: (v: number) => formatMoney(v, displayCurrency),
     };
-  }, [assets, loans, goals, goalLinks, flows, portfolios, quotes, dividends, rates, settings.display_currency]);
+  }, [assets, loans, goals, goalLinks, flows, portfolios, quotes, dividends, rates, settings.display_currency, nomPlanete]);
 
   const rechargerEcheances = async () => {
     const res = await apiFetch("/api/occurrences") as { occurrences: Occurrence[]; overdue: number };
@@ -414,7 +423,7 @@ export default function HomePage() {
           ...revenusFlux.map(f => ({ nom: f.name || "Revenu", montant: monthlyEquivalent(f) })),
         ],
         depenses: depensesFlux.map(f => ({ nom: f.name || "Dépense", montant: monthlyEquivalent(f) })),
-        planetes: portfolios.map(p => ({ nom: p.name, montant: valeurPlanete(p.id) })),
+        planetes: portfolios.map(p => ({ nom: nomPlanete(p), montant: valeurPlanete(p.id) })),
       },
       projets: goals.map(g => {
         const liees = goalLinks.filter(gl => gl.goalId === g.id).map(gl => gl.portfolioId);
@@ -430,14 +439,14 @@ export default function HomePage() {
             return s;
           }, 0),
           planetes: liees.length,
-          contenus: liees.map(pid => ({
-            nom: portfolios.find(p => p.id === pid)?.name ?? "Planète",
-            montant: valeurPlanete(pid),
-          })),
+          contenus: liees.map(pid => {
+            const p = portfolios.find(x => x.id === pid);
+            return { nom: p ? nomPlanete(p) : "Planète", montant: valeurPlanete(pid) };
+          }),
         };
       }),
     };
-  }, [assets, quotes, loans, flows, members, goals, goalLinks, portfolios, rates, settings]);
+  }, [assets, quotes, loans, flows, members, goals, goalLinks, portfolios, rates, settings, nomPlanete]);
 
   const isEmpty =
     assets.length === 0 &&
@@ -472,7 +481,7 @@ export default function HomePage() {
           occurrences={occurrences}
           flows={flows}
           destinations={Object.fromEntries([
-            ...portfolios.map(p => [`portfolio:${p.id}`, p.name]),
+            ...portfolios.map(p => [`portfolio:${p.id}`, nomPlanete(p)]),
             ...goals.map(g => [`goal:${g.id}`, g.name]),
           ])}
           displayCurrency={settings.display_currency || "EUR"}

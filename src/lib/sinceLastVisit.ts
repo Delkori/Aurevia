@@ -72,7 +72,15 @@ export function summarizeSinceLastVisit(input: SummaryInput): {
   const highlights: Highlight[] = [];
 
   // 1. Patrimoine net — seul chiffre dont on possède réellement l'historique.
-  if (memory && Number.isFinite(memory.netWorth) && memory.netWorth !== 0) {
+  //
+  // Sauf quand des cours manquent : les lignes concernées retombent alors sur
+  // leur prix de revient, si bien que le total ne se compare plus à celui
+  // d'hier. Modifier un réglage — un salaire, par exemple — recharge tout et
+  // redemande les cours ; une seule requête qui n'aboutit pas suffisait à
+  // annoncer « Patrimoine net en baisse de 40 000 € » alors que rien n'avait
+  // bougé. Le point 5 dit déjà la vérité de cette situation : des cours
+  // manquent. Mieux vaut ne rien annoncer qu'annoncer un mouvement inventé.
+  if (input.staleCount === 0 && memory && Number.isFinite(memory.netWorth) && memory.netWorth !== 0) {
     const delta = input.netWorth - memory.netWorth;
     const pct = (delta / Math.abs(memory.netWorth)) * 100;
     // En dessous de 0,1 %, c'est du bruit de cotation : ne pas en faire un événement.
