@@ -173,6 +173,33 @@ body {
    identique, les trois systèmes tournaient comme un seul engrenage.
    `.sv-contre` tourne en sens inverse, à la même cadence, pour que les
    étiquettes restent à l'endroit au lieu de basculer la tête en bas. */
+/* Le petit astronaute fait signe quand on clique sa planète.
+
+   La rotation porte sur le coin haut-gauche de la boîte du bras — qui est
+   exactement l'épaule, puisque le tracé part de là et que c'est son point le
+   plus haut et le plus à gauche. `fill-box` évite d'avoir à écrire un centre
+   de rotation en dur, qui aurait dû différer entre l'astronaute du centre et
+   celui d'une personne, plus petit.
+
+   Le bras part vers le bas à droite : une rotation négative le lève. Il monte,
+   agite deux fois, puis retombe. Les animations réduites le neutralisent comme
+   le reste. */
+@keyframes g-salut {
+  0%   { transform: rotate(0deg); }
+  12%  { transform: rotate(-118deg); }
+  26%  { transform: rotate(-96deg); }
+  40%  { transform: rotate(-122deg); }
+  54%  { transform: rotate(-96deg); }
+  68%  { transform: rotate(-122deg); }
+  84%  { transform: rotate(-104deg); }
+  100% { transform: rotate(0deg); }
+}
+.g-salut {
+  animation: g-salut 1.5s ease-in-out;
+  transform-box: fill-box;
+  transform-origin: 0 0;
+}
+
 @keyframes sv-orbite { to { transform: rotate(360deg); } }
 .sv-orbite {
   animation: sv-orbite linear infinite;
