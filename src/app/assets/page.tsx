@@ -6,6 +6,7 @@ import { formatMoney } from "@/lib/format";
 import { currentValue, gain, isStale, quoteAsOf, ASSET_TYPE_LABELS, type ValuationContext } from "@/lib/networth";
 import { apiFetch, ApiError } from "@/lib/api";
 import { fetchAllQuotes } from "@/lib/allQuotes";
+import { etiquettesPlanetes } from "@/lib/nomsPlanetes";
 import LoansTable from "@/components/LoansTable";
 
 type Asset = {
@@ -21,7 +22,8 @@ type Asset = {
   portfolioId: number | null;
 };
 
-type Portfolio = { id: number; name: string; color: string };
+type Portfolio = { id: number; name: string; color: string; memberId: number | null };
+type Member = { id: number; name: string };
 type Quote = { price: number; currency: string; asOf?: string } | null;
 type Rates = Record<string, number>;
 
@@ -86,6 +88,8 @@ function toPayload(row: DraftRow) {
 export default function AssetsPage() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [ownerName, setOwnerName] = useState("Moi");
   const [quotes, setQuotes] = useState<Record<string, Quote>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -97,19 +101,24 @@ export default function AssetsPage() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [assetsResult, portfoliosResult, ratesResult, settingsResult] =
+      const [assetsResult, portfoliosResult, ratesResult, settingsResult, membersResult] =
         await Promise.allSettled([
           apiFetch("/api/assets"),
           apiFetch("/api/portfolios"),
           apiFetch("/api/exchange-rates"),
           apiFetch("/api/settings"),
+          apiFetch("/api/members"),
         ]);
 
       if (ratesResult.status === "fulfilled") setRates(ratesResult.value as Rates);
       if (settingsResult.status === "fulfilled") {
         const st = settingsResult.value as Record<string, string>;
         setDisplayCurrency(st.display_currency || "EUR");
+        setOwnerName(st.owner_name || "Moi");
       }
+      // Sert seulement à distinguer deux planètes homonymes : si la requête
+      // échoue, la liste reste utilisable, simplement moins précise.
+      if (membersResult.status === "fulfilled") setMembers(membersResult.value as Member[]);
 
       if (assetsResult.status === "fulfilled") {
         setAssets(assetsResult.value as Asset[]);
@@ -229,6 +238,10 @@ export default function AssetsPage() {
   // Même contexte de valorisation que la galaxie : les montants du tableau et
   // ceux des planètes ne peuvent pas diverger.
   const ctx: ValuationContext = { rates, displayCurrency };
+  // Deux « PEA » dans un même sélecteur ne se distinguent plus : on ajoute le
+  // propriétaire, et seulement là où il est nécessaire.
+  const etiquettes = etiquettesPlanetes(portfolios, members, ownerName);
+  const nomPlanete = (p: Portfolio) => etiquettes.get(p.id) ?? p.name;
   const fmt = (v: number) => formatMoney(v, displayCurrency);
 
   const groupTotal = (items: Asset[]) =>
@@ -291,7 +304,7 @@ export default function AssetsPage() {
                   <td colSpan={10} className="px-4 py-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
                     <span className="inline-flex items-center gap-2">
                       {portfolio && <span className="w-2 h-2 rounded-full shrink-0" style={{ background: portfolio.color }} />}
-                      {portfolio ? portfolio.name : "Sans planète"}
+                      {portfolio ? nomPlanete(portfolio) : "Sans planète"}
                       <span className="text-text-muted font-normal normal-case ml-2 tabular">{fmt(groupTotal(items))}</span>
                     </span>
                   </td>
@@ -344,7 +357,7 @@ export default function AssetsPage() {
                       <option value="">—</option>
                       {portfolios.map((p) => (
                         <option key={p.id} value={p.id}>
-                          {p.name}
+                          {nomPlanete(p)}
                         </option>
                       ))}
                     </select>
@@ -513,7 +526,7 @@ export default function AssetsPage() {
                   <option value="">—</option>
                   {portfolios.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.name}
+                      {nomPlanete(p)}
                     </option>
                   ))}
                 </select>

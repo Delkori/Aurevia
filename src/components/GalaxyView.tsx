@@ -31,6 +31,7 @@ import { ChevronLeft, ClipboardCheck, Loader2 } from "lucide-react";
 import DateDuJour from "@/components/DateDuJour";
 import { daysUntilNextOccurrence } from "@/lib/dates";
 import NodePanel, { PlanetModal, type Selection, type Actions } from "@/components/NodePanel";
+import { etiquettesPlanetes } from "@/lib/nomsPlanetes";
 
 type Asset = { id: number; name: string; type: string; ticker: string | null; quantity: string | null; avgBuyPrice: string | null; manualValue: string | null; yieldRate: string | null; currency: string; portfolioId: number | null };
 type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null };
@@ -398,6 +399,14 @@ export default function GalaxyView({
     [rates, displayCurrency]
   );
   const fmt = useCallback((v: number) => formatMoney(v, displayCurrency), [displayCurrency]);
+  // Un PEA par conjoint, c'est l'usage — mais deux cercles nommés « PEA » ne se
+  // distinguent plus. On n'ajoute le propriétaire qu'aux noms partagés : le
+  // préciser sur une planète unique n'apprendrait rien et allongerait
+  // l'étiquette pour rien.
+  const etiquettesPlanete = useMemo(
+    () => etiquettesPlanetes(portfolios, members, ownerName),
+    [portfolios, members, ownerName]
+  );
 
   const groups = useMemo(() => {
     const byP = new Map<number | "unassigned", Asset[]>();
@@ -573,7 +582,7 @@ export default function GalaxyView({
       // En simulation, le gain affiché (calculé sur les cours réels du jour) perdrait son
       // sens à côté d'une valeur projetée dans le futur — on le masque plutôt que d'afficher
       // un chiffre qui semblerait porter sur la projection alors qu'il ne la concerne pas.
-      nodes.push({ id: pid, kind: "portfolio", label: g.portfolio.name, r: sr(projTotal, maxPV, 20, 78), color: NATURE_COLORS[g.nature], nature: g.nature, portfolioKey: g.key, gainVal: scrubYears > 0 ? undefined : totalGain, sub: fmt(projTotal), skin, isProjected: scrubYears > 0, proprietaires });
+      nodes.push({ id: pid, kind: "portfolio", label: etiquettesPlanete.get(g.key as number) ?? g.portfolio.name, r: sr(projTotal, maxPV, 20, 78), color: NATURE_COLORS[g.nature], nature: g.nature, portfolioKey: g.key, gainVal: scrubYears > 0 ? undefined : totalGain, sub: fmt(projTotal), skin, isProjected: scrubYears > 0, proprietaires });
       // Un fil par personne qui détient la planète, pas un seul vers le
       // propriétaire déclaré : Camille possédait la moitié de l'appartement
       // sans qu'aucun trait ne l'y relie. Les quotes-parts servaient déjà aux
@@ -668,7 +677,7 @@ export default function GalaxyView({
     }
 
     return { targetNodes: nodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows, totalRevenue, totalInvest };
-  }, [groups, expanded, goals, members, flows, quotes, salary, goalLinks, progressOf, scrubYears, scrubGrowth, ownerName, centerColor, ownerAccessory, ctx, portfolioOwnerships, expenseShares, systeme, fmt]);
+  }, [groups, expanded, goals, members, flows, quotes, salary, goalLinks, progressOf, scrubYears, scrubGrowth, ownerName, centerColor, ownerAccessory, ctx, portfolioOwnerships, expenseShares, systeme, fmt, etiquettesPlanete]);
   linksRef.current = links;
 
   // Le corps du système où l'on a voyagé, pour l'annoncer en haut de la vue.
@@ -2433,7 +2442,7 @@ export default function GalaxyView({
         </div>
       </div>
       {showPlanetModal && (
-        <PlanetModal members={members} ownerName={ownerName}
+        <PlanetModal portfolios={portfolios} members={members} ownerName={ownerName}
           onSubmit={async d => { const p = await actions.createPortfolio(d); setSelected({ kind: "portfolio", id: p.id, name: p.name, color: p.color, skin: p.skin, total: 0, count: 0, memberId: p.memberId }); }}
           onClose={() => setShowPlanetModal(false)} />
       )}

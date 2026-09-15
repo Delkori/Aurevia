@@ -8,6 +8,7 @@ import { NATURE_COLORS, NATURE_LABELS, natureOfPortfolio } from "@/lib/natures";
 import { upcomingByMonth, type FlowLike } from "@/lib/calendar";
 import { ASTRONAUT_ACCESSORIES } from "@/lib/astronautAccessories";
 import { monthsToReach } from "@/lib/projection";
+import { etiquettesPlanetes, homonymesDe } from "@/lib/nomsPlanetes";
 
 type Asset = { id: number; name: string; type: string; ticker: string | null; quantity: string | null; avgBuyPrice: string | null; manualValue: string | null; yieldRate: string | null; currency: string; portfolioId: number | null };
 type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null };
@@ -126,17 +127,28 @@ function SkinPicker({ value, onChange }: { value: string; onChange: (v: string) 
   );
 }
 
-function PortfolioForm({ initial, members, ownerName, onSubmit, onDelete, onCancel }:
-  { initial?: { name: string; color: string; skin: string | null; memberId: number | null }; members: Member[]; ownerName: string; onSubmit: (d: Record<string, unknown>) => void; onDelete?: () => void; onCancel: () => void }) {
+function PortfolioForm({ initial, portfolios, members, ownerName, onSubmit, onDelete, onCancel }:
+  { initial?: { id?: number; name: string; color: string; skin: string | null; memberId: number | null }; portfolios: Portfolio[]; members: Member[]; ownerName: string; onSubmit: (d: Record<string, unknown>) => void; onDelete?: () => void; onCancel: () => void }) {
   const [name, setName] = useState(initial?.name ?? "");
   const [color, setColor] = useState(initial?.color ?? COLORS[0]);
   const [skin, setSkin] = useState(initial?.skin ?? "");
   const [memberId, setMemberId] = useState(String(initial?.memberId ?? ""));
+  // Deux PEA, c'est normal dans un couple — mais autant le dire tout de suite,
+  // et rappeler à qui appartient celui qui existe déjà.
+  const jumeaux = homonymesDe(name, portfolios, members, ownerName, initial?.id);
   return (
     <form onSubmit={e => { e.preventDefault(); onSubmit({ name, color, skin: skin || null, memberId: memberId ? Number(memberId) : null }); }} className="space-y-2">
       <p className="text-[10px] text-text-muted uppercase tracking-wide">{initial ? "Planète" : "Nouvelle planète"}</p>
       <Label>Nom</Label><Inp required value={name} onChange={e => setName(e.target.value)} placeholder="PEA, CTO, Salaire…" />
-      {members.length > 0 && <><Label>Membre</Label><Sel value={memberId} onChange={e => setMemberId(e.target.value)}><option value="">{ownerName}</option>{members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</Sel></>}
+      {jumeaux.length > 0 && (
+        <p className="text-[10px] text-accent bg-accent-soft border border-accent/30 rounded-md px-2 py-1.5">
+          {jumeaux.length === 1
+            ? `Une planète « ${jumeaux[0].nom} » existe déjà, celle de ${jumeaux[0].proprietaire}.`
+            : `${jumeaux.length} planètes « ${jumeaux[0].nom} » existent déjà : ${jumeaux.map(j => j.proprietaire).join(", ")}.`}
+          {" "}Le propriétaire choisi ci-dessous les distinguera dans les listes.
+        </p>
+      )}
+      {members.length > 0 && <><Label>Propriétaire</Label><Sel value={memberId} onChange={e => setMemberId(e.target.value)}><option value="">{ownerName}</option>{members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</Sel></>}
       <Label>Skin</Label>
       <SkinPicker value={skin} onChange={setSkin} />
       {(skin === "" || skin === "generic") && <><Label>Couleur</Label><ColorPick value={color} onChange={setColor} /></>}
@@ -229,12 +241,12 @@ function OwnershipEditor({ portfolioId, portfolioOwnerMemberId, members, ownerNa
 }
 
 // ── Planet creation modal ────────────────────────────────────────────────────
-export function PlanetModal({ members, ownerName, onSubmit, onClose }:
-  { members: Member[]; ownerName: string; onSubmit: (d: Record<string, unknown>) => Promise<void>; onClose: () => void }) {
+export function PlanetModal({ portfolios, members, ownerName, onSubmit, onClose }:
+  { portfolios: Portfolio[]; members: Member[]; ownerName: string; onSubmit: (d: Record<string, unknown>) => Promise<void>; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
       <div className="w-full max-w-sm bg-surface border border-border rounded-xl p-5 shadow-2xl" onClick={e => e.stopPropagation()}>
-        <PortfolioForm members={members} ownerName={ownerName}
+        <PortfolioForm portfolios={portfolios} members={members} ownerName={ownerName}
           onSubmit={async d => { await onSubmit(d); onClose(); }}
           onCancel={onClose} />
       </div>
@@ -291,8 +303,9 @@ function TickerAutocomplete({ value, onChange, onPick, placeholder }:
 }
 
 // ── Asset Form ───────────────────────────────────────────────────────────────
-function AssetForm({ initial, portfolios, defaultPortfolioId, onSubmit, onDelete, onCancel }:
-  { initial?: Asset; portfolios: Portfolio[]; defaultPortfolioId?: number; onSubmit: (d: Record<string, unknown>) => void; onDelete?: () => void; onCancel: () => void }) {
+function AssetForm({ initial, portfolios, members, ownerName, defaultPortfolioId, onSubmit, onDelete, onCancel }:
+  { initial?: Asset; portfolios: Portfolio[]; members: Member[]; ownerName: string; defaultPortfolioId?: number; onSubmit: (d: Record<string, unknown>) => void; onDelete?: () => void; onCancel: () => void }) {
+  const etiquettes = etiquettesPlanetes(portfolios, members, ownerName);
   const [f, setF] = useState({ name: initial?.name ?? "", type: initial?.type ?? "stock", ticker: initial?.ticker ?? "", quantity: initial?.quantity ?? "", avgBuyPrice: initial?.avgBuyPrice ?? "", manualValue: initial?.manualValue ?? "", yieldRate: initial?.yieldRate ?? "", currency: initial?.currency ?? "EUR", portfolioId: initial?.portfolioId ? String(initial.portfolioId) : defaultPortfolioId ? String(defaultPortfolioId) : "" });
   const nt = TYPES_WITH_TICKER.has(f.type);
   function payload() {
@@ -303,7 +316,7 @@ function AssetForm({ initial, portfolios, defaultPortfolioId, onSubmit, onDelete
       <p className="text-[10px] text-text-muted uppercase tracking-wide">{initial ? "Actif" : "Nouvel actif"}</p>
       <Label>Nom</Label><Inp required value={f.name} onChange={e => setF({ ...f, name: e.target.value })} />
       <Label>Type</Label><Sel value={f.type} onChange={e => setF({ ...f, type: e.target.value })}>{Object.entries(ASSET_TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Sel>
-      <Label>Planète</Label><Sel value={f.portfolioId} onChange={e => setF({ ...f, portfolioId: e.target.value })}><option value="">—</option>{portfolios.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</Sel>
+      <Label>Planète</Label><Sel value={f.portfolioId} onChange={e => setF({ ...f, portfolioId: e.target.value })}><option value="">—</option>{portfolios.map(p => <option key={p.id} value={p.id}>{etiquettes.get(p.id) ?? p.name}</option>)}</Sel>
       {nt && <><Label>{f.type === "precious_metal" ? "Métal" : f.type === "crypto" ? "ID CoinGecko" : "Ticker"}</Label>
         {f.type === "precious_metal" ? <Sel value={f.ticker} onChange={e => setF({ ...f, ticker: e.target.value })}><option value="">—</option>{METAL_TICKERS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}</Sel>
           : f.type === "crypto" ? <Inp value={f.ticker} onChange={e => setF({ ...f, ticker: e.target.value })} placeholder="bitcoin" />
@@ -356,10 +369,12 @@ function FlowForm({ portfolios, goals, members, ownerName, defaultTargetType, de
     shared: initial?.shared === true,
   });
   const membersWithSalary = members.filter(m => m.salary && Number(m.salary) > 0);
-  const targets = f.targetType === "portfolio" ? portfolios.map(p => ({ id: p.id, name: p.name }))
+  const etiquettes = etiquettesPlanetes(portfolios, members, ownerName);
+  const planetes = portfolios.map(p => ({ id: p.id, name: etiquettes.get(p.id) ?? p.name }));
+  const targets = f.targetType === "portfolio" ? planetes
     : f.targetType === "goal" ? goals.map(g => ({ id: g.id, name: g.name }))
     : [];
-  const sources = f.sourceType === "portfolio" ? portfolios.map(p => ({ id: p.id, name: p.name }))
+  const sources = f.sourceType === "portfolio" ? planetes
     : f.sourceType === "member_salary" ? membersWithSalary.map(m => ({ id: m.id, name: `Salaire de ${m.name}` }))
     : [];
   const needsTargetPicker = f.targetType !== "expense" && f.targetType !== "income";
@@ -539,14 +554,20 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
   { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; onUpdateSelf: (name: string, color: string, accessory: string | null) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number; onPortfolioCreated?: (p: Portfolio) => void; ownerName: string; expenseMemberId?: number | null; dividends: Record<string, DividendInfo | null>; displayCurrency: string; ctx: ValuationContext }) {
   const fmt = (v: number) => formatMoney(v, displayCurrency);
   const portfolioTotal = (id: number) => groups.find(g => g.key === id)?.total ?? 0;
+  // Deux planètes peuvent porter le même nom ; on ne précise le propriétaire
+  // que là où le nom seul ne suffit plus à les distinguer.
+  const etiquettesPlanete = useMemo(
+    () => etiquettesPlanetes(portfolios, members, ownerName),
+    [portfolios, members, ownerName]
+  );
   const calendrier = useMemo(() => {
     const nommer = (f: Flow) => f.name
-      || (f.targetType === "portfolio" ? portfolios.find(p => p.id === f.targetId)?.name
+      || (f.targetType === "portfolio" ? (f.targetId != null ? etiquettesPlanete.get(f.targetId) : undefined)
         : f.targetType === "goal" ? goals.find(g => g.id === f.targetId)?.name
         : f.targetType === "income" ? "Revenu" : null)
       || "Mouvement";
     return upcomingByMonth(flows.map(f => ({ ...f, name: nommer(f) })) as unknown as FlowLike[], 4);
-  }, [flows, portfolios, goals]);
+  }, [flows, goals, etiquettesPlanete]);
   // Un dividende est versé dans la devise du titre : on le ramène à la devise
   // d'affichage pour ne pas mélanger les unités dans un même panneau.
   const fmtFrom = (v: number, from: string) =>
@@ -559,8 +580,8 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
   return (
     <div className="glass-panel border-l border-border p-5 space-y-3 overflow-y-auto h-full">
 
-      {createMode === "portfolio" && <PortfolioForm members={members} ownerName={ownerName} onSubmit={async d => { const p = await actions.createPortfolio(d); setCreateMode(null); if (onPortfolioCreated) onPortfolioCreated(p); else onClear(); }} onCancel={clear} />}
-      {createMode === "asset" && <AssetForm portfolios={portfolios} defaultPortfolioId={selected?.kind === "portfolio" && selected.id !== "unassigned" ? selected.id as number : undefined} onSubmit={async d => { await actions.createAsset(d); clear(); }} onCancel={clear} />}
+      {createMode === "portfolio" && <PortfolioForm portfolios={portfolios} members={members} ownerName={ownerName} onSubmit={async d => { const p = await actions.createPortfolio(d); setCreateMode(null); if (onPortfolioCreated) onPortfolioCreated(p); else onClear(); }} onCancel={clear} />}
+      {createMode === "asset" && <AssetForm portfolios={portfolios} members={members} ownerName={ownerName} defaultPortfolioId={selected?.kind === "portfolio" && selected.id !== "unassigned" ? selected.id as number : undefined} onSubmit={async d => { await actions.createAsset(d); clear(); }} onCancel={clear} />}
       {createMode === "goal" && <GoalForm members={members} ownerName={ownerName} onSubmit={async d => { await actions.createGoal(d); clear(); }} onCancel={clear} />}
       {createMode === "flow" && <FlowForm portfolios={portfolios} goals={goals} members={members} ownerName={ownerName} onSubmit={async d => { await actions.createFlow(d); clear(); }} onCancel={clear} />}
       {createMode === "expense" && <FlowForm portfolios={portfolios} goals={goals} members={members} ownerName={ownerName} defaultTargetType="expense" defaultMemberId={expenseMemberId} onSubmit={async d => { await actions.createFlow(d); clear(); }} onCancel={clear} />}
@@ -631,7 +652,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
                   <span className="flex items-center gap-1.5 min-w-0">
                     <span className="w-2 h-2 rounded-full shrink-0" style={{ background: NATURE_COLORS[nature] }}
                       title={NATURE_LABELS[nature]} />
-                    <span className="truncate">{p.name}</span>
+                    <span className="truncate">{etiquettesPlanete.get(p.id) ?? p.name}</span>
                   </span>
                   <span className="tabular shrink-0">{fmt(total)}</span>
                 </div>
@@ -693,7 +714,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
           {flows.length > 0 && <div className="pt-2 border-t border-border">
             <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Flux mensuels</p>
             {flows.filter(f => f.sourceType === "salary").map(f => {
-              const tName = f.targetType === "portfolio" ? portfolios.find(p => p.id === f.targetId)?.name
+              const tName = f.targetType === "portfolio" ? (f.targetId != null ? etiquettesPlanete.get(f.targetId) : undefined)
                 : f.targetType === "goal" ? goals.find(g => g.id === f.targetId)?.name
                 : f.targetType === "expense" ? (f.name || "Dépense") : "?";
               return <div key={f.id} className="flex justify-between text-xs py-0.5">
@@ -702,7 +723,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
               </div>;
             })}
             {flows.filter(f => f.sourceType === "portfolio").map(f => {
-              const sName = portfolios.find(p => p.id === f.sourceId)?.name || "?";
+              const sName = (f.sourceId != null ? etiquettesPlanete.get(f.sourceId) : undefined) || "?";
               const tName = f.targetType === "goal" ? goals.find(g => g.id === f.targetId)?.name : "?";
               return <div key={f.id} className="flex justify-between text-xs py-0.5">
                 <span className="text-text-muted">{sName} → {tName}</span>
@@ -718,7 +739,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
           {/* Portfolio summary */}
           <div className="flex items-center gap-2">
             <span className="w-3 h-3 rounded-full shrink-0" style={{ background: selected.color }} />
-            <h3 className="font-medium font-[family-name:var(--font-heading)] text-sm">{selected.name}</h3>
+            <h3 className="font-medium font-[family-name:var(--font-heading)] text-sm">{(typeof selected.id === "number" ? etiquettesPlanete.get(selected.id) : undefined) ?? selected.name}</h3>
           </div>
           <p className="text-2xl font-[family-name:var(--font-mono-num)] tabular">{fmt(selected.total)}</p>
           <p className="text-xs text-text-muted">{selected.count} actif{selected.count > 1 ? "s" : ""} · {grossTotal > 0 ? Math.round(selected.total / grossTotal * 100) : 0}% du patrimoine</p>
@@ -736,7 +757,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
           )}
 
           {/* Edit form (hidden by default) */}
-          {createMode === "edit-portfolio" && <PortfolioForm initial={{ name: selected.name, color: selected.color, skin: selected.skin, memberId: selected.memberId }} members={members} ownerName={ownerName}
+          {createMode === "edit-portfolio" && <PortfolioForm initial={{ id: selected.id as number, name: selected.name, color: selected.color, skin: selected.skin, memberId: selected.memberId }} portfolios={portfolios} members={members} ownerName={ownerName}
             onSubmit={async d => { await actions.updatePortfolio(selected.id as number, d); clear(); }}
             onDelete={async () => {
               if (!confirm(`Supprimer "${selected.name}" ?`)) return;
@@ -809,7 +830,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
 
       {!createMode && selected?.kind === "asset" && (
         <>
-          <AssetForm initial={selected.asset} portfolios={portfolios}
+          <AssetForm initial={selected.asset} portfolios={portfolios} members={members} ownerName={ownerName}
             onSubmit={async d => { await actions.updateAsset(selected.asset.id, d); clear(); }}
             onDelete={async () => { if (!confirm(`Supprimer "${selected.asset.name}" ?`)) return; await actions.deleteAsset(selected.asset.id); clear(); }}
             onCancel={clear} />
@@ -856,7 +877,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
                   else await actions.createGoalLink({ goalId: selected.goal.id, portfolioId: p.id });
                 }} />
                 <span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />
-                <span className="flex-1">{p.name}</span>
+                <span className="flex-1">{etiquettesPlanete.get(p.id) ?? p.name}</span>
                 <span className="tabular text-text-muted">{fmt(g?.total ?? 0)}</span>
               </label>;
             })}
@@ -876,7 +897,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
               {incoming.length > 0 && <>
                 <p className="text-[10px] text-text-muted uppercase tracking-wide">Sources de financement</p>
                 {incoming.map(f => {
-                  const srcName = f.sourceType === "salary" ? "Salaire" : portfolios.find(p => p.id === f.sourceId)?.name || f.name || "Flux";
+                  const srcName = f.sourceType === "salary" ? "Salaire" : (f.sourceId != null ? etiquettesPlanete.get(f.sourceId) : undefined) || f.name || "Flux";
                   const pct = totalMonthly > 0 ? Math.round(Number(f.amount) / totalMonthly * 100) : 0;
                   return <div key={f.id} className="flex items-center justify-between text-xs py-1">
                     <span>{srcName}</span>

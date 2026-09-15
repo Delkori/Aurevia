@@ -7,10 +7,12 @@ import { apiFetch, ApiError } from "@/lib/api";
 import { formatMoney } from "@/lib/format";
 import { nextOccurrenceDate } from "@/lib/dates";
 import NetWorthChart from "@/components/NetWorthChart";
+import { etiquettesPlanetes } from "@/lib/nomsPlanetes";
 
 type Snapshot = { date: string; totalValue: string };
 type Flow = { id: number; name: string | null; sourceType: string; sourceId: number | null; targetType: string; targetId: number | null; amount: string; frequency: string; createdAt: string };
-type Portfolio = { id: number; name: string };
+type Portfolio = { id: number; name: string; memberId: number | null };
+type Member = { id: number; name: string };
 type Goal = { id: number; name: string; targetAmount: string };
 
 const FREQ_LABEL: Record<string, string> = { daily: "quotidien", monthly: "mensuel", weekly: "hebdo", yearly: "annuel" };
@@ -20,6 +22,8 @@ export default function TimelinePage() {
   const [flows, setFlows] = useState<Flow[]>([]);
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [ownerName, setOwnerName] = useState("Moi");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [snapshotting, setSnapshotting] = useState(false);
@@ -27,16 +31,21 @@ export default function TimelinePage() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [s, f, p, g] = await Promise.allSettled([
+      const [s, f, p, g, m, st] = await Promise.allSettled([
         apiFetch("/api/snapshot"),
         apiFetch("/api/flows"),
         apiFetch("/api/portfolios"),
         apiFetch("/api/goals"),
+        apiFetch("/api/members"),
+        apiFetch("/api/settings"),
       ]);
       setSnapshots(s.status === "fulfilled" ? (s.value as Snapshot[]) : []);
       setFlows(f.status === "fulfilled" ? (f.value as Flow[]) : []);
       setPortfolios(p.status === "fulfilled" ? (p.value as Portfolio[]) : []);
       setGoals(g.status === "fulfilled" ? (g.value as Goal[]) : []);
+      // Servent uniquement à distinguer deux planètes homonymes dans l'agenda.
+      setMembers(m.status === "fulfilled" ? (m.value as Member[]) : []);
+      if (st.status === "fulfilled") setOwnerName((st.value as Record<string, string>).owner_name || "Moi");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Erreur de chargement.");
     } finally {
@@ -60,11 +69,14 @@ export default function TimelinePage() {
   };
 
   const [now] = useState(() => Date.now());
+  // Deux « PEA » dans l'agenda ne se distinguent pas : on ajoute le
+  // propriétaire aux seuls noms partagés.
+  const etiquettes = etiquettesPlanetes(portfolios, members, ownerName);
   const agenda = flows
     .map(f => {
       const date = nextOccurrenceDate(f.createdAt, f.frequency);
       if (!date) return null;
-      const targetName = f.targetType === "portfolio" ? portfolios.find(p => p.id === f.targetId)?.name
+      const targetName = f.targetType === "portfolio" ? (f.targetId != null ? etiquettes.get(f.targetId) : undefined)
         : f.targetType === "goal" ? goals.find(g => g.id === f.targetId)?.name
         : f.name || (f.targetType === "expense" ? "Dépense" : f.targetType === "income" ? "Revenu" : "Flux");
       const days = Math.max(0, Math.ceil((date.getTime() - now) / 86400000));
