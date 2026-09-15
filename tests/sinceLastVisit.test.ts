@@ -165,6 +165,24 @@ describe("échéances à venir", () => {
 });
 
 describe("cours manquants", () => {
+  test("aucune variation de patrimoine n'est annoncée quand des cours manquent", () => {
+    // Un cours qui n'arrive pas fait retomber sa ligne sur son prix de revient :
+    // le total chute sans que rien n'ait bougé. Annoncer « en baisse de 8000 € »
+    // serait un mouvement inventé — la ligne « cours manquants » dit déjà le vrai.
+    const input = base({ memory: memory({ netWorth: 100000 }), netWorth: 92000, staleCount: 1 });
+    assert.deepEqual(ids(input), ["stale"]);
+  });
+
+  test("une hausse non plus : la comparaison entière est suspendue", () => {
+    const input = base({ memory: memory({ netWorth: 100000 }), netWorth: 104000, staleCount: 2 });
+    assert.deepEqual(ids(input), ["stale"]);
+  });
+
+  test("le patrimoine reparle dès que tous les cours sont là", () => {
+    const input = base({ memory: memory({ netWorth: 100000 }), netWorth: 92000, staleCount: 0 });
+    assert.deepEqual(ids(input), ["networth"]);
+  });
+
   test("le singulier et le pluriel sont corrects", () => {
     assert.match(
       summarizeSinceLastVisit(base({ staleCount: 1 })).highlights[0].text,
@@ -187,8 +205,18 @@ describe("ordre des informations", () => {
         { id: 1, name: null, amount: 600, frequency: "monthly", createdAt: "2026-09-13T00:00:00Z", targetLabel: "PEA" },
       ],
       dividends: [{ ticker: "MC.PA", assetName: "LVMH", date: "2026-09-20", amount: 140 }],
+    });
+    assert.deepEqual(ids(input), ["networth", "goal-1", "payments", "dividends"]);
+  });
+
+  test("les cours manquants ferment la liste", () => {
+    const input = base({
+      flows: [
+        { id: 1, name: null, amount: 600, frequency: "monthly", createdAt: "2026-09-13T00:00:00Z", targetLabel: "PEA" },
+      ],
+      dividends: [{ ticker: "MC.PA", assetName: "LVMH", date: "2026-09-20", amount: 140 }],
       staleCount: 2,
     });
-    assert.deepEqual(ids(input), ["networth", "goal-1", "payments", "dividends", "stale"]);
+    assert.deepEqual(ids(input), ["payments", "dividends", "stale"]);
   });
 });
