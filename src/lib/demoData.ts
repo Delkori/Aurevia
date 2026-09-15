@@ -36,6 +36,10 @@ export const DEMO_PORTFOLIOS = [
   { key: "crypto", name: "Crypto", color: "#fb923c", skin: "crypto", member: null },
   { key: "appart", name: "Appartement Lyon", color: "#4ade80", skin: "terrain", member: null },
   { key: "av", name: "Assurance-vie", color: "#f0abfc", skin: "ocean", member: "camille" },
+  // Deux PEA portant le même nom : c'est l'usage dans un couple, et c'est ce
+  // qui rend visible la règle de nommage — « PEA · Alex » et « PEA · Camille »
+  // ne se complètent que parce qu'ils sont homonymes.
+  { key: "peac", name: "PEA", color: "#34d399", skin: "ocean", member: "camille" },
   { key: "livret", name: "Livret A de Jonas", color: "#fbbf24", skin: "ocean", member: "jonas" },
 ] as const;
 
@@ -62,6 +66,11 @@ export const DEMO_ASSETS: DemoAsset[] = [
   { key: "uc", name: "Unités de compte", type: "life_insurance", manualValue: "19800", currency: "EUR", portfolio: "av" },
   { key: "livreta", name: "Livret A", type: "cash", manualValue: "4300", currency: "EUR", portfolio: "livret" },
   { key: "or", name: "Or physique", type: "precious_metal", ticker: "GC=F", quantity: "3", avgBuyPrice: "2180", currency: "USD", portfolio: "crypto" },
+  // PEA de Camille — mêmes titres que celui d'Alex, en plus petit : deux
+  // personnes détiennent souvent les mêmes lignes, et c'est justement pour ça
+  // qu'il faut savoir de quel PEA on parle.
+  { key: "cw8c", name: "Amundi MSCI World", type: "etf", ticker: "CW8.PA", quantity: "14", avgBuyPrice: "402.00", currency: "EUR", portfolio: "peac" },
+  { key: "mcc", name: "LVMH", type: "stock", ticker: "MC.PA", quantity: "4", avgBuyPrice: "655.00", currency: "EUR", portfolio: "peac" },
 ];
 
 export const DEMO_LOANS = [
@@ -88,6 +97,7 @@ export const DEMO_FLOWS = [
   { name: null, source: "salary", target: "portfolio:pea", amount: "600", frequency: "monthly", member: null },
   { name: null, source: "salary", target: "portfolio:cto", amount: "250", frequency: "monthly", member: null },
   { name: null, source: "member:camille", target: "portfolio:av", amount: "300", frequency: "monthly", member: null },
+  { name: null, source: "member:camille", target: "portfolio:peac", amount: "200", frequency: "monthly", member: null },
   { name: null, source: "salary", target: "portfolio:crypto", amount: "100", frequency: "monthly", member: null },
   { name: null, source: "salary", target: "portfolio:livret", amount: "50", frequency: "monthly", member: null },
   { name: "Loyer", source: "salary", target: "expense", amount: "1150", frequency: "monthly", member: null },
