@@ -14,13 +14,13 @@ import { partDe, type PartLike } from "@/lib/expenseShares";
 import { proprietairesDe, arcsAnneau, type Proprietaire } from "@/lib/proprietaires";
 import {
   construireSystemes, contexteUtile, goalIdDeProjet, systemeDuNoeud,
-  type EntreesSystemes, type SystemeId,
+  SYSTEME_INVESTISSEMENTS, type EntreesSystemes, type SystemeId,
 } from "@/lib/systemes";
 import SystemesView from "@/components/SystemesView";
 import { currentValue, gain, gainPercent, goalProgress, totalDebt, ownedShare, type Rates, type ValuationContext } from "@/lib/networth";
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
 import { getLogoUrl } from "@/lib/logos";
-import { brancherZoom, transformeDe, vueDOuverture } from "@/lib/zoom";
+import { brancherZoom, transformeDe, vueCentreeSur, vueDOuverture } from "@/lib/zoom";
 import {
   FILTRE_ETEINT, SHIP_DIMS, SHIP_IMAGES, VACANCES_IMAGE, imageDepenses, isVacationGoal,
   palierDepenses, planetSkin, salaryImage, skinImageForValue, type PlanetSkin,
@@ -320,6 +320,15 @@ export default function GalaxyView({
   const [createMode, setCreateMode] = useState<string | null>(null);
   const [linkMode, setLinkMode] = useState(false);
   const [showPlanetModal, setShowPlanetModal] = useState(false);
+  // Planète qu'on vient de demander depuis le panneau : on l'amène au milieu du
+  // cadre et on la fait battre quelques secondes. Le numéro distingue deux
+  // demandes successives sur la même planète, sinon la seconde ne relancerait
+  // rien. Il vient d'un compteur à part et non de l'état : celui-ci retombe à
+  // `null` quand le halo s'éteint, et une numérotation qui repart de un ferait
+  // passer la demande suivante pour une déjà traitée.
+  const [phare, setPhare] = useState<{ pid: number; t: number } | null>(null);
+  const numeroPhare = useRef(0);
+  const centrageFait = useRef("");
   const [ownerMode, setOwnerMode] = useState(false);
   const [ownerSourceNode, setOwnerSourceNode] = useState<{ id: string; kind: "center" | "member"; memberId?: number; label: string } | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -357,7 +366,7 @@ export default function GalaxyView({
   const [linkFrequency, setLinkFrequency] = useState("monthly");
   const simRef = useRef<Simulation<GNode, GLink> | null>(null);
   const nodesMapRef = useRef<Map<string, GNode>>(new Map());
-  const [, setTick] = useState(0);
+  const [tick, setTick] = useState(0);
   const [dragId, setDragId] = useState<string | null>(null);
   const dragIdRef = useRef<string | null>(null);
   dragIdRef.current = dragId;
@@ -1261,6 +1270,54 @@ export default function GalaxyView({
     onRefresh();
   };
 
+  /**
+   * Ouvrir une planète depuis le panneau.
+   *
+   * La liste du panneau est le seul endroit qui les montre toutes ; encore
+   * faut-il pouvoir en atteindre une. Trois gestes, dans cet ordre : entrer
+   * dans le système qui l'héberge si on n'y est pas — depuis la vue d'ensemble
+   * la galaxie n'est même pas rendue —, l'ouvrir dans le panneau, puis
+   * demander le recentrage. Celui-ci attend d'avoir des coordonnées : après un
+   * changement de système, la simulation n'a pas encore placé le nœud.
+   */
+  const montrerPlanete = (pid: number) => {
+    const g = groups.find(gr => gr.key === pid);
+    if (!g) return;
+    if (systeme !== SYSTEME_INVESTISSEMENTS && onEntrerSysteme) onEntrerSysteme(SYSTEME_INVESTISSEMENTS);
+    setCreateMode(null);
+    setSelected({
+      kind: "portfolio", id: pid, name: g.portfolio.name, color: g.portfolio.color,
+      skin: g.portfolio.skin, total: g.total, count: g.valued.length, memberId: g.portfolio.memberId,
+    });
+    setPhare({ pid, t: ++numeroPhare.current });
+  };
+
+  // Le recentrage ne touche que le DOM : la transformation du groupe racine est
+  // écrite à la main partout ailleurs (molette, pincement, glissé), elle ne
+  // passe pas par le rendu React. `tick` sert seulement à réessayer tant que la
+  // simulation n'a pas donné de position au nœud.
+  useEffect(() => {
+    if (!phare) return;
+    // Entrer dans un système monte un nouveau SVG, et le montage remet la vue
+    // d'aplomb — après notre recentrage, qui serait perdu. On recentre donc une
+    // fois par état de montage, pas une fois par demande.
+    const cle = `${phare.t}/${svgMonte ? 1 : 0}`;
+    if (centrageFait.current === cle) return;
+    const n = nodesMapRef.current.get(`p-${phare.pid}`);
+    if (!n || !Number.isFinite(n.x) || !Number.isFinite(n.y)) return;
+    centrageFait.current = cle;
+    Object.assign(zoomRef.current, vueCentreeSur({ x: n.x!, y: n.y! }, { largeur: W, hauteur: H, k: zoomRef.current.k }));
+    rootRef.current?.setAttribute("transform", transformeDe(zoomRef.current));
+  }, [phare, tick, svgMonte]);
+
+  // Le halo ne bat que le temps qu'il faut pour attirer l'œil ; le laisser
+  // en ferait une décoration permanente qui ne désignerait plus rien.
+  useEffect(() => {
+    if (!phare) return;
+    const t = setTimeout(() => setPhare(null), 2600);
+    return () => clearTimeout(t);
+  }, [phare]);
+
   const autoLayout = () => { clearAllPositions(layoutModeRef.current); nodesMapRef.current.forEach(n => { if (n.id !== "center") { n.fx = null; n.fy = null; } }); Object.assign(zoomRef.current, { k: 1, x: 0, y: 0 }); rootRef.current?.setAttribute("transform", ""); simRef.current?.alpha(1).restart(); };
 
   const exportPdf = async () => {
@@ -2142,6 +2199,9 @@ export default function GalaxyView({
                     </>}
 
                     <circle r={n.r} fill="url(#sph-hl)" stroke="rgba(0,0,0,0.4)" strokeWidth={1} />
+                    {phare?.pid === n.portfolioKey && (
+                      <circle r={n.r + 10} fill="none" stroke="#b8a5ff" strokeWidth={2.5} className="g-anim g-phare" />
+                    )}
                     <AnneauProprietaires r={n.r} proprietaires={n.proprietaires} epaisseur={isExp ? 3.5 : 2.5} />
                     <EtiquettePlanete r={n.r + 3} cote={cote} titre={n.label} sous={n.sub && mask(n.sub)} couleurSous={n.isProjected ? "#c8bfff" : undefined}
                       lignes={[
@@ -2438,7 +2498,8 @@ export default function GalaxyView({
         </div>
         <div className="min-h-0 h-full">
           <NodePanel selected={selected} loans={loans} portfolios={portfolios} members={members} goals={goals} flows={flows} goalLinks={goalLinks} portfolioOwnerships={portfolioOwnerships} actions={actions} onClear={() => setSelected(null)} createMode={createMode} setCreateMode={setCreateMode} salary={salary} onUpdateSalary={onUpdateSalary} onUpdateSelf={onUpdateSelf} groups={groups.map(g => ({ key: g.key, total: g.total, valued: g.valued }))} grossTotal={grossTotal} debt={debt} ownerName={ownerName} expenseMemberId={expenseMemberId} dividends={dividends} displayCurrency={displayCurrency} ctx={ctx}
-            onPortfolioCreated={p => setSelected({ kind: "portfolio", id: p.id, name: p.name, color: p.color, skin: p.skin, total: 0, count: 0, memberId: p.memberId })} />
+            onPortfolioCreated={p => setSelected({ kind: "portfolio", id: p.id, name: p.name, color: p.color, skin: p.skin, total: 0, count: 0, memberId: p.memberId })}
+            onPickPortfolio={montrerPlanete} />
         </div>
       </div>
       {showPlanetModal && (

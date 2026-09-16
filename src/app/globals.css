@@ -213,3 +213,20 @@ body {
   transform-origin: center;
   will-change: transform;
 }
+
+/* Le phare : la planète qu'on vient de demander depuis le panneau bat trois
+   fois, le temps que l'œil la trouve. Le recentrage l'amène au milieu du
+   cadre, mais au milieu d'une vingtaine de sphères ça ne suffit pas à dire
+   « c'est celle-là ». `g-anim` centre l'échelle sur le cercle lui-même,
+   quel que soit son rayon, et les animations réduites l'effacent comme le
+   reste. */
+@keyframes g-phare {
+  0%   { opacity: 0;    transform: scale(0.82); }
+  10%  { opacity: 0.95; transform: scale(1); }
+  33%  { opacity: 0;    transform: scale(1.35); }
+  43%  { opacity: 0.95; transform: scale(1); }
+  66%  { opacity: 0;    transform: scale(1.35); }
+  76%  { opacity: 0.95; transform: scale(1); }
+  100% { opacity: 0;    transform: scale(1.35); }
+}
+.g-phare { animation: g-phare 2.6s ease-out; }

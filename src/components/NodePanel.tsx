@@ -240,6 +240,48 @@ function OwnershipEditor({ portfolioId, portfolioOwnerMemberId, members, ownerNa
   );
 }
 
+/**
+ * Les planètes du foyer, de la plus grosse à la plus petite.
+ *
+ * La liste servait seulement à lire des montants. Or c'est le seul endroit qui
+ * les montre toutes : retrouver « Assurance-vie » à l'œil parmi vingt sphères
+ * n'est pas un geste raisonnable. Chaque ligne est donc un bouton — elle ouvre
+ * le récapitulatif de la planète et va la chercher là où elle se trouve.
+ */
+function ListePlanetes({ portfolios, groups, etiquettes, fmt, selectedId, onPick }:
+  { portfolios: Portfolio[]; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[];
+    etiquettes: Map<number, string>; fmt: (v: number) => string; selectedId?: number | "unassigned" | null;
+    onPick?: (id: number) => void }) {
+  if (portfolios.length === 0) return null;
+  const lignes = portfolios
+    .map(p => {
+      const g = groups.find(gr => gr.key === p.id);
+      return { p, total: g?.total ?? 0, nature: natureOfPortfolio(g?.valued ?? []) };
+    })
+    .sort((a, b) => b.total - a.total);
+  return (
+    <div className="pt-2 border-t border-border">
+      <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Planètes</p>
+      {lignes.map(({ p, total, nature }) => (
+        <button key={p.id} type="button" onClick={() => onPick?.(p.id)} disabled={!onPick}
+          className={`flex items-center justify-between w-full text-left text-xs py-1 px-1 -mx-1 gap-2 rounded ${
+            onPick ? "hover:bg-surface-hover" : "cursor-default"} ${
+            selectedId === p.id ? "bg-accent-soft text-accent" : ""}`}>
+          <span className="flex items-center gap-1.5 min-w-0">
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: NATURE_COLORS[nature] }}
+              title={NATURE_LABELS[nature]} />
+            <span className="truncate">{etiquettes.get(p.id) ?? p.name}</span>
+          </span>
+          <span className="tabular shrink-0">{fmt(total)}</span>
+        </button>
+      ))}
+      {onPick && <p className="text-[10px] text-text-muted mt-1.5">
+        Clique une planète pour l&apos;ouvrir et la retrouver dans la galaxie.
+      </p>}
+    </div>
+  );
+}
+
 // ── Planet creation modal ────────────────────────────────────────────────────
 export function PlanetModal({ portfolios, members, ownerName, onSubmit, onClose }:
   { portfolios: Portfolio[]; members: Member[]; ownerName: string; onSubmit: (d: Record<string, unknown>) => Promise<void>; onClose: () => void }) {
@@ -550,8 +592,8 @@ function SelfForm({ name: initialName, color: initialColor, accessory: initialAc
 }
 
 // ── Main Panel ───────────────────────────────────────────────────────────────
-export default function NodePanel({ selected, loans, portfolios, members, goals, flows, goalLinks, portfolioOwnerships, actions, onClear, createMode, setCreateMode, salary, onUpdateSalary, onUpdateSelf, groups, grossTotal, debt, onPortfolioCreated, ownerName, expenseMemberId, dividends, displayCurrency, ctx }:
-  { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; onUpdateSelf: (name: string, color: string, accessory: string | null) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number; onPortfolioCreated?: (p: Portfolio) => void; ownerName: string; expenseMemberId?: number | null; dividends: Record<string, DividendInfo | null>; displayCurrency: string; ctx: ValuationContext }) {
+export default function NodePanel({ selected, loans, portfolios, members, goals, flows, goalLinks, portfolioOwnerships, actions, onClear, createMode, setCreateMode, salary, onUpdateSalary, onUpdateSelf, groups, grossTotal, debt, onPortfolioCreated, onPickPortfolio, ownerName, expenseMemberId, dividends, displayCurrency, ctx }:
+  { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; onUpdateSelf: (name: string, color: string, accessory: string | null) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number; onPortfolioCreated?: (p: Portfolio) => void; onPickPortfolio?: (id: number) => void; ownerName: string; expenseMemberId?: number | null; dividends: Record<string, DividendInfo | null>; displayCurrency: string; ctx: ValuationContext }) {
   const fmt = (v: number) => formatMoney(v, displayCurrency);
   const portfolioTotal = (id: number) => groups.find(g => g.key === id)?.total ?? 0;
   // Deux planètes peuvent porter le même nom ; on ne précise le propriétaire
@@ -638,26 +680,8 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
               </span>
             </div>)}
           </div>}
-          {portfolios.length > 0 && <div className="pt-2 border-t border-border">
-            <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Planètes</p>
-            {portfolios
-              .map(p => {
-                const g = groups.find(gr => gr.key === p.id);
-                const nature = natureOfPortfolio(g?.valued ?? []);
-                return { p, total: g?.total ?? 0, nature };
-              })
-              .sort((a, b) => b.total - a.total)
-              .map(({ p, total, nature }) => (
-                <div key={p.id} className="flex items-center justify-between text-xs py-1 gap-2">
-                  <span className="flex items-center gap-1.5 min-w-0">
-                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: NATURE_COLORS[nature] }}
-                      title={NATURE_LABELS[nature]} />
-                    <span className="truncate">{etiquettesPlanete.get(p.id) ?? p.name}</span>
-                  </span>
-                  <span className="tabular shrink-0">{fmt(total)}</span>
-                </div>
-              ))}
-          </div>}
+          <ListePlanetes portfolios={portfolios} groups={groups} etiquettes={etiquettesPlanete} fmt={fmt}
+            onPick={onPickPortfolio} />
           {goals.length > 0 && <div className="pt-2 border-t border-border">
             <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Objectifs</p>
             {goals.map(g => {
@@ -710,6 +734,10 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
           <h3 className="font-medium font-[family-name:var(--font-heading)] text-sm">Patrimoine net</h3>
           <p className="text-2xl font-[family-name:var(--font-mono-num)] tabular">{fmt(selected.total)}</p>
           {debt > 0 && <div className="text-xs text-text-muted space-y-0.5"><p className="tabular">{fmt(selected.grossTotal)} d&apos;actifs</p><p className="tabular text-negative">− {fmt(debt)} de crédits</p></div>}
+          {/* Le patrimoine n'est que la somme de ces planètes : ne pas les
+              montrer ici obligeait à les chercher une à une dans la galaxie. */}
+          <ListePlanetes portfolios={portfolios} groups={groups} etiquettes={etiquettesPlanete} fmt={fmt}
+            onPick={onPickPortfolio} />
           {loans.length > 0 && <div className="pt-2 border-t border-border">{loans.map(l => <div key={l.id} className="flex justify-between text-xs py-1"><span className="text-text-muted">{l.name}</span><span className="tabular text-negative">{fmt(Number(l.remainingBalance))}</span></div>)}</div>}
           {flows.length > 0 && <div className="pt-2 border-t border-border">
             <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Flux mensuels</p>
@@ -733,6 +761,52 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
           </div>}
         </div>
       )}
+
+      {/* « Sans portefeuille » n'est pas une planète : c'est le tas de ce qui
+          n'est rattaché à rien. La sélectionner n'ouvrait rien du tout — donc
+          rien n'expliquait d'où elle sortait ni comment s'en débarrasser. */}
+      {!createMode && selected?.kind === "portfolio" && selected.id === "unassigned" && (() => {
+        const contenu = groups.find(g => g.key === "unassigned")?.valued ?? [];
+        return (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full shrink-0" style={{ background: selected.color }} />
+              <h3 className="font-medium font-[family-name:var(--font-heading)] text-sm">Sans portefeuille</h3>
+            </div>
+            <p className="text-2xl font-[family-name:var(--font-mono-num)] tabular">{fmt(selected.total)}</p>
+            <p className="text-[10px] text-text-muted">
+              Ce n&apos;est pas une planète, mais ce qui n&apos;est rattaché à aucune — le plus souvent
+              parce qu&apos;on a supprimé la planète en gardant son contenu. Fais glisser un satellite
+              sur une planète pour l&apos;y ranger, ou supprime-les.
+            </p>
+            {contenu.length > 0 && <div className="pt-2 border-t border-border">
+              <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Composition</p>
+              {[...contenu].sort((a, b) => b.value - a.value).map(v => (
+                <div key={v.asset.id} className="flex justify-between items-center text-xs py-1.5 border-b border-border/50 last:border-0">
+                  <div>
+                    <p className="font-medium text-text">{v.asset.name}</p>
+                    <p className="text-[10px] text-text-muted">{ASSET_TYPE_LABELS[v.asset.type]}{v.asset.ticker ? ` · ${v.asset.ticker}` : ""}</p>
+                  </div>
+                  <span className="tabular shrink-0">{fmt(v.value)}</span>
+                </div>
+              ))}
+              <Btn type="button" variant="danger" className="w-full mt-3"
+                onClick={async () => {
+                  const combien = `${contenu.length} satellite${contenu.length > 1 ? "s" : ""}`;
+                  if (!confirm(`Supprimer les ${combien} sans portefeuille (${fmt(selected.total)}) ?`)) return;
+                  for (const v of contenu) await actions.deleteAsset(v.asset.id);
+                  clear();
+                }}>
+                <Trash2 size={12} /> Supprimer ces satellites
+              </Btn>
+            </div>}
+            {portfolios.length > 0 && (
+              <ListePlanetes portfolios={portfolios} groups={groups} etiquettes={etiquettesPlanete} fmt={fmt}
+                onPick={onPickPortfolio} />
+            )}
+          </div>
+        );
+      })()}
 
       {(!createMode || createMode === "edit-portfolio") && selected?.kind === "portfolio" && selected.id !== "unassigned" && (
         <div className="space-y-3">
@@ -760,13 +834,37 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
           {createMode === "edit-portfolio" && <PortfolioForm initial={{ id: selected.id as number, name: selected.name, color: selected.color, skin: selected.skin, memberId: selected.memberId }} portfolios={portfolios} members={members} ownerName={ownerName}
             onSubmit={async d => { await actions.updatePortfolio(selected.id as number, d); clear(); }}
             onDelete={async () => {
-              if (!confirm(`Supprimer "${selected.name}" ?`)) return;
-              const assetIds = new Set((groups.find(g => g.key === selected.id)?.valued ?? []).map(v => v.asset.id));
-              const linkedLoans = loans.filter(l => l.assetId != null && assetIds.has(l.assetId));
-              if (linkedLoans.length > 0) {
-                const names = linkedLoans.map(l => `${l.name} (${fmt(Number(l.remainingBalance))})`).join(", ");
-                if (confirm(`Cette planète a un crédit lié : ${names}. Le supprimer aussi ? (Annuler = le garder, non rattaché à une planète)`)) {
-                  for (const l of linkedLoans) await actions.deleteLoan(l.id);
+              // Supprimer une planète ne supprimait pas ce qu'elle contenait :
+              // les satellites se détachaient et se regroupaient sous « Sans
+              // portefeuille ». La planète semblait donc rester, sous un autre
+              // nom, sans que rien ne l'ait annoncé. La question est posée
+              // avant, et la réponse par défaut — celle du bouton principal —
+              // est celle à laquelle on s'attend : tout part.
+              const contenu = groups.find(g => g.key === selected.id)?.valued ?? [];
+              const valeur = contenu.reduce((s, v) => s + v.value, 0);
+              const combien = `${contenu.length} satellite${contenu.length > 1 ? "s" : ""}`;
+              if (!confirm(
+                contenu.length === 0
+                  ? `Supprimer la planète "${selected.name}" ?`
+                  : `Supprimer la planète "${selected.name}" et ses ${combien} (${fmt(valeur)}) ?\n\n`
+                    + `Annuler pour ne rien supprimer.`
+              )) return;
+              if (contenu.length > 0) {
+                const garder = confirm(
+                  `Garder les ${combien} ?\n\n`
+                  + `OK : ils restent, regroupés sous « Sans portefeuille », et pourront être rattachés ailleurs.\n`
+                  + `Annuler : ils sont supprimés avec la planète.`
+                );
+                if (!garder) {
+                  const assetIds = new Set(contenu.map(v => v.asset.id));
+                  const linkedLoans = loans.filter(l => l.assetId != null && assetIds.has(l.assetId));
+                  if (linkedLoans.length > 0) {
+                    const names = linkedLoans.map(l => `${l.name} (${fmt(Number(l.remainingBalance))})`).join(", ");
+                    if (confirm(`Cette planète a un crédit lié : ${names}. Le supprimer aussi ? (Annuler = le garder, non rattaché à une planète)`)) {
+                      for (const l of linkedLoans) await actions.deleteLoan(l.id);
+                    }
+                  }
+                  for (const v of contenu) await actions.deleteAsset(v.asset.id);
                 }
               }
               await actions.deletePortfolio(selected.id as number); clear();
@@ -825,6 +923,13 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
               })}
             </div>;
           })()}
+
+          {/* Les voisines, pour passer de l'une à l'autre sans repartir du
+              patrimoine à chaque fois. */}
+          {portfolios.length > 1 && (
+            <ListePlanetes portfolios={portfolios} groups={groups} etiquettes={etiquettesPlanete} fmt={fmt}
+              selectedId={selected.id} onPick={onPickPortfolio} />
+          )}
         </div>
       )}
 
