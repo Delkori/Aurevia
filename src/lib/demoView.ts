@@ -66,7 +66,7 @@ export function demoPortfolios(maintenant = new Date()) {
   const t = origine(maintenant);
   return DEMO_PORTFOLIOS.map((p, i) => ({
     id: i + 1, name: p.name, color: p.color, skin: p.skin,
-    memberId: memberId(p.member), targetAmount: p.target, createdAt: t,
+    memberId: memberId(p.member), targetAmount: p.target, openedAt: p.opened, createdAt: t,
   }));
 }
 

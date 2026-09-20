@@ -37,16 +37,18 @@ export const DEMO_PORTFOLIOS = [
   // L'appartement est au plafond : une merveille, avec son aura.
   // 31 497 € sur 45 000 : six segments pleins, et le versement de 600 € du
   // mois hachure le septième — c'est le segment « à venir » qu'on veut montrer.
-  { key: "pea", name: "PEA", color: "#7c6af5", skin: "ocean", member: null, target: "45000" },
-  { key: "cto", name: "CTO", color: "#60a5fa", skin: "tech", member: null, target: "15000" },
-  { key: "crypto", name: "Crypto", color: "#fb923c", skin: "crypto", member: null, target: null },
-  { key: "appart", name: "Appartement Lyon", color: "#4ade80", skin: "terrain", member: null, target: "340000" },
-  { key: "av", name: "Assurance-vie", color: "#f0abfc", skin: "ocean", member: "camille", target: "80000" },
+  // `opened` : depuis quand le foyer tient chaque planète — un PEA de 2019,
+  // une assurance-vie de 2016. Ce n'est pas la date de saisie dans l'app.
+  { key: "pea", name: "PEA", color: "#7c6af5", skin: "ocean", member: null, target: "45000", opened: "2019-03-12" },
+  { key: "cto", name: "CTO", color: "#60a5fa", skin: "tech", member: null, target: "15000", opened: "2021-06-04" },
+  { key: "crypto", name: "Crypto", color: "#fb923c", skin: "crypto", member: null, target: null, opened: "2022-01-18" },
+  { key: "appart", name: "Appartement Lyon", color: "#4ade80", skin: "terrain", member: null, target: "340000", opened: "2020-09-30" },
+  { key: "av", name: "Assurance-vie", color: "#f0abfc", skin: "ocean", member: "camille", target: "80000", opened: "2016-05-02" },
   // Deux PEA portant le même nom : c'est l'usage dans un couple, et c'est ce
   // qui rend visible la règle de nommage — « PEA · Alex » et « PEA · Camille »
   // ne se complètent que parce qu'ils sont homonymes.
-  { key: "peac", name: "PEA", color: "#34d399", skin: "ocean", member: "camille", target: "20000" },
-  { key: "livret", name: "Livret A de Jonas", color: "#fbbf24", skin: "ocean", member: "jonas", target: "10000" },
+  { key: "peac", name: "PEA", color: "#34d399", skin: "ocean", member: "camille", target: "20000", opened: "2024-02-15" },
+  { key: "livret", name: "Livret A de Jonas", color: "#fbbf24", skin: "ocean", member: "jonas", target: "10000", opened: "2023-01-09" },
 ] as const;
 
 export const DEMO_ASSETS: DemoAsset[] = [

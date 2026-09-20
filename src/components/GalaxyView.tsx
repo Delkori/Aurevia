@@ -25,6 +25,9 @@ import { barreDeVie, pourcentageDe, SEGMENTS, type BarreDeVie } from "@/lib/barr
 import { scoreDeStructure } from "@/lib/score";
 import type { Situation } from "@/lib/eres";
 import type { ActionQuete, Quete } from "@/lib/quetes";
+import type { Decouverte } from "@/lib/decouvertes";
+import type { Conquete } from "@/lib/conquete";
+import Decouvertes from "@/components/Decouvertes";
 import {
   FILTRE_ETEINT, SHIP_DIMS, SHIP_IMAGES, VACANCES_IMAGE, imageDepenses, isVacationGoal,
   palierDepenses, planetSkin, salaryImage, skinImageForValue, type PlanetSkin,
@@ -38,7 +41,7 @@ import NodePanel, { PlanetModal, type Selection, type Actions } from "@/componen
 import { etiquettesPlanetes } from "@/lib/nomsPlanetes";
 
 type Asset = { id: number; name: string; type: string; ticker: string | null; quantity: string | null; avgBuyPrice: string | null; manualValue: string | null; yieldRate: string | null; currency: string; portfolioId: number | null };
-type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null; targetAmount: string | null };
+type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null; targetAmount: string | null; openedAt: string | null };
 type Goal = { id: number; name: string; targetAmount: string; targetDate: string | null; color: string; memberId: number | null };
 type Loan = { id: number; name: string; remainingBalance: string; currency: string; assetId: number | null };
 type Member = { id: number; name: string; role: string; color: string; salary: string | null; accessory: string | null };
@@ -327,7 +330,7 @@ function TravelingMarkers({
 }
 
 export default function GalaxyView({
-  assets, portfolios, goals, loans, members, flows, goalLinks, portfolioOwnerships, quotes, dividends, actions, salary, onUpdateSalary, onUpdateSelf, onRefresh, showCountdown, ownerName, centerColor, ownerAccessory, rates, displayCurrency, readOnly = false, layoutMode, onLayoutMode, overdueCount = 0, onOpenReview, demoLoaded = false, onRemoveDemo, demoBusy = false, expenseShares = [], systeme = null, onSortirSysteme, onEntrerSysteme, entreesSystemes, memoire = null, situation = null, quetes = [],
+  assets, portfolios, goals, loans, members, flows, goalLinks, portfolioOwnerships, quotes, dividends, actions, salary, onUpdateSalary, onUpdateSelf, onRefresh, showCountdown, ownerName, centerColor, ownerAccessory, rates, displayCurrency, readOnly = false, layoutMode, onLayoutMode, overdueCount = 0, onOpenReview, demoLoaded = false, onRemoveDemo, demoBusy = false, expenseShares = [], systeme = null, onSortirSysteme, onEntrerSysteme, entreesSystemes, memoire = null, situation = null, quetes = [], decouvertes = [], conquete = null,
 }: {
   assets: Asset[]; portfolios: Portfolio[]; goals: Goal[]; loans: Loan[];
   members: Member[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; quotes: Record<string, Quote>; dividends: Record<string, DividendInfo | null>;
@@ -350,12 +353,15 @@ export default function GalaxyView({
   /** L'ère du foyer et ses quêtes, calculées par la page à partir de tout ce qu'elle sait. */
   situation?: Situation | null;
   quetes?: Quete[];
+  decouvertes?: Decouverte[];
+  conquete?: Conquete | null;
 }) {
   const [expanded, setExpanded] = useState<Set<number | "unassigned">>(new Set());
   const [selected, setSelected] = useState<Selection>(null);
   const [createMode, setCreateMode] = useState<string | null>(null);
   const [linkMode, setLinkMode] = useState(false);
   const [showPlanetModal, setShowPlanetModal] = useState(false);
+  const [arbreOuvert, setArbreOuvert] = useState(false);
   // Planète qu'on vient de demander depuis le panneau : on l'amène au milieu du
   // cadre et on la fait battre quelques secondes. Le numéro distingue deux
   // demandes successives sur la même planète, sinon la seconde ne relancerait
@@ -1603,6 +1609,14 @@ export default function GalaxyView({
               )}
             </div>
           )}
+          {decouvertes.length > 0 && (
+            <button onClick={() => setArbreOuvert(true)}
+              className="w-full flex items-center justify-between text-[10px] pt-2 text-text-muted hover:text-text"
+              title="Ouvrir l'arbre des découvertes">
+              <span>Découvertes</span>
+              <span className="tabular font-medium text-text">{decouvertes.filter(d => d.decouverte).length} / {decouvertes.length}</span>
+            </button>
+          )}
         </div>
 
         {/* ── Lecture : pointage et simulateur. La disposition, elle, est posée
@@ -1793,7 +1807,7 @@ export default function GalaxyView({
         </div>
         {systeme === null && entreesSystemes && onEntrerSysteme ? (
           <div className="absolute inset-0 max-lg:top-11">
-            <SystemesView entrees={entreesSystemes} devise={displayCurrency} onEntrer={onEntrerSysteme} />
+            <SystemesView entrees={conquete ? { ...entreesSystemes, conquete } : entreesSystemes} devise={displayCurrency} onEntrer={onEntrerSysteme} />
           </div>
         ) : (<>
         {/* Où suis-je : sans ce titre, rien ne rappelait dans quel système on
@@ -2046,6 +2060,20 @@ export default function GalaxyView({
                     <circle r={R + 25} fill="url(#glow-center)" />
                     <circle r={R} fill="url(#sph-center)" filter="url(#glow-strong)" />
                     <circle r={R} fill="url(#sph-hl)" />
+                    {/* La couronne d'ère : six crans autour du patrimoine, autant
+                        d'allumés que d'ères franchies. C'est le seul cosmétique
+                        qui ne se gagne pas — il se constate. */}
+                    {situation && (() => {
+                      const rc = R + 8, C = 2 * Math.PI * rc, arc = C / 6 - 5;
+                      return <g pointerEvents="none">
+                        <title>{`Ère ${["I", "II", "III", "IV", "V", "VI"][situation.ere.numero - 1]} · ${situation.ere.nom}`}</title>
+                        {[0, 1, 2, 3, 4, 5].map(i => (
+                          <circle key={i} r={rc} fill="none" strokeWidth={2.2} strokeLinecap="round"
+                            stroke={i < situation.ere.numero ? "#ffcc55" : "rgba(255,255,255,0.14)"}
+                            strokeDasharray={`${arc} ${C - arc}`} transform={`rotate(${-90 + i * 60})`} />
+                        ))}
+                      </g>;
+                    })()}
 
                     {/* ── Little astronaut standing on top ── */}
                     <g className="g-bob-t" style={{ ["--g-y" as string]: `${-R - 16 + bob}px` }}>
@@ -2585,6 +2613,7 @@ export default function GalaxyView({
             onPickPortfolio={montrerPlanete} quetes={quetes} onQuete={suivreQuete} />
         </div>
       </div>
+      {arbreOuvert && <Decouvertes decouvertes={decouvertes} onClose={() => setArbreOuvert(false)} />}
       {showPlanetModal && (
         <PlanetModal portfolios={portfolios} members={members} ownerName={ownerName}
           onSubmit={async d => { const p = await actions.createPortfolio(d); setSelected({ kind: "portfolio", id: p.id, name: p.name, color: p.color, skin: p.skin, total: 0, count: 0, memberId: p.memberId, targetAmount: p.targetAmount }); }}

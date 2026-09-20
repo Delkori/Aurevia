@@ -97,6 +97,7 @@ export async function seedDemo(): Promise<Seed> {
         skin: p.skin,
         memberId: p.member ? memberIds[p.member] : null,
         targetAmount: p.target,
+        openedAt: p.opened,
       })
       .returning();
     portfolioIds[p.key] = row.id;

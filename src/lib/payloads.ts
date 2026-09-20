@@ -48,6 +48,7 @@ export async function portfolioValues(req: Request) {
     skin: optString(body.skin, "Skin", 30),
     memberId: optId(body.memberId, "Membre"),
     targetAmount: optNumeric(body.targetAmount, "Plafond", { min: 0 }),
+    openedAt: optDate(body.openedAt, "Date d'ouverture"),
   };
 }
 
