@@ -1,6 +1,7 @@
 // Import relatif : module pur, exécuté par `node --test`.
 import { barreDeVie, pourcentageDe } from "./barreDeVie.ts";
 import type { Score } from "./score.ts";
+import type { Situation } from "./eres.ts";
 
 /**
  * La fin d'un tour.
@@ -36,6 +37,8 @@ export type BilanTour = {
     pourcentage: string;
   }[];
   score: Score | null;
+  /** L'ère du foyer, et ce qui le sépare de la suivante. */
+  situation: Situation | null;
 };
 
 const MOIS = [
@@ -70,6 +73,7 @@ export function bilanDuTour(e: {
   planetes: { id: number; nom: string; valeur: number; plafond: number | null }[];
   memoire: { goalProgress?: Record<string, number>; portfolioValues?: Record<string, number> } | null;
   score: Score | null;
+  situation?: Situation | null;
 }): BilanTour {
   const ref = instantaneDeReference(e.instantanes, e.mois);
   return {
@@ -96,5 +100,6 @@ export function bilanDuTour(e: {
       }];
     }),
     score: e.score,
+    situation: e.situation ?? null,
   };
 }

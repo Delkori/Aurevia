@@ -13,7 +13,7 @@ import { monthlyEquivalent } from "@/lib/flows";
 import { partDe, type PartLike } from "@/lib/expenseShares";
 import { proprietairesDe, arcsAnneau, type Proprietaire } from "@/lib/proprietaires";
 import {
-  construireSystemes, contexteUtile, goalIdDeProjet, systemeDuNoeud,
+  construireSystemes, contexteUtile, goalIdDeProjet, projetId, systemeDuNoeud,
   SYSTEME_INVESTISSEMENTS, type EntreesSystemes, type SystemeId,
 } from "@/lib/systemes";
 import SystemesView from "@/components/SystemesView";
@@ -23,6 +23,8 @@ import { getLogoUrl } from "@/lib/logos";
 import { brancherZoom, transformeDe, vueCentreeSur, vueDOuverture } from "@/lib/zoom";
 import { barreDeVie, pourcentageDe, SEGMENTS, type BarreDeVie } from "@/lib/barreDeVie";
 import { scoreDeStructure } from "@/lib/score";
+import type { Situation } from "@/lib/eres";
+import type { ActionQuete, Quete } from "@/lib/quetes";
 import {
   FILTRE_ETEINT, SHIP_DIMS, SHIP_IMAGES, VACANCES_IMAGE, imageDepenses, isVacationGoal,
   palierDepenses, planetSkin, salaryImage, skinImageForValue, type PlanetSkin,
@@ -325,7 +327,7 @@ function TravelingMarkers({
 }
 
 export default function GalaxyView({
-  assets, portfolios, goals, loans, members, flows, goalLinks, portfolioOwnerships, quotes, dividends, actions, salary, onUpdateSalary, onUpdateSelf, onRefresh, showCountdown, ownerName, centerColor, ownerAccessory, rates, displayCurrency, readOnly = false, layoutMode, onLayoutMode, overdueCount = 0, onOpenReview, demoLoaded = false, onRemoveDemo, demoBusy = false, expenseShares = [], systeme = null, onSortirSysteme, onEntrerSysteme, entreesSystemes, memoire = null,
+  assets, portfolios, goals, loans, members, flows, goalLinks, portfolioOwnerships, quotes, dividends, actions, salary, onUpdateSalary, onUpdateSelf, onRefresh, showCountdown, ownerName, centerColor, ownerAccessory, rates, displayCurrency, readOnly = false, layoutMode, onLayoutMode, overdueCount = 0, onOpenReview, demoLoaded = false, onRemoveDemo, demoBusy = false, expenseShares = [], systeme = null, onSortirSysteme, onEntrerSysteme, entreesSystemes, memoire = null, situation = null, quetes = [],
 }: {
   assets: Asset[]; portfolios: Portfolio[]; goals: Goal[]; loans: Loan[];
   members: Member[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; quotes: Record<string, Quote>; dividends: Record<string, DividendInfo | null>;
@@ -345,6 +347,9 @@ export default function GalaxyView({
   demoLoaded?: boolean; onRemoveDemo?: () => void; demoBusy?: boolean;
   /** Ce qu'on a mémorisé à la dernière visite : les segments perdus depuis en découlent. */
   memoire?: { portfolioValues?: Record<string, number>; goalProgress?: Record<string, number> } | null;
+  /** L'ère du foyer et ses quêtes, calculées par la page à partir de tout ce qu'elle sait. */
+  situation?: Situation | null;
+  quetes?: Quete[];
 }) {
   const [expanded, setExpanded] = useState<Set<number | "unassigned">>(new Set());
   const [selected, setSelected] = useState<Selection>(null);
@@ -1348,6 +1353,13 @@ export default function GalaxyView({
     setPhare({ pid, t: ++numeroPhare.current });
   };
 
+  /** Une quête mène quelque part : au pointage, à une planète, à un projet. */
+  const suivreQuete = (a: ActionQuete) => {
+    if (a.type === "pointer") onOpenReview();
+    else if (a.type === "planete") montrerPlanete(a.id);
+    else if (a.type === "projet") { setSelected(null); onEntrerSysteme?.(projetId(a.id)); }
+  };
+
   // Le recentrage ne touche que le DOM : la transformation du groupe racine est
   // écrite à la main partout ailleurs (molette, pincement, glissé), elle ne
   // passe pas par le rendu React. `tick` sert seulement à réessayer tant que la
@@ -1571,6 +1583,24 @@ export default function GalaxyView({
               <div className="h-1 rounded bg-bg mt-1 overflow-hidden">
                 <div className="h-full rounded" style={{ width: `${structureScore}%`, background: structureScore >= 70 ? "#34d399" : structureScore >= 45 ? "#7c6af5" : "#f87171" }} />
               </div>
+            </div>
+          )}
+          {/* L'ère : constatée, jamais gagnée. Six crans ; celui du foyer est
+              plein, et une ligne dit ce qui sépare de la suivante. */}
+          {situation && (
+            <div className="pt-2" title={situation.ere.sens}>
+              <div className="flex items-center justify-between text-[10px]">
+                <span className="text-text-muted">Ère {["I", "II", "III", "IV", "V", "VI"][situation.ere.numero - 1]}</span>
+                <span className="font-semibold text-[#ffcc55]">{situation.ere.nom}</span>
+              </div>
+              <div className="flex gap-1 mt-1" aria-hidden="true">
+                {[1, 2, 3, 4, 5, 6].map(n => (
+                  <span key={n} className="flex-1 h-1 rounded" style={{ background: n <= situation.ere.numero ? "#ffcc55" : "var(--color-bg, #07070d)" }} />
+                ))}
+              </div>
+              {situation.prochaine && situation.manque[0] && (
+                <p className="text-[9px] text-text-muted mt-1 leading-snug">{situation.prochaine.nom} : {situation.manque[0]}</p>
+              )}
             </div>
           )}
         </div>
@@ -2552,7 +2582,7 @@ export default function GalaxyView({
         <div className="min-h-0 h-full">
           <NodePanel selected={selected} loans={loans} portfolios={portfolios} members={members} goals={goals} flows={flows} goalLinks={goalLinks} portfolioOwnerships={portfolioOwnerships} actions={actions} onClear={() => setSelected(null)} createMode={createMode} setCreateMode={setCreateMode} salary={salary} onUpdateSalary={onUpdateSalary} onUpdateSelf={onUpdateSelf} groups={groups.map(g => ({ key: g.key, total: g.total, valued: g.valued }))} grossTotal={grossTotal} debt={debt} ownerName={ownerName} expenseMemberId={expenseMemberId} dividends={dividends} displayCurrency={displayCurrency} ctx={ctx}
             onPortfolioCreated={p => setSelected({ kind: "portfolio", id: p.id, name: p.name, color: p.color, skin: p.skin, total: 0, count: 0, memberId: p.memberId, targetAmount: p.targetAmount })}
-            onPickPortfolio={montrerPlanete} />
+            onPickPortfolio={montrerPlanete} quetes={quetes} onQuete={suivreQuete} />
         </div>
       </div>
       {showPlanetModal && (

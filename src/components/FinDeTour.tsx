@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Award, Minus } from "lucide-react";
+import { ArrowDown, ArrowUp, Award, Crown, Minus } from "lucide-react";
 import type { BilanTour } from "@/lib/finDeTour";
 import { PART_MAX } from "@/lib/score";
 
@@ -17,7 +17,7 @@ export default function FinDeTour({ bilan, fmt, onRetour, onTourSuivant }: {
   onRetour: () => void;
   onTourSuivant: () => void;
 }) {
-  const { patrimoine, projets, planetes, score } = bilan;
+  const { patrimoine, projets, planetes, score, situation } = bilan;
   const delta = patrimoine.avant != null ? patrimoine.apres - patrimoine.avant : null;
   const depuis = patrimoine.depuis ? dateCourte(patrimoine.depuis) : null;
 
@@ -73,6 +73,15 @@ export default function FinDeTour({ bilan, fmt, onRetour, onTourSuivant }: {
           {planetes.length === 0 && (
             <Ligne icone="neutre" texte={<span className="text-text-muted">Aucune planète n&apos;a de plafond : fixe-en un pour voir sa barre de vie ici</span>} valeur="" />
           )}
+
+          {/* L'ère : où en est le foyer, et ce qui le sépare de la suivante. */}
+          {situation && (
+            <Ligne icone="ere"
+              texte={<>{situation.ere.nom}{situation.prochaine && situation.manque[0] && (
+                <span className="text-text-muted"> — {situation.prochaine.nom} : {situation.manque[0]}</span>
+              )}</>}
+              valeur={`ère ${["I", "II", "III", "IV", "V", "VI"][situation.ere.numero - 1]}`} ton="or" />
+          )}
         </div>
 
         {/* Score */}
@@ -105,16 +114,16 @@ export default function FinDeTour({ bilan, fmt, onRetour, onTourSuivant }: {
 }
 
 function Ligne({ icone, texte, valeur, ton }: {
-  icone: "haut" | "bas" | "neutre" | "merveille";
+  icone: "haut" | "bas" | "neutre" | "merveille" | "ere";
   texte: React.ReactNode;
   valeur: string;
   ton?: "positive" | "negative" | "or";
 }) {
   const classes = {
     haut: "bg-positive/15 text-positive", bas: "bg-negative/15 text-negative",
-    neutre: "bg-border text-text-muted", merveille: "bg-[#ffcc55]/15 text-[#ffcc55]",
+    neutre: "bg-border text-text-muted", merveille: "bg-[#ffcc55]/15 text-[#ffcc55]", ere: "bg-[#ffcc55]/15 text-[#ffcc55]",
   }[icone];
-  const Icone = { haut: ArrowUp, bas: ArrowDown, neutre: Minus, merveille: Award }[icone];
+  const Icone = { haut: ArrowUp, bas: ArrowDown, neutre: Minus, merveille: Award, ere: Crown }[icone];
   const couleur = ton === "positive" ? "text-positive" : ton === "negative" ? "text-negative" : ton === "or" ? "text-[#ffcc55]" : "text-text";
   return (
     <div className="grid grid-cols-[18px_1fr_auto] items-center gap-2.5 py-2 text-xs">

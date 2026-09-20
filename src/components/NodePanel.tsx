@@ -10,6 +10,7 @@ import { ASTRONAUT_ACCESSORIES } from "@/lib/astronautAccessories";
 import { monthsToReach } from "@/lib/projection";
 import { etiquettesPlanetes, homonymesDe } from "@/lib/nomsPlanetes";
 import { barreDeVie, pourcentageDe } from "@/lib/barreDeVie";
+import type { ActionQuete, Quete } from "@/lib/quetes";
 
 type Asset = { id: number; name: string; type: string; ticker: string | null; quantity: string | null; avgBuyPrice: string | null; manualValue: string | null; yieldRate: string | null; currency: string; portfolioId: number | null };
 type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null; targetAmount: string | null };
@@ -597,8 +598,8 @@ function SelfForm({ name: initialName, color: initialColor, accessory: initialAc
 }
 
 // ── Main Panel ───────────────────────────────────────────────────────────────
-export default function NodePanel({ selected, loans, portfolios, members, goals, flows, goalLinks, portfolioOwnerships, actions, onClear, createMode, setCreateMode, salary, onUpdateSalary, onUpdateSelf, groups, grossTotal, debt, onPortfolioCreated, onPickPortfolio, ownerName, expenseMemberId, dividends, displayCurrency, ctx }:
-  { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; onUpdateSelf: (name: string, color: string, accessory: string | null) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number; onPortfolioCreated?: (p: Portfolio) => void; onPickPortfolio?: (id: number) => void; ownerName: string; expenseMemberId?: number | null; dividends: Record<string, DividendInfo | null>; displayCurrency: string; ctx: ValuationContext }) {
+export default function NodePanel({ selected, loans, portfolios, members, goals, flows, goalLinks, portfolioOwnerships, actions, onClear, createMode, setCreateMode, salary, onUpdateSalary, onUpdateSelf, groups, grossTotal, debt, onPortfolioCreated, onPickPortfolio, quetes = [], onQuete, ownerName, expenseMemberId, dividends, displayCurrency, ctx }:
+  { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; onUpdateSelf: (name: string, color: string, accessory: string | null) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number; onPortfolioCreated?: (p: Portfolio) => void; onPickPortfolio?: (id: number) => void; quetes?: Quete[]; onQuete?: (a: ActionQuete) => void; ownerName: string; expenseMemberId?: number | null; dividends: Record<string, DividendInfo | null>; displayCurrency: string; ctx: ValuationContext }) {
   const fmt = (v: number) => formatMoney(v, displayCurrency);
   const portfolioTotal = (id: number) => groups.find(g => g.key === id)?.total ?? 0;
   // Deux planètes peuvent porter le même nom ; on ne précise le propriétaire
@@ -644,6 +645,28 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
           {debt > 0 && <div className="text-xs text-text-muted space-y-0.5">
             <p className="tabular">{fmt(grossTotal)} d&apos;actifs</p>
             <p className="tabular text-negative">− {fmt(debt)} de crédits</p>
+          </div>}
+          {/* Les quêtes : ce que le foyer pourrait faire maintenant. Jamais un
+              placement à acheter — une échéance, un geste d'organisation, ou
+              la division d'un plan déjà déclaré. */}
+          {quetes.length > 0 && <div className="pt-2 border-t border-border space-y-1.5">
+            <p className="text-[10px] text-text-muted uppercase tracking-wide">Quêtes</p>
+            {quetes.map(q => {
+              const Corps = (
+                <>
+                  <p className="text-[9px] uppercase tracking-wider text-text-muted">{{ echeance: "Échéance", organisation: "Organisation", plan: "Arithmétique du plan" }[q.type]}</p>
+                  <p className="text-xs font-medium text-text mt-0.5">{q.titre}</p>
+                  <p className="text-[10px] text-text-muted mt-0.5">{q.detail}</p>
+                  <p className="text-[10px] text-accent mt-1">{q.gain}</p>
+                </>
+              );
+              return q.action && onQuete
+                ? <button key={q.id} type="button" onClick={() => onQuete(q.action!)}
+                    className="block w-full text-left rounded-lg border border-border bg-surface px-2.5 py-2 hover:bg-surface-hover hover:border-accent/40">
+                    {Corps}
+                  </button>
+                : <div key={q.id} className="rounded-lg border border-border bg-surface px-2.5 py-2">{Corps}</div>;
+            })}
           </div>}
           {(() => {
             // Revenus passifs projetés (12 prochains mois) : somme, pour chaque action/ETF

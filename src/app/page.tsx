@@ -10,6 +10,10 @@ import FinDeTour from "@/components/FinDeTour";
 import { bilanDuTour, type BilanTour, type Instantane } from "@/lib/finDeTour";
 import { scoreDeStructure } from "@/lib/score";
 import { planetSkin } from "@/lib/skins";
+import { situationDuFoyer } from "@/lib/eres";
+import { quetesDuFoyer } from "@/lib/quetes";
+import { nomDuMois } from "@/lib/finDeTour";
+import { natureOfPortfolio } from "@/lib/natures";
 import DemoIntro from "@/components/DemoIntro";
 import { monthlyEquivalent } from "@/lib/flows";
 import { type EntreesSystemes, type SystemeId } from "@/lib/systemes";
@@ -381,6 +385,7 @@ export default function HomePage() {
       })),
       memoire: memory,
       score,
+      situation: jeu.situation,
     });
   };
 
@@ -504,6 +509,46 @@ export default function HomePage() {
     };
   }, [assets, quotes, loans, flows, members, goals, goalLinks, portfolios, rates, settings, nomPlanete]);
 
+  /**
+   * L'ère du foyer et ses quêtes — constatées, jamais gagnées. Tout vient de
+   * ce que la page sait déjà : l'épargne disponible est la valeur des
+   * planètes de nature « épargne », les revenus passifs sont les revenus
+   * déclarés plus les dividendes estimés ramenés au mois.
+   */
+  // Pas de `useMemo` : le compilateur React mémoïse lui-même, et un
+  // `useMemo` qu'il ne peut pas vérifier lui fait abandonner toute la page.
+  const jeu = (() => {
+    const devise = settings.display_currency || "EUR";
+    const fmt = (v: number) => formatMoney(v, devise);
+    const ctx: ValuationContext = { rates, displayCurrency: devise };
+    const valeurDe = (a: Asset) => currentValue(a, a.ticker ? quotes[a.ticker] : null, ctx);
+    const natureDe = (pid: number) =>
+      natureOfPortfolio(assets.filter(a => a.portfolioId === pid).map(a => ({ asset: a, value: valeurDe(a) })));
+    const valeurPlanete = (pid: number) => visitData.portfolioValues[String(pid)] ?? 0;
+    // « autre » n'est pas une nature, c'est l'absence de nature : elle ne compte pas.
+    const natures = new Set(portfolios.filter(p => valeurPlanete(p.id) > 0).map(p => natureDe(p.id)).filter(n => n !== "autre"));
+    const versementProgramme = flows.some(f => (f.targetType === "portfolio" || f.targetType === "goal") && monthlyEquivalent(f) > 0);
+    const situation = situationDuFoyer({
+      epargneDisponible: portfolios.filter(p => natureDe(p.id) === "epargne").reduce((s, p) => s + valeurPlanete(p.id), 0),
+      depensesMensuelles: entreesSystemes.depenses,
+      versementProgramme,
+      patrimoineNet: visitData.netWorth,
+      revenusMensuels: entreesSystemes.revenus,
+      natures: natures.size,
+      revenusPassifs: flows.filter(f => f.targetType === "income").reduce((s, f) => s + monthlyEquivalent(f), 0)
+        + visitData.dividends.reduce((s, d) => s + d.amount, 0) / 12,
+    }, fmt);
+    const quetes = quetesDuFoyer({
+      enRetard: overdue,
+      mois: nomDuMois(new Date()).split(" ")[0],
+      planetes: portfolios.map(p => ({ id: p.id, nom: nomPlanete(p), valeur: valeurPlanete(p.id), plafond: Number(p.targetAmount) || null })),
+      projets: entreesSystemes.projets.map(p => ({ id: p.goalId, nom: p.nom, acquis: p.acquis, cible: p.cible, apportMensuel: p.apport })),
+      depensesDeclarees: entreesSystemes.depenses > 0,
+      versementProgramme,
+    }, fmt);
+    return { situation, quetes };
+  })();
+
   const isEmpty =
     assets.length === 0 &&
     portfolios.length === 0 &&
@@ -606,7 +651,7 @@ export default function HomePage() {
 
         {!isEmpty && !readOnly && <SinceLastVisit data={visitData} disabled={readOnly} />}
         <GalaxyView
-          memoire={memory}
+          memoire={memory} situation={jeu.situation} quetes={jeu.quetes}
           assets={assets} portfolios={portfolios} goals={goals} loans={loans}
           members={members} flows={flows} goalLinks={goalLinks} portfolioOwnerships={portfolioOwnerships} expenseShares={expenseShares} quotes={quotes} dividends={dividends} actions={actions}
           salary={Number(settings.monthly_salary) || 0}
