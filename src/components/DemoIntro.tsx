@@ -51,13 +51,13 @@ const POINTS = [
   },
   {
     icone: ClipboardCheck,
-    titre: "Prévu contre constaté",
-    texte: "Chaque échéance se pointe au fil du mois, en un clic. L'écart entre ce qui était prévu et ce qui est réellement passé est le chiffre qu'aucun tableur ne donne — et il se pointe aussi dans cette démonstration.",
+    titre: "Chaque mois est un tour",
+    texte: "Chaque échéance se pointe au fil du mois, en un clic ; l'écart entre le prévu et le constaté est le chiffre qu'aucun tableur ne donne. Enregistrer termine le tour : le bilan dit ce qui a bougé, ce qui s'est rempli, ce que le foyer a découvert. Ça se joue aussi dans cette démonstration.",
   },
   {
     icone: Orbit,
-    titre: "Une galaxie plutôt qu'un tableau",
-    texte: "Les revenus, les dépenses, les placements et les projets sont des systèmes ; on y voyage. Chaque planète porte l'anneau de son propriétaire et chaque versement son trajet : d'où part l'argent, et où il va.",
+    titre: "Une galaxie qu'on fait évoluer",
+    texte: "Les revenus, les dépenses, les placements et les projets sont des systèmes ; on y voyage. Chaque planète porte une barre de vie vers le plafond qu'on lui a fixé — elle recule quand les cours reculent — et le foyer traverse des ères, du Campement à l'Indépendance, constatées dans ses chiffres, jamais gagnées en cliquant.",
   },
 ];
 
