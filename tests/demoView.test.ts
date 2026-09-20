@@ -96,7 +96,8 @@ describe("foyer de démonstration", () => {
     assert.ok(s.length >= 12, `${s.length} points`);
     for (let i = 1; i < s.length; i++) assert.ok(s[i].date > s[i - 1].date, `${s[i - 1].date} → ${s[i].date}`);
     for (const p of s) {
-      assert.equal(Number(p.netWorth).toFixed(2), (Number(p.totalValue) - Number(p.totalDebt)).toFixed(2));
+      // Le net, comme dans la vraie table : la courbe et la fin de tour le lisent là.
+      assert.equal(p.totalValue, p.netWorth);
       assert.ok(Number(p.netWorth) > 0);
     }
   });

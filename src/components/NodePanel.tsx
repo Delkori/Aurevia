@@ -9,9 +9,11 @@ import { upcomingByMonth, type FlowLike } from "@/lib/calendar";
 import { ASTRONAUT_ACCESSORIES } from "@/lib/astronautAccessories";
 import { monthsToReach } from "@/lib/projection";
 import { etiquettesPlanetes, homonymesDe } from "@/lib/nomsPlanetes";
+import { barreDeVie, pourcentageDe } from "@/lib/barreDeVie";
+import type { ActionQuete, Quete } from "@/lib/quetes";
 
 type Asset = { id: number; name: string; type: string; ticker: string | null; quantity: string | null; avgBuyPrice: string | null; manualValue: string | null; yieldRate: string | null; currency: string; portfolioId: number | null };
-type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null };
+type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null; targetAmount: string | null };
 type Goal = { id: number; name: string; targetAmount: string; targetDate: string | null; color: string; memberId: number | null };
 type Loan = { id: number; name: string; remainingBalance: string; currency: string; assetId: number | null };
 type Member = { id: number; name: string; role: string; color: string; salary: string | null; accessory: string | null };
@@ -23,7 +25,7 @@ type DividendInfo = { ticker: string; currency: string; received: DividendEvent[
 
 export type Selection =
   | { kind: "total"; total: number; grossTotal: number; debt: number }
-  | { kind: "portfolio"; id: number | "unassigned"; name: string; color: string; skin: string | null; total: number; count: number; memberId: number | null }
+  | { kind: "portfolio"; id: number | "unassigned"; name: string; color: string; skin: string | null; total: number; count: number; memberId: number | null; targetAmount: string | null }
   | { kind: "asset"; asset: Asset; value: number; gain: number; gainPct: number; portfolioName: string }
   | { kind: "goal"; goal: Goal; progress: number; linkedPortfolioIds: number[] }
   | { kind: "member"; member: Member; total: number }
@@ -128,16 +130,17 @@ function SkinPicker({ value, onChange }: { value: string; onChange: (v: string) 
 }
 
 function PortfolioForm({ initial, portfolios, members, ownerName, onSubmit, onDelete, onCancel }:
-  { initial?: { id?: number; name: string; color: string; skin: string | null; memberId: number | null }; portfolios: Portfolio[]; members: Member[]; ownerName: string; onSubmit: (d: Record<string, unknown>) => void; onDelete?: () => void; onCancel: () => void }) {
+  { initial?: { id?: number; name: string; color: string; skin: string | null; memberId: number | null; targetAmount?: string | null }; portfolios: Portfolio[]; members: Member[]; ownerName: string; onSubmit: (d: Record<string, unknown>) => void; onDelete?: () => void; onCancel: () => void }) {
   const [name, setName] = useState(initial?.name ?? "");
   const [color, setColor] = useState(initial?.color ?? COLORS[0]);
   const [skin, setSkin] = useState(initial?.skin ?? "");
   const [memberId, setMemberId] = useState(String(initial?.memberId ?? ""));
+  const [plafond, setPlafond] = useState(initial?.targetAmount ?? "");
   // Deux PEA, c'est normal dans un couple — mais autant le dire tout de suite,
   // et rappeler à qui appartient celui qui existe déjà.
   const jumeaux = homonymesDe(name, portfolios, members, ownerName, initial?.id);
   return (
-    <form onSubmit={e => { e.preventDefault(); onSubmit({ name, color, skin: skin || null, memberId: memberId ? Number(memberId) : null }); }} className="space-y-2">
+    <form onSubmit={e => { e.preventDefault(); onSubmit({ name, color, skin: skin || null, memberId: memberId ? Number(memberId) : null, targetAmount: plafond.trim() || null }); }} className="space-y-2">
       <p className="text-[10px] text-text-muted uppercase tracking-wide">{initial ? "Planète" : "Nouvelle planète"}</p>
       <Label>Nom</Label><Inp required value={name} onChange={e => setName(e.target.value)} placeholder="PEA, CTO, Salaire…" />
       {jumeaux.length > 0 && (
@@ -149,6 +152,9 @@ function PortfolioForm({ initial, portfolios, members, ownerName, onSubmit, onDe
         </p>
       )}
       {members.length > 0 && <><Label>Propriétaire</Label><Sel value={memberId} onChange={e => setMemberId(e.target.value)}><option value="">{ownerName}</option>{members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</Sel></>}
+      <Label>Plafond</Label>
+      <Inp type="number" step="any" min="0" value={plafond} onChange={e => setPlafond(e.target.value)} placeholder="50 000" className="tabular" />
+      <p className="text-[10px] text-text-muted">La valeur que tu vises pour cette planète. Elle dessine une barre de vie au-dessus de la sphère — sans plafond, pas de barre.</p>
       <Label>Skin</Label>
       <SkinPicker value={skin} onChange={setSkin} />
       {(skin === "" || skin === "generic") && <><Label>Couleur</Label><ColorPick value={color} onChange={setColor} /></>}
@@ -236,6 +242,48 @@ function OwnershipEditor({ portfolioId, portfolioOwnerMemberId, members, ownerNa
         Total parts : {total}%{total !== 100 ? " — doit faire 100% pour que le patrimoine par membre soit exact" : ""}
       </p>
       {totalMonthly > 0 && <p className="text-[10px] text-text-muted">Total versements : {totalMonthly}€/mois</p>}
+    </div>
+  );
+}
+
+/**
+ * Les planètes du foyer, de la plus grosse à la plus petite.
+ *
+ * La liste servait seulement à lire des montants. Or c'est le seul endroit qui
+ * les montre toutes : retrouver « Assurance-vie » à l'œil parmi vingt sphères
+ * n'est pas un geste raisonnable. Chaque ligne est donc un bouton — elle ouvre
+ * le récapitulatif de la planète et va la chercher là où elle se trouve.
+ */
+function ListePlanetes({ portfolios, groups, etiquettes, fmt, selectedId, onPick }:
+  { portfolios: Portfolio[]; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[];
+    etiquettes: Map<number, string>; fmt: (v: number) => string; selectedId?: number | "unassigned" | null;
+    onPick?: (id: number) => void }) {
+  if (portfolios.length === 0) return null;
+  const lignes = portfolios
+    .map(p => {
+      const g = groups.find(gr => gr.key === p.id);
+      return { p, total: g?.total ?? 0, nature: natureOfPortfolio(g?.valued ?? []) };
+    })
+    .sort((a, b) => b.total - a.total);
+  return (
+    <div className="pt-2 border-t border-border">
+      <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Planètes</p>
+      {lignes.map(({ p, total, nature }) => (
+        <button key={p.id} type="button" onClick={() => onPick?.(p.id)} disabled={!onPick}
+          className={`flex items-center justify-between w-full text-left text-xs py-1 px-1 -mx-1 gap-2 rounded ${
+            onPick ? "hover:bg-surface-hover" : "cursor-default"} ${
+            selectedId === p.id ? "bg-accent-soft text-accent" : ""}`}>
+          <span className="flex items-center gap-1.5 min-w-0">
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: NATURE_COLORS[nature] }}
+              title={NATURE_LABELS[nature]} />
+            <span className="truncate">{etiquettes.get(p.id) ?? p.name}</span>
+          </span>
+          <span className="tabular shrink-0">{fmt(total)}</span>
+        </button>
+      ))}
+      {onPick && <p className="text-[10px] text-text-muted mt-1.5">
+        Clique une planète pour l&apos;ouvrir et la retrouver dans la galaxie.
+      </p>}
     </div>
   );
 }
@@ -550,8 +598,8 @@ function SelfForm({ name: initialName, color: initialColor, accessory: initialAc
 }
 
 // ── Main Panel ───────────────────────────────────────────────────────────────
-export default function NodePanel({ selected, loans, portfolios, members, goals, flows, goalLinks, portfolioOwnerships, actions, onClear, createMode, setCreateMode, salary, onUpdateSalary, onUpdateSelf, groups, grossTotal, debt, onPortfolioCreated, ownerName, expenseMemberId, dividends, displayCurrency, ctx }:
-  { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; onUpdateSelf: (name: string, color: string, accessory: string | null) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number; onPortfolioCreated?: (p: Portfolio) => void; ownerName: string; expenseMemberId?: number | null; dividends: Record<string, DividendInfo | null>; displayCurrency: string; ctx: ValuationContext }) {
+export default function NodePanel({ selected, loans, portfolios, members, goals, flows, goalLinks, portfolioOwnerships, actions, onClear, createMode, setCreateMode, salary, onUpdateSalary, onUpdateSelf, groups, grossTotal, debt, onPortfolioCreated, onPickPortfolio, quetes = [], onQuete, ownerName, expenseMemberId, dividends, displayCurrency, ctx }:
+  { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; onUpdateSelf: (name: string, color: string, accessory: string | null) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number; onPortfolioCreated?: (p: Portfolio) => void; onPickPortfolio?: (id: number) => void; quetes?: Quete[]; onQuete?: (a: ActionQuete) => void; ownerName: string; expenseMemberId?: number | null; dividends: Record<string, DividendInfo | null>; displayCurrency: string; ctx: ValuationContext }) {
   const fmt = (v: number) => formatMoney(v, displayCurrency);
   const portfolioTotal = (id: number) => groups.find(g => g.key === id)?.total ?? 0;
   // Deux planètes peuvent porter le même nom ; on ne précise le propriétaire
@@ -598,6 +646,28 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
             <p className="tabular">{fmt(grossTotal)} d&apos;actifs</p>
             <p className="tabular text-negative">− {fmt(debt)} de crédits</p>
           </div>}
+          {/* Les quêtes : ce que le foyer pourrait faire maintenant. Jamais un
+              placement à acheter — une échéance, un geste d'organisation, ou
+              la division d'un plan déjà déclaré. */}
+          {quetes.length > 0 && <div className="pt-2 border-t border-border space-y-1.5">
+            <p className="text-[10px] text-text-muted uppercase tracking-wide">Quêtes</p>
+            {quetes.map(q => {
+              const Corps = (
+                <>
+                  <p className="text-[9px] uppercase tracking-wider text-text-muted">{{ echeance: "Échéance", organisation: "Organisation", plan: "Arithmétique du plan" }[q.type]}</p>
+                  <p className="text-xs font-medium text-text mt-0.5">{q.titre}</p>
+                  <p className="text-[10px] text-text-muted mt-0.5">{q.detail}</p>
+                  <p className="text-[10px] text-accent mt-1">{q.gain}</p>
+                </>
+              );
+              return q.action && onQuete
+                ? <button key={q.id} type="button" onClick={() => onQuete(q.action!)}
+                    className="block w-full text-left rounded-lg border border-border bg-surface px-2.5 py-2 hover:bg-surface-hover hover:border-accent/40">
+                    {Corps}
+                  </button>
+                : <div key={q.id} className="rounded-lg border border-border bg-surface px-2.5 py-2">{Corps}</div>;
+            })}
+          </div>}
           {(() => {
             // Revenus passifs projetés (12 prochains mois) : somme, pour chaque action/ETF
             // détenu, de (quantité × montant par action) sur les versements estimés à venir.
@@ -638,26 +708,8 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
               </span>
             </div>)}
           </div>}
-          {portfolios.length > 0 && <div className="pt-2 border-t border-border">
-            <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Planètes</p>
-            {portfolios
-              .map(p => {
-                const g = groups.find(gr => gr.key === p.id);
-                const nature = natureOfPortfolio(g?.valued ?? []);
-                return { p, total: g?.total ?? 0, nature };
-              })
-              .sort((a, b) => b.total - a.total)
-              .map(({ p, total, nature }) => (
-                <div key={p.id} className="flex items-center justify-between text-xs py-1 gap-2">
-                  <span className="flex items-center gap-1.5 min-w-0">
-                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: NATURE_COLORS[nature] }}
-                      title={NATURE_LABELS[nature]} />
-                    <span className="truncate">{etiquettesPlanete.get(p.id) ?? p.name}</span>
-                  </span>
-                  <span className="tabular shrink-0">{fmt(total)}</span>
-                </div>
-              ))}
-          </div>}
+          <ListePlanetes portfolios={portfolios} groups={groups} etiquettes={etiquettesPlanete} fmt={fmt}
+            onPick={onPickPortfolio} />
           {goals.length > 0 && <div className="pt-2 border-t border-border">
             <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Objectifs</p>
             {goals.map(g => {
@@ -710,6 +762,10 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
           <h3 className="font-medium font-[family-name:var(--font-heading)] text-sm">Patrimoine net</h3>
           <p className="text-2xl font-[family-name:var(--font-mono-num)] tabular">{fmt(selected.total)}</p>
           {debt > 0 && <div className="text-xs text-text-muted space-y-0.5"><p className="tabular">{fmt(selected.grossTotal)} d&apos;actifs</p><p className="tabular text-negative">− {fmt(debt)} de crédits</p></div>}
+          {/* Le patrimoine n'est que la somme de ces planètes : ne pas les
+              montrer ici obligeait à les chercher une à une dans la galaxie. */}
+          <ListePlanetes portfolios={portfolios} groups={groups} etiquettes={etiquettesPlanete} fmt={fmt}
+            onPick={onPickPortfolio} />
           {loans.length > 0 && <div className="pt-2 border-t border-border">{loans.map(l => <div key={l.id} className="flex justify-between text-xs py-1"><span className="text-text-muted">{l.name}</span><span className="tabular text-negative">{fmt(Number(l.remainingBalance))}</span></div>)}</div>}
           {flows.length > 0 && <div className="pt-2 border-t border-border">
             <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Flux mensuels</p>
@@ -734,6 +790,52 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
         </div>
       )}
 
+      {/* « Sans portefeuille » n'est pas une planète : c'est le tas de ce qui
+          n'est rattaché à rien. La sélectionner n'ouvrait rien du tout — donc
+          rien n'expliquait d'où elle sortait ni comment s'en débarrasser. */}
+      {!createMode && selected?.kind === "portfolio" && selected.id === "unassigned" && (() => {
+        const contenu = groups.find(g => g.key === "unassigned")?.valued ?? [];
+        return (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full shrink-0" style={{ background: selected.color }} />
+              <h3 className="font-medium font-[family-name:var(--font-heading)] text-sm">Sans portefeuille</h3>
+            </div>
+            <p className="text-2xl font-[family-name:var(--font-mono-num)] tabular">{fmt(selected.total)}</p>
+            <p className="text-[10px] text-text-muted">
+              Ce n&apos;est pas une planète, mais ce qui n&apos;est rattaché à aucune — le plus souvent
+              parce qu&apos;on a supprimé la planète en gardant son contenu. Fais glisser un satellite
+              sur une planète pour l&apos;y ranger, ou supprime-les.
+            </p>
+            {contenu.length > 0 && <div className="pt-2 border-t border-border">
+              <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Composition</p>
+              {[...contenu].sort((a, b) => b.value - a.value).map(v => (
+                <div key={v.asset.id} className="flex justify-between items-center text-xs py-1.5 border-b border-border/50 last:border-0">
+                  <div>
+                    <p className="font-medium text-text">{v.asset.name}</p>
+                    <p className="text-[10px] text-text-muted">{ASSET_TYPE_LABELS[v.asset.type]}{v.asset.ticker ? ` · ${v.asset.ticker}` : ""}</p>
+                  </div>
+                  <span className="tabular shrink-0">{fmt(v.value)}</span>
+                </div>
+              ))}
+              <Btn type="button" variant="danger" className="w-full mt-3"
+                onClick={async () => {
+                  const combien = `${contenu.length} satellite${contenu.length > 1 ? "s" : ""}`;
+                  if (!confirm(`Supprimer les ${combien} sans portefeuille (${fmt(selected.total)}) ?`)) return;
+                  for (const v of contenu) await actions.deleteAsset(v.asset.id);
+                  clear();
+                }}>
+                <Trash2 size={12} /> Supprimer ces satellites
+              </Btn>
+            </div>}
+            {portfolios.length > 0 && (
+              <ListePlanetes portfolios={portfolios} groups={groups} etiquettes={etiquettesPlanete} fmt={fmt}
+                onPick={onPickPortfolio} />
+            )}
+          </div>
+        );
+      })()}
+
       {(!createMode || createMode === "edit-portfolio") && selected?.kind === "portfolio" && selected.id !== "unassigned" && (
         <div className="space-y-3">
           {/* Portfolio summary */}
@@ -743,6 +845,12 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
           </div>
           <p className="text-2xl font-[family-name:var(--font-mono-num)] tabular">{fmt(selected.total)}</p>
           <p className="text-xs text-text-muted">{selected.count} actif{selected.count > 1 ? "s" : ""} · {grossTotal > 0 ? Math.round(selected.total / grossTotal * 100) : 0}% du patrimoine</p>
+          {(() => {
+            const barre = barreDeVie({ valeur: selected.total, plafond: Number(selected.targetAmount) || null });
+            return barre
+              ? <p className={`text-xs ${barre.pleine ? "text-[#ffcc55]" : "text-text-muted"}`}>Plafond {fmt(Number(selected.targetAmount))} · <span className="tabular font-medium">{pourcentageDe(barre)}</span>{barre.pleine ? " · merveille" : ""}</p>
+              : <p className="text-[10px] text-text-muted">Pas de plafond : pas de barre de vie. « Modifier » pour en fixer un.</p>;
+          })()}
 
           {/* Quick actions */}
           <div className="flex gap-2">
@@ -757,16 +865,40 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
           )}
 
           {/* Edit form (hidden by default) */}
-          {createMode === "edit-portfolio" && <PortfolioForm initial={{ id: selected.id as number, name: selected.name, color: selected.color, skin: selected.skin, memberId: selected.memberId }} portfolios={portfolios} members={members} ownerName={ownerName}
+          {createMode === "edit-portfolio" && <PortfolioForm initial={{ id: selected.id as number, name: selected.name, color: selected.color, skin: selected.skin, memberId: selected.memberId, targetAmount: selected.targetAmount }} portfolios={portfolios} members={members} ownerName={ownerName}
             onSubmit={async d => { await actions.updatePortfolio(selected.id as number, d); clear(); }}
             onDelete={async () => {
-              if (!confirm(`Supprimer "${selected.name}" ?`)) return;
-              const assetIds = new Set((groups.find(g => g.key === selected.id)?.valued ?? []).map(v => v.asset.id));
-              const linkedLoans = loans.filter(l => l.assetId != null && assetIds.has(l.assetId));
-              if (linkedLoans.length > 0) {
-                const names = linkedLoans.map(l => `${l.name} (${fmt(Number(l.remainingBalance))})`).join(", ");
-                if (confirm(`Cette planète a un crédit lié : ${names}. Le supprimer aussi ? (Annuler = le garder, non rattaché à une planète)`)) {
-                  for (const l of linkedLoans) await actions.deleteLoan(l.id);
+              // Supprimer une planète ne supprimait pas ce qu'elle contenait :
+              // les satellites se détachaient et se regroupaient sous « Sans
+              // portefeuille ». La planète semblait donc rester, sous un autre
+              // nom, sans que rien ne l'ait annoncé. La question est posée
+              // avant, et la réponse par défaut — celle du bouton principal —
+              // est celle à laquelle on s'attend : tout part.
+              const contenu = groups.find(g => g.key === selected.id)?.valued ?? [];
+              const valeur = contenu.reduce((s, v) => s + v.value, 0);
+              const combien = `${contenu.length} satellite${contenu.length > 1 ? "s" : ""}`;
+              if (!confirm(
+                contenu.length === 0
+                  ? `Supprimer la planète "${selected.name}" ?`
+                  : `Supprimer la planète "${selected.name}" et ses ${combien} (${fmt(valeur)}) ?\n\n`
+                    + `Annuler pour ne rien supprimer.`
+              )) return;
+              if (contenu.length > 0) {
+                const garder = confirm(
+                  `Garder les ${combien} ?\n\n`
+                  + `OK : ils restent, regroupés sous « Sans portefeuille », et pourront être rattachés ailleurs.\n`
+                  + `Annuler : ils sont supprimés avec la planète.`
+                );
+                if (!garder) {
+                  const assetIds = new Set(contenu.map(v => v.asset.id));
+                  const linkedLoans = loans.filter(l => l.assetId != null && assetIds.has(l.assetId));
+                  if (linkedLoans.length > 0) {
+                    const names = linkedLoans.map(l => `${l.name} (${fmt(Number(l.remainingBalance))})`).join(", ");
+                    if (confirm(`Cette planète a un crédit lié : ${names}. Le supprimer aussi ? (Annuler = le garder, non rattaché à une planète)`)) {
+                      for (const l of linkedLoans) await actions.deleteLoan(l.id);
+                    }
+                  }
+                  for (const v of contenu) await actions.deleteAsset(v.asset.id);
                 }
               }
               await actions.deletePortfolio(selected.id as number); clear();
@@ -825,6 +957,13 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
               })}
             </div>;
           })()}
+
+          {/* Les voisines, pour passer de l'une à l'autre sans repartir du
+              patrimoine à chaque fois. */}
+          {portfolios.length > 1 && (
+            <ListePlanetes portfolios={portfolios} groups={groups} etiquettes={etiquettesPlanete} fmt={fmt}
+              selectedId={selected.id} onPick={onPickPortfolio} />
+          )}
         </div>
       )}
 

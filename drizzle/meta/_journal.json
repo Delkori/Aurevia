@@ -120,6 +120,13 @@
       "when": 1789323028437,
       "tag": "0016_expense_shares",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1789888532590,
+      "tag": "0017_portfolio_target",
+      "breakpoints": true
     }
   ]
-}
+}\n

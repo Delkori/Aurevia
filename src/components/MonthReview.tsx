@@ -152,7 +152,8 @@ export default function MonthReview({
    * quinze mouvements, trente requêtes en file, plusieurs secondes de fenêtre
    * figée. L'appelant regroupe.
    */
-  onUpdateMany?: (majs: { id: number; status: string; actualAmount?: string | null }[]) => Promise<void>;
+  /** Reçoit aussi le mois pointé : c'est le tour dont on fait le bilan. */
+  onUpdateMany?: (majs: { id: number; status: string; actualAmount?: string | null }[], mois: Date) => Promise<void>;
   onClose: () => void;
   readOnly?: boolean;
   /** Démonstration : tout est manipulable, rien n'est enregistré. */
@@ -265,7 +266,7 @@ export default function MonthReview({
     if (majs.length === 0) return;
     setEnregistrement(true);
     try {
-      if (onUpdateMany) await onUpdateMany(majs);
+      if (onUpdateMany) await onUpdateMany(majs, mois);
       else for (const m of majs) await onUpdate(m.id, { status: m.status, actualAmount: m.actualAmount });
       setBrouillon({});
       setSaisie({});

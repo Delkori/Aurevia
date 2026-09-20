@@ -4,7 +4,16 @@ import { useEffect, useState, useCallback, useMemo, useSyncExternalStore } from 
 import { AlertTriangle, X, Eye, Sparkles, Loader2 } from "lucide-react";
 import GalaxyView from "@/components/GalaxyView";
 import SinceLastVisit from "@/components/SinceLastVisit";
+import { getVisitMemory, getVisitMemoryServer, subscribeVisitMemory } from "@/lib/sinceLastVisit";
 import MonthReview, { type Occurrence } from "@/components/MonthReview";
+import FinDeTour from "@/components/FinDeTour";
+import { bilanDuTour, type BilanTour, type Instantane } from "@/lib/finDeTour";
+import { scoreDeStructure } from "@/lib/score";
+import { planetSkin } from "@/lib/skins";
+import { situationDuFoyer } from "@/lib/eres";
+import { quetesDuFoyer } from "@/lib/quetes";
+import { nomDuMois } from "@/lib/finDeTour";
+import { natureOfPortfolio } from "@/lib/natures";
 import DemoIntro from "@/components/DemoIntro";
 import { monthlyEquivalent } from "@/lib/flows";
 import { type EntreesSystemes, type SystemeId } from "@/lib/systemes";
@@ -18,7 +27,7 @@ import { fetchAllDividends, type DividendInfo } from "@/lib/allDividends";
 import { etiquettesPlanetes } from "@/lib/nomsPlanetes";
 
 type Asset = { id: number; name: string; type: string; ticker: string | null; quantity: string | null; avgBuyPrice: string | null; manualValue: string | null; yieldRate: string | null; currency: string; portfolioId: number | null };
-type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null };
+type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null; targetAmount: string | null };
 type Goal = { id: number; name: string; targetAmount: string; targetDate: string | null; color: string; memberId: number | null };
 type Loan = { id: number; name: string; remainingBalance: string; principal: string; interestRate: string | null; monthlyPayment: string | null; assetId: number | null; currency: string };
 type Member = { id: number; name: string; role: string; color: string; salary: string | null; accessory: string | null };
@@ -76,8 +85,15 @@ export default function HomePage() {
   const [demoLoaded, setDemoLoaded] = useState(false);
   const [seeding, setSeeding] = useState(false);
   const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
+  /** L'historique du patrimoine net : le point de départ de chaque tour. */
+  const [snapshots, setSnapshots] = useState<Instantane[]>([]);
+  /** Le bilan du tour qu'on vient d'enregistrer, tant qu'il est à l'écran. */
+  const [bilan, setBilan] = useState<BilanTour | null>(null);
   const [overdue, setOverdue] = useState(0);
   const [reviewOpen, setReviewOpen] = useState(false);
+  // La mémoire de la dernière visite : la galaxie s'en sert pour marquer les
+  // segments de vie perdus depuis, sur chaque planète et chaque projet.
+  const memory = useSyncExternalStore(subscribeVisitMemory, getVisitMemory, getVisitMemoryServer);
   const ecranEtroit = useEcranEtroit();
   /** `null` = vue d'ensemble des systèmes ; sinon on est entré dans l'un d'eux. */
   const [systeme, setSysteme] = useState<SystemeId | null>(null);
@@ -85,13 +101,13 @@ export default function HomePage() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [a, p, g, l, m, f, s, gl, po, fx, se, dm, oc, es] = await Promise.allSettled([
+      const [a, p, g, l, m, f, s, gl, po, fx, se, dm, oc, es, sn] = await Promise.allSettled([
         apiFetch("/api/assets"), apiFetch("/api/portfolios"), apiFetch("/api/goals"),
         apiFetch("/api/loans"), apiFetch("/api/members"), apiFetch("/api/flows"),
         apiFetch("/api/settings"), apiFetch("/api/goal-links"), apiFetch("/api/portfolio-ownerships"),
         apiFetch("/api/exchange-rates"),
         apiFetch("/api/session"), apiFetch("/api/demo"), apiFetch("/api/occurrences"),
-        apiFetch("/api/expense-shares"),
+        apiFetch("/api/expense-shares"), apiFetch("/api/snapshot"),
       ]);
       const ad = a.status === "fulfilled" ? (a.value as Asset[]) : [];
       setAssets(ad);
@@ -104,6 +120,7 @@ export default function HomePage() {
       setGoalLinks(gl.status === "fulfilled" ? (gl.value as GoalLink[]) : []);
       setPortfolioOwnerships(po.status === "fulfilled" ? (po.value as PortfolioOwnership[]) : []);
       setExpenseShares(es.status === "fulfilled" ? (es.value as ExpenseShare[]) : []);
+      setSnapshots(sn.status === "fulfilled" ? (sn.value as Instantane[]) : []);
       if (fx.status === "fulfilled") setRates(fx.value as Rates);
       setRole(se.status === "fulfilled" ? (se.value as { role: "owner" | "demo" }).role : "owner");
       if (oc.status === "fulfilled") {
@@ -270,8 +287,13 @@ export default function HomePage() {
 
     const staleCount = assets.filter((a) => isStale(a, a.ticker ? quotes[a.ticker] : null)).length;
 
+    // La valeur de chaque planète à cette visite : c'est ce qui permettra, à
+    // la prochaine, de dire quels segments de sa barre de vie ont été perdus.
+    const portfolioValues = Object.fromEntries(portfolios.map((p) => [String(p.id), portfolioTotal(p.id)]));
+
     return {
       netWorth,
+      portfolioValues,
       goals: goalRows,
       flows: flowRows,
       dividends: dividendRows,
@@ -331,13 +353,50 @@ export default function HomePage() {
    * complet* par ligne rendait le bouton inutilisable dès dix mouvements : les
    * écritures partent ensemble, et on ne recharge qu'une fois à la fin.
    */
-  const updateManyOccurrences = async (majs: { id: number; status: string; actualAmount?: string | null }[]) => {
+  /**
+   * Le bilan du tour qu'on vient d'enregistrer. Tout y est déjà calculé
+   * ailleurs — le résumé de visite, la galaxie, le score ; on ne fait que
+   * les réunir. Le score reprend la définition des revenus de la galaxie
+   * (salaire principal et revenus déclarés), sans quoi la fin de tour
+   * afficherait un autre chiffre que la barre latérale.
+   */
+  const bilanPour = (pointes: number, mois: Date): BilanTour => {
+    const ctx: ValuationContext = { rates, displayCurrency: settings.display_currency || "EUR" };
+    const valeurDe = (a: Asset) => currentValue(a, a.ticker ? quotes[a.ticker] : null, ctx);
+    const brut = assets.reduce((s, a) => s + valeurDe(a), 0);
+    const revenus = (Number(settings.monthly_salary) || 0)
+      + flows.filter(f => f.targetType === "income").reduce((s, f) => s + monthlyEquivalent(f), 0);
+    const depenses = flows.filter(f => f.targetType === "expense").reduce((s, f) => s + monthlyEquivalent(f), 0);
+    const score = scoreDeStructure({
+      brut, dette: totalDebt(loans, ctx), revenus, depenses,
+      planetes: portfolios.map(p => {
+        const valued = assets.filter(a => a.portfolioId === p.id).map(a => ({ asset: a, value: valeurDe(a) }));
+        return { total: visitData.portfolioValues[String(p.id)] ?? 0, skin: planetSkin(p.name, valued, p.skin) };
+      }),
+    });
+    return bilanDuTour({
+      mois, pointes,
+      patrimoineNet: visitData.netWorth,
+      instantanes: snapshots,
+      projets: visitData.goals.map(g => ({ id: g.id, nom: g.name, progression: g.progress })),
+      planetes: portfolios.map(p => ({
+        id: p.id, nom: nomPlanete(p), valeur: visitData.portfolioValues[String(p.id)] ?? 0,
+        plafond: Number(p.targetAmount) || null,
+      })),
+      memoire: memory,
+      score,
+      situation: jeu.situation,
+    });
+  };
+
+  const updateManyOccurrences = async (majs: { id: number; status: string; actualAmount?: string | null }[], mois: Date) => {
     if (readOnly) {
       const par = new Map(majs.map(m => [m.id, m]));
       majLocale(liste => liste.map(o => {
         const m = par.get(o.id);
         return m ? { ...o, status: m.status, actualAmount: m.actualAmount ?? null } : o;
       }));
+      setBilan(bilanPour(majs.length, mois));
       return;
     }
     await Promise.all(majs.map(m => apiFetch(`/api/occurrences/${m.id}`, {
@@ -346,6 +405,8 @@ export default function HomePage() {
       body: JSON.stringify({ status: m.status, actualAmount: m.actualAmount }),
     })));
     await rechargerEcheances();
+    // Enregistrer, c'est finir le tour : le bilan s'ouvre par-dessus le pointage.
+    setBilan(bilanPour(majs.length, mois));
   };
 
   /** Mouvement exceptionnel : une dépense que rien n'avait prévue. */
@@ -448,6 +509,46 @@ export default function HomePage() {
     };
   }, [assets, quotes, loans, flows, members, goals, goalLinks, portfolios, rates, settings, nomPlanete]);
 
+  /**
+   * L'ère du foyer et ses quêtes — constatées, jamais gagnées. Tout vient de
+   * ce que la page sait déjà : l'épargne disponible est la valeur des
+   * planètes de nature « épargne », les revenus passifs sont les revenus
+   * déclarés plus les dividendes estimés ramenés au mois.
+   */
+  // Pas de `useMemo` : le compilateur React mémoïse lui-même, et un
+  // `useMemo` qu'il ne peut pas vérifier lui fait abandonner toute la page.
+  const jeu = (() => {
+    const devise = settings.display_currency || "EUR";
+    const fmt = (v: number) => formatMoney(v, devise);
+    const ctx: ValuationContext = { rates, displayCurrency: devise };
+    const valeurDe = (a: Asset) => currentValue(a, a.ticker ? quotes[a.ticker] : null, ctx);
+    const natureDe = (pid: number) =>
+      natureOfPortfolio(assets.filter(a => a.portfolioId === pid).map(a => ({ asset: a, value: valeurDe(a) })));
+    const valeurPlanete = (pid: number) => visitData.portfolioValues[String(pid)] ?? 0;
+    // « autre » n'est pas une nature, c'est l'absence de nature : elle ne compte pas.
+    const natures = new Set(portfolios.filter(p => valeurPlanete(p.id) > 0).map(p => natureDe(p.id)).filter(n => n !== "autre"));
+    const versementProgramme = flows.some(f => (f.targetType === "portfolio" || f.targetType === "goal") && monthlyEquivalent(f) > 0);
+    const situation = situationDuFoyer({
+      epargneDisponible: portfolios.filter(p => natureDe(p.id) === "epargne").reduce((s, p) => s + valeurPlanete(p.id), 0),
+      depensesMensuelles: entreesSystemes.depenses,
+      versementProgramme,
+      patrimoineNet: visitData.netWorth,
+      revenusMensuels: entreesSystemes.revenus,
+      natures: natures.size,
+      revenusPassifs: flows.filter(f => f.targetType === "income").reduce((s, f) => s + monthlyEquivalent(f), 0)
+        + visitData.dividends.reduce((s, d) => s + d.amount, 0) / 12,
+    }, fmt);
+    const quetes = quetesDuFoyer({
+      enRetard: overdue,
+      mois: nomDuMois(new Date()).split(" ")[0],
+      planetes: portfolios.map(p => ({ id: p.id, nom: nomPlanete(p), valeur: valeurPlanete(p.id), plafond: Number(p.targetAmount) || null })),
+      projets: entreesSystemes.projets.map(p => ({ id: p.goalId, nom: p.nom, acquis: p.acquis, cible: p.cible, apportMensuel: p.apport })),
+      depensesDeclarees: entreesSystemes.depenses > 0,
+      versementProgramme,
+    }, fmt);
+    return { situation, quetes };
+  })();
+
   const isEmpty =
     assets.length === 0 &&
     portfolios.length === 0 &&
@@ -475,6 +576,11 @@ export default function HomePage() {
             fictives et rien ne peut être modifié.
           </span>
         </div>
+      )}
+      {bilan && (
+        <FinDeTour bilan={bilan} fmt={(v) => formatMoney(v, settings.display_currency || "EUR")}
+          onRetour={() => setBilan(null)}
+          onTourSuivant={() => { setBilan(null); setReviewOpen(false); }} />
       )}
       {reviewOpen && (
         <MonthReview
@@ -545,6 +651,7 @@ export default function HomePage() {
 
         {!isEmpty && !readOnly && <SinceLastVisit data={visitData} disabled={readOnly} />}
         <GalaxyView
+          memoire={memory} situation={jeu.situation} quetes={jeu.quetes}
           assets={assets} portfolios={portfolios} goals={goals} loans={loans}
           members={members} flows={flows} goalLinks={goalLinks} portfolioOwnerships={portfolioOwnerships} expenseShares={expenseShares} quotes={quotes} dividends={dividends} actions={actions}
           salary={Number(settings.monthly_salary) || 0}

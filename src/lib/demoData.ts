@@ -31,16 +31,22 @@ export const DEMO_MEMBERS = [
 ] as const;
 
 export const DEMO_PORTFOLIOS = [
-  { key: "pea", name: "PEA", color: "#7c6af5", skin: "ocean", member: null },
-  { key: "cto", name: "CTO", color: "#60a5fa", skin: "tech", member: null },
-  { key: "crypto", name: "Crypto", color: "#fb923c", skin: "crypto", member: null },
-  { key: "appart", name: "Appartement Lyon", color: "#4ade80", skin: "terrain", member: null },
-  { key: "av", name: "Assurance-vie", color: "#f0abfc", skin: "ocean", member: "camille" },
+  // `target` : le plafond qu'Alex s'est fixé pour chaque planète — la barre de
+  // vie au-dessus de la sphère. Crypto n'en a pas, exprès : c'est la seule
+  // sans barre, et ça montre la règle (pas de plafond, pas de barre).
+  // L'appartement est au plafond : une merveille, avec son aura.
+  // 31 497 € sur 45 000 : six segments pleins, et le versement de 600 € du
+  // mois hachure le septième — c'est le segment « à venir » qu'on veut montrer.
+  { key: "pea", name: "PEA", color: "#7c6af5", skin: "ocean", member: null, target: "45000" },
+  { key: "cto", name: "CTO", color: "#60a5fa", skin: "tech", member: null, target: "15000" },
+  { key: "crypto", name: "Crypto", color: "#fb923c", skin: "crypto", member: null, target: null },
+  { key: "appart", name: "Appartement Lyon", color: "#4ade80", skin: "terrain", member: null, target: "340000" },
+  { key: "av", name: "Assurance-vie", color: "#f0abfc", skin: "ocean", member: "camille", target: "80000" },
   // Deux PEA portant le même nom : c'est l'usage dans un couple, et c'est ce
   // qui rend visible la règle de nommage — « PEA · Alex » et « PEA · Camille »
   // ne se complètent que parce qu'ils sont homonymes.
-  { key: "peac", name: "PEA", color: "#34d399", skin: "ocean", member: "camille" },
-  { key: "livret", name: "Livret A de Jonas", color: "#fbbf24", skin: "ocean", member: "jonas" },
+  { key: "peac", name: "PEA", color: "#34d399", skin: "ocean", member: "camille", target: "20000" },
+  { key: "livret", name: "Livret A de Jonas", color: "#fbbf24", skin: "ocean", member: "jonas", target: "10000" },
 ] as const;
 
 export const DEMO_ASSETS: DemoAsset[] = [

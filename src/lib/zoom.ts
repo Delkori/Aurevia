@@ -223,3 +223,19 @@ export function vueDOuverture(
 
 /** Largeur au-delà de laquelle la galaxie tient sans se resserrer. */
 export const LARGEUR_ETROITE = 640;
+
+/**
+ * La vue qui amène un point du repère au milieu du cadre.
+ *
+ * Sert au phare : ouvrir une planète depuis le panneau doit aussi aller la
+ * chercher, sans quoi « voir son récapitulatif » et « savoir où elle est »
+ * restent deux gestes séparés. L'échelle ne descend pas sous 1 — recentrer en
+ * gardant un dézoom montrerait la bonne planète, minuscule.
+ */
+export function vueCentreeSur(
+  centre: { x: number; y: number },
+  { largeur, hauteur, k }: { largeur: number; hauteur: number; k: number }
+): Vue {
+  const echelle = Math.max(k, 1);
+  return { k: echelle, x: largeur / 2 - echelle * centre.x, y: hauteur / 2 - echelle * centre.y };
+}

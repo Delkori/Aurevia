@@ -66,7 +66,7 @@ export function demoPortfolios(maintenant = new Date()) {
   const t = origine(maintenant);
   return DEMO_PORTFOLIOS.map((p, i) => ({
     id: i + 1, name: p.name, color: p.color, skin: p.skin,
-    memberId: memberId(p.member), createdAt: t,
+    memberId: memberId(p.member), targetAmount: p.target, createdAt: t,
   }));
 }
 
@@ -175,10 +175,14 @@ export function demoSnapshots(maintenant = new Date()) {
     // affichés, et l'écran donne deux totaux qui ne se recoupent pas.
     const brut = Math.round((402_000 + 83_000 * t + 11_000 * Math.sin(t * 7)) * 100) / 100;
     const dette = Math.round((196_000 - 8_600 * t) * 100) / 100;
+    // `totalValue` est le patrimoine *net*, comme dans la vraie table : c'est
+    // ce que `captureNetWorthSnapshot` enregistre, et ce que la courbe et la
+    // fin de tour comparent. Y mettre le brut faisait tracer à la démo une
+    // courbe à 485 000 € sous un en-tête à 306 000 €.
     out.push({
       id: MOIS_HISTOIRE - i + 1,
       date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`,
-      totalValue: brut.toFixed(2),
+      totalValue: (brut - dette).toFixed(2),
       totalDebt: dette.toFixed(2),
       netWorth: (brut - dette).toFixed(2),
       createdAt: d,

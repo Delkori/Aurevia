@@ -13,14 +13,18 @@ import { monthlyEquivalent } from "@/lib/flows";
 import { partDe, type PartLike } from "@/lib/expenseShares";
 import { proprietairesDe, arcsAnneau, type Proprietaire } from "@/lib/proprietaires";
 import {
-  construireSystemes, contexteUtile, goalIdDeProjet, systemeDuNoeud,
-  type EntreesSystemes, type SystemeId,
+  construireSystemes, contexteUtile, goalIdDeProjet, projetId, systemeDuNoeud,
+  SYSTEME_INVESTISSEMENTS, type EntreesSystemes, type SystemeId,
 } from "@/lib/systemes";
 import SystemesView from "@/components/SystemesView";
 import { currentValue, gain, gainPercent, goalProgress, totalDebt, ownedShare, type Rates, type ValuationContext } from "@/lib/networth";
 import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodePositions";
 import { getLogoUrl } from "@/lib/logos";
-import { brancherZoom, transformeDe, vueDOuverture } from "@/lib/zoom";
+import { brancherZoom, transformeDe, vueCentreeSur, vueDOuverture } from "@/lib/zoom";
+import { barreDeVie, pourcentageDe, SEGMENTS, type BarreDeVie } from "@/lib/barreDeVie";
+import { scoreDeStructure } from "@/lib/score";
+import type { Situation } from "@/lib/eres";
+import type { ActionQuete, Quete } from "@/lib/quetes";
 import {
   FILTRE_ETEINT, SHIP_DIMS, SHIP_IMAGES, VACANCES_IMAGE, imageDepenses, isVacationGoal,
   palierDepenses, planetSkin, salaryImage, skinImageForValue, type PlanetSkin,
@@ -34,7 +38,7 @@ import NodePanel, { PlanetModal, type Selection, type Actions } from "@/componen
 import { etiquettesPlanetes } from "@/lib/nomsPlanetes";
 
 type Asset = { id: number; name: string; type: string; ticker: string | null; quantity: string | null; avgBuyPrice: string | null; manualValue: string | null; yieldRate: string | null; currency: string; portfolioId: number | null };
-type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null };
+type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null; targetAmount: string | null };
 type Goal = { id: number; name: string; targetAmount: string; targetDate: string | null; color: string; memberId: number | null };
 type Loan = { id: number; name: string; remainingBalance: string; currency: string; assetId: number | null };
 type Member = { id: number; name: string; role: string; color: string; salary: string | null; accessory: string | null };
@@ -86,6 +90,8 @@ interface GNode extends SimulationNodeDatum {
   id: string; kind: string; label: string; r: number; color: string;
   portfolioKey?: number | "unassigned"; assetId?: number; goalId?: number; memberId?: number | null;
   gainVal?: number; gainPct?: number; sub?: string; logoUrl?: string | null; skin?: PlanetSkin; nature?: Nature;
+  /** Barre de vie d'une planète plafonnée ou d'un projet ; absente sinon. */
+  barre?: BarreDeVie | null;
   ownerExpenseTotal?: number; ownerRevenue?: number; flowId?: number; amount?: number; isProjected?: boolean; accessory?: string | null;
   /** Dépense portée par plusieurs personnes : le nœud n'en montre qu'une part. */
   partagee?: boolean;
@@ -220,6 +226,31 @@ function EtiquettePlanete({ r, cote = "bas", titre, sous, couleurSous, lignes = 
 }
 
 /**
+ * La barre de vie, au-dessus de la sphère : dix segments, le pourcentage à
+ * droite. Les couleurs disent l'état — plein à la couleur de la planète,
+ * hachuré pour ce que le versement du mois va remplir, rouge qui bat pour ce
+ * que les cours ont repris depuis la dernière visite. Un projet affiche déjà
+ * son pourcentage sous son nom : on ne l'écrit pas deux fois.
+ */
+function BarreDeVieSvg({ barre, r, couleur, pourcentage = true }: { barre: BarreDeVie; r: number; couleur: string; pourcentage?: boolean }) {
+  const largeur = Math.max(44, Math.min(84, r * 2));
+  const ecart = 2, h = 5;
+  const w = (largeur - ecart * (SEGMENTS - 1)) / SEGMENTS;
+  const y = -(r + 14), x0 = -largeur / 2;
+  return <g pointerEvents="none">
+    <title>{`${pourcentageDe(barre)} du plafond`}</title>
+    {barre.segments.map((s, i) => {
+      const x = x0 + i * (w + ecart);
+      if (s === "a-venir") return <rect key={i} x={x} y={y} width={w} height={h} rx={1} fill={couleur} fillOpacity={0.28} stroke={couleur} strokeOpacity={0.9} strokeWidth={0.7} strokeDasharray="1.6 1.4" />;
+      return <rect key={i} x={x} y={y} width={w} height={h} rx={1}
+        fill={s === "plein" ? couleur : s === "perdu" ? "#f87171" : "rgba(255,255,255,0.13)"}
+        className={s === "perdu" ? "g-perte" : undefined} />;
+    })}
+    {pourcentage && <text x={largeur / 2 + 5} y={y + h - 0.5} fontSize={8} fontWeight={700} fill={barre.pleine ? "#ffcc55" : "rgba(255,255,255,0.85)"} style={HALO_TEXTE}>{pourcentageDe(barre)}</text>}
+  </g>;
+}
+
+/**
  * Anneau à la couleur de la personne propriétaire — c'est lui qui distingue,
  * au premier coup d'œil, la planète d'Alex de celle de Camille, quel que soit
  * l'habillage. Un bien détenu à plusieurs porte un arc par personne,
@@ -296,7 +327,7 @@ function TravelingMarkers({
 }
 
 export default function GalaxyView({
-  assets, portfolios, goals, loans, members, flows, goalLinks, portfolioOwnerships, quotes, dividends, actions, salary, onUpdateSalary, onUpdateSelf, onRefresh, showCountdown, ownerName, centerColor, ownerAccessory, rates, displayCurrency, readOnly = false, layoutMode, onLayoutMode, overdueCount = 0, onOpenReview, demoLoaded = false, onRemoveDemo, demoBusy = false, expenseShares = [], systeme = null, onSortirSysteme, onEntrerSysteme, entreesSystemes,
+  assets, portfolios, goals, loans, members, flows, goalLinks, portfolioOwnerships, quotes, dividends, actions, salary, onUpdateSalary, onUpdateSelf, onRefresh, showCountdown, ownerName, centerColor, ownerAccessory, rates, displayCurrency, readOnly = false, layoutMode, onLayoutMode, overdueCount = 0, onOpenReview, demoLoaded = false, onRemoveDemo, demoBusy = false, expenseShares = [], systeme = null, onSortirSysteme, onEntrerSysteme, entreesSystemes, memoire = null, situation = null, quetes = [],
 }: {
   assets: Asset[]; portfolios: Portfolio[]; goals: Goal[]; loans: Loan[];
   members: Member[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; quotes: Record<string, Quote>; dividends: Record<string, DividendInfo | null>;
@@ -314,12 +345,26 @@ export default function GalaxyView({
   entreesSystemes?: EntreesSystemes;
   /** Le foyer d'exemple est chargé : on propose de le retirer. */
   demoLoaded?: boolean; onRemoveDemo?: () => void; demoBusy?: boolean;
+  /** Ce qu'on a mémorisé à la dernière visite : les segments perdus depuis en découlent. */
+  memoire?: { portfolioValues?: Record<string, number>; goalProgress?: Record<string, number> } | null;
+  /** L'ère du foyer et ses quêtes, calculées par la page à partir de tout ce qu'elle sait. */
+  situation?: Situation | null;
+  quetes?: Quete[];
 }) {
   const [expanded, setExpanded] = useState<Set<number | "unassigned">>(new Set());
   const [selected, setSelected] = useState<Selection>(null);
   const [createMode, setCreateMode] = useState<string | null>(null);
   const [linkMode, setLinkMode] = useState(false);
   const [showPlanetModal, setShowPlanetModal] = useState(false);
+  // Planète qu'on vient de demander depuis le panneau : on l'amène au milieu du
+  // cadre et on la fait battre quelques secondes. Le numéro distingue deux
+  // demandes successives sur la même planète, sinon la seconde ne relancerait
+  // rien. Il vient d'un compteur à part et non de l'état : celui-ci retombe à
+  // `null` quand le halo s'éteint, et une numérotation qui repart de un ferait
+  // passer la demande suivante pour une déjà traitée.
+  const [phare, setPhare] = useState<{ pid: number; t: number } | null>(null);
+  const numeroPhare = useRef(0);
+  const centrageFait = useRef("");
   const [ownerMode, setOwnerMode] = useState(false);
   const [ownerSourceNode, setOwnerSourceNode] = useState<{ id: string; kind: "center" | "member"; memberId?: number; label: string } | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -357,7 +402,7 @@ export default function GalaxyView({
   const [linkFrequency, setLinkFrequency] = useState("monthly");
   const simRef = useRef<Simulation<GNode, GLink> | null>(null);
   const nodesMapRef = useRef<Map<string, GNode>>(new Map());
-  const [, setTick] = useState(0);
+  const [tick, setTick] = useState(0);
   const [dragId, setDragId] = useState<string | null>(null);
   const dragIdRef = useRef<string | null>(null);
   dragIdRef.current = dragId;
@@ -413,7 +458,7 @@ export default function GalaxyView({
     for (const a of assets) { const k = a.portfolioId ?? "unassigned"; if (!byP.has(k)) byP.set(k, []); byP.get(k)!.push(a); }
     for (const p of portfolios) { if (!byP.has(p.id)) byP.set(p.id, []); } // keep empty planets visible
     return [...byP.entries()].map(([key, list]) => {
-      const p = key === "unassigned" ? { id: "unassigned" as const, name: "Sans portefeuille", color: "#6b6b72", skin: null, memberId: null } : portfolios.find(p => p.id === key) ?? { id: key, name: "?", color: "#6b6b72", skin: null, memberId: null };
+      const p = key === "unassigned" ? { id: "unassigned" as const, name: "Sans portefeuille", color: "#6b6b72", skin: null, memberId: null, targetAmount: null } : portfolios.find(p => p.id === key) ?? { id: key, name: "?", color: "#6b6b72", skin: null, memberId: null, targetAmount: null };
       const valued = list.map(a => ({ asset: a, value: currentValue(a, a.ticker ? quotes[a.ticker] : null, ctx) }));
       return { key, portfolio: p, valued, total: valued.reduce((s, v) => s + v.value, 0), nature: natureOfPortfolio(valued) };
     }).sort((a, b) => b.total - a.total);
@@ -579,10 +624,21 @@ export default function GalaxyView({
       const skin = planetSkin(g.portfolio.name, g.valued, g.portfolio.skin);
       const projTotal = projectedGroupTotal(g);
       const proprietaires = proprietairesDe(g.key, g.portfolio.memberId, portfolioOwnerships, personne);
+      // La barre de vie : valeur rapportée au plafond que la personne s'est
+      // fixé. En simulation elle suit la valeur projetée — c'est la barre
+      // qu'on aurait — et oublie les pertes depuis la dernière visite, qui
+      // n'auraient aucun sens dans le futur.
+      const versementMensuel = flows
+        .filter(f => f.targetType === "portfolio" && f.targetId === g.key)
+        .reduce((s, f) => s + monthlyAmount(f), 0);
+      const barre = barreDeVie({
+        valeur: projTotal, plafond: Number(g.portfolio.targetAmount) || null, versementMensuel,
+        valeurPrecedente: scrubYears > 0 ? null : memoire?.portfolioValues?.[String(g.key)],
+      });
       // En simulation, le gain affiché (calculé sur les cours réels du jour) perdrait son
       // sens à côté d'une valeur projetée dans le futur — on le masque plutôt que d'afficher
       // un chiffre qui semblerait porter sur la projection alors qu'il ne la concerne pas.
-      nodes.push({ id: pid, kind: "portfolio", label: etiquettesPlanete.get(g.key as number) ?? g.portfolio.name, r: sr(projTotal, maxPV, 20, 78), color: NATURE_COLORS[g.nature], nature: g.nature, portfolioKey: g.key, gainVal: scrubYears > 0 ? undefined : totalGain, sub: fmt(projTotal), skin, isProjected: scrubYears > 0, proprietaires });
+      nodes.push({ id: pid, kind: "portfolio", label: etiquettesPlanete.get(g.key as number) ?? g.portfolio.name, r: sr(projTotal, maxPV, 20, 78), color: NATURE_COLORS[g.nature], nature: g.nature, portfolioKey: g.key, gainVal: scrubYears > 0 ? undefined : totalGain, sub: fmt(projTotal), skin, isProjected: scrubYears > 0, proprietaires, barre });
       // Un fil par personne qui détient la planète, pas un seul vers le
       // propriétaire déclaré : Camille possédait la moitié de l'appartement
       // sans qu'aucun trait ne l'y relie. Les quotes-parts servaient déjà aux
@@ -614,7 +670,20 @@ export default function GalaxyView({
       const memberNode = goal.memberId ? `m-${goal.memberId}` : null;
       const linkedPortfolioIds = goalLinks.filter(gl => gl.goalId === goal.id).map(gl => gl.portfolioId);
       const prog = progressOf(goal);
-      nodes.push({ id: `g-${goal.id}`, kind: "goal", label: goal.name, r: 16 + Math.min(1, prog) * 44, color: goal.color, goalId: goal.id, sub: `${Math.round(prog * 100)}%`, proprietaires: [personne(goal.memberId)] });
+      // Un projet a déjà sa cible : sa barre de vie est sa progression, et le
+      // segment à venir vient de ce qui l'alimente chaque mois — directement,
+      // ou par les planètes qui lui sont liées.
+      const cible = Number(goal.targetAmount) || 0;
+      const apport = flows.reduce((s, f) => {
+        if (f.targetType === "goal" && f.targetId === goal.id) return s + monthlyAmount(f);
+        if (f.targetType === "portfolio" && f.targetId != null && linkedPortfolioIds.includes(f.targetId)) return s + monthlyAmount(f);
+        return s;
+      }, 0);
+      const barreProjet = barreDeVie({
+        valeur: prog, plafond: 1, versementMensuel: cible > 0 ? apport / cible : 0,
+        valeurPrecedente: scrubYears > 0 ? null : memoire?.goalProgress?.[String(goal.id)],
+      });
+      nodes.push({ id: `g-${goal.id}`, kind: "goal", label: goal.name, r: 16 + Math.min(1, prog) * 44, color: goal.color, goalId: goal.id, sub: `${Math.round(prog * 100)}%`, proprietaires: [personne(goal.memberId)], barre: barreProjet });
       links.push({ source: memberNode ?? "self", target: `g-${goal.id}` });
       linkedPortfolioIds.forEach(pid => { if (nodes.find(n => n.id === `p-${pid}`)) goalLinkEdges.push({ source: `g-${goal.id}`, target: `p-${pid}` }); });
     }
@@ -677,7 +746,7 @@ export default function GalaxyView({
     }
 
     return { targetNodes: nodes, links, flowLinks, goalLinkEdges, resteAInvestir, totalExpenseFlows, totalRevenue, totalInvest };
-  }, [groups, expanded, goals, members, flows, quotes, salary, goalLinks, progressOf, scrubYears, scrubGrowth, ownerName, centerColor, ownerAccessory, ctx, portfolioOwnerships, expenseShares, systeme, fmt, etiquettesPlanete]);
+  }, [groups, expanded, goals, members, flows, quotes, salary, goalLinks, progressOf, scrubYears, scrubGrowth, ownerName, centerColor, ownerAccessory, ctx, portfolioOwnerships, expenseShares, systeme, fmt, etiquettesPlanete, memoire]);
   linksRef.current = links;
 
   // Le corps du système où l'on a voyagé, pour l'annoncer en haut de la vue.
@@ -1205,7 +1274,7 @@ export default function GalaxyView({
     else if (n.kind === "portfolio" && n.portfolioKey !== undefined) {
       const g = groups.find(gr => gr.key === n.portfolioKey)!;
       toggle(n.portfolioKey);
-      setSelected({ kind: "portfolio", id: n.portfolioKey, name: g.portfolio.name, color: g.portfolio.color, skin: g.portfolio.skin, total: g.total, count: g.valued.length, memberId: g.portfolio.memberId });
+      setSelected({ kind: "portfolio", id: n.portfolioKey, name: g.portfolio.name, color: g.portfolio.color, skin: g.portfolio.skin, total: g.total, count: g.valued.length, memberId: g.portfolio.memberId, targetAmount: g.portfolio.targetAmount });
     }
     else if (n.kind === "asset" && n.assetId != null) {
       const g = groups.find(gr => gr.key === n.portfolioKey)!;
@@ -1260,6 +1329,62 @@ export default function GalaxyView({
     setPendingPart(null);
     onRefresh();
   };
+
+  /**
+   * Ouvrir une planète depuis le panneau.
+   *
+   * La liste du panneau est le seul endroit qui les montre toutes ; encore
+   * faut-il pouvoir en atteindre une. Trois gestes, dans cet ordre : entrer
+   * dans le système qui l'héberge si on n'y est pas — depuis la vue d'ensemble
+   * la galaxie n'est même pas rendue —, l'ouvrir dans le panneau, puis
+   * demander le recentrage. Celui-ci attend d'avoir des coordonnées : après un
+   * changement de système, la simulation n'a pas encore placé le nœud.
+   */
+  const montrerPlanete = (pid: number) => {
+    const g = groups.find(gr => gr.key === pid);
+    if (!g) return;
+    if (systeme !== SYSTEME_INVESTISSEMENTS && onEntrerSysteme) onEntrerSysteme(SYSTEME_INVESTISSEMENTS);
+    setCreateMode(null);
+    setSelected({
+      kind: "portfolio", id: pid, name: g.portfolio.name, color: g.portfolio.color,
+      skin: g.portfolio.skin, total: g.total, count: g.valued.length, memberId: g.portfolio.memberId,
+      targetAmount: g.portfolio.targetAmount,
+    });
+    setPhare({ pid, t: ++numeroPhare.current });
+  };
+
+  /** Une quête mène quelque part : au pointage, à une planète, à un projet. */
+  const suivreQuete = (a: ActionQuete) => {
+    if (a.type === "pointer") onOpenReview();
+    else if (a.type === "planete") montrerPlanete(a.id);
+    else if (a.type === "projet") { setSelected(null); onEntrerSysteme?.(projetId(a.id)); }
+  };
+
+  // Le recentrage ne touche que le DOM : la transformation du groupe racine est
+  // écrite à la main partout ailleurs (molette, pincement, glissé), elle ne
+  // passe pas par le rendu React. `tick` sert seulement à réessayer tant que la
+  // simulation n'a pas donné de position au nœud.
+  useEffect(() => {
+    if (!phare) return;
+    // Entrer dans un système monte un nouveau SVG, et le montage remet la vue
+    // d'aplomb — après notre recentrage, qui serait perdu. On recentre donc une
+    // fois par état de montage, pas une fois par demande.
+    const cle = `${phare.t}/${svgMonte ? 1 : 0}`;
+    if (centrageFait.current === cle) return;
+    const n = nodesMapRef.current.get(`p-${phare.pid}`);
+    if (!n || !Number.isFinite(n.x) || !Number.isFinite(n.y)) return;
+    centrageFait.current = cle;
+    Object.assign(zoomRef.current, vueCentreeSur({ x: n.x!, y: n.y! }, { largeur: W, hauteur: H, k: zoomRef.current.k }));
+    rootRef.current?.setAttribute("transform", transformeDe(zoomRef.current));
+  }, [phare, tick, svgMonte]);
+
+  // Le halo ne bat que le temps qu'il faut pour attirer l'œil ; le laisser
+  // en ferait une décoration permanente qui ne désignerait plus rien.
+  useEffect(() => {
+    if (!phare) return;
+    const t = setTimeout(() => setPhare(null), 2600);
+    return () => clearTimeout(t);
+  }, [phare]);
 
   const autoLayout = () => { clearAllPositions(layoutModeRef.current); nodesMapRef.current.forEach(n => { if (n.id !== "center") { n.fx = null; n.fy = null; } }); Object.assign(zoomRef.current, { k: 1, x: 0, y: 0 }); rootRef.current?.setAttribute("transform", ""); simRef.current?.alpha(1).restart(); };
 
@@ -1370,17 +1495,11 @@ export default function GalaxyView({
 
   // Score de structure /100 — purement organisationnel (diversification, dette,
   // concentration, taux d'épargne), aucune recommandation d'investissement.
-  const structureScore = useMemo(() => {
-    if (grossTotal <= 0) return null;
-    const savingsPart = totalRevenue > 0 ? Math.min(25, Math.max(0, tauxEpargne / 40 * 25)) : 12.5;
-    const skins = new Set(groups.filter(g => g.total > 0).map(g => planetSkin(g.portfolio.name, g.valued, g.portfolio.skin)));
-    const diversificationPart = Math.min(25, skins.size * 6);
-    const debtRatio = grossTotal > 0 ? debt / grossTotal : 0;
-    const debtPart = Math.max(0, 25 - debtRatio * 100 / 4);
-    const largestShare = grossTotal > 0 ? Math.max(0, ...groups.map(g => g.total)) / grossTotal : 0;
-    const concentrationPart = largestShare <= 0.3 ? 25 : Math.max(0, 25 - (largestShare - 0.3) / 0.7 * 25);
-    return Math.round(savingsPart + diversificationPart + debtPart + concentrationPart);
-  }, [grossTotal, totalRevenue, tauxEpargne, groups, debt]);
+  // La règle vit dans `lib/score.ts` : la fin de tour la détaille part par part.
+  const structureScore = useMemo(() => scoreDeStructure({
+    brut: grossTotal, dette: debt, revenus: totalRevenue, depenses: totalExpenseFlows,
+    planetes: groups.map(g => ({ total: g.total, skin: planetSkin(g.portfolio.name, g.valued, g.portfolio.skin) })),
+  })?.total ?? null, [grossTotal, totalRevenue, totalExpenseFlows, groups, debt]);
 
   // Alertes de trajectoire : purement factuelles (écart en €), aucun conseil d'investissement.
   const alerts = useMemo(() => {
@@ -1464,6 +1583,24 @@ export default function GalaxyView({
               <div className="h-1 rounded bg-bg mt-1 overflow-hidden">
                 <div className="h-full rounded" style={{ width: `${structureScore}%`, background: structureScore >= 70 ? "#34d399" : structureScore >= 45 ? "#7c6af5" : "#f87171" }} />
               </div>
+            </div>
+          )}
+          {/* L'ère : constatée, jamais gagnée. Six crans ; celui du foyer est
+              plein, et une ligne dit ce qui sépare de la suivante. */}
+          {situation && (
+            <div className="pt-2" title={situation.ere.sens}>
+              <div className="flex items-center justify-between text-[10px]">
+                <span className="text-text-muted">Ère {["I", "II", "III", "IV", "V", "VI"][situation.ere.numero - 1]}</span>
+                <span className="font-semibold text-[#ffcc55]">{situation.ere.nom}</span>
+              </div>
+              <div className="flex gap-1 mt-1" aria-hidden="true">
+                {[1, 2, 3, 4, 5, 6].map(n => (
+                  <span key={n} className="flex-1 h-1 rounded" style={{ background: n <= situation.ere.numero ? "#ffcc55" : "var(--color-bg, #07070d)" }} />
+                ))}
+              </div>
+              {situation.prochaine && situation.manque[0] && (
+                <p className="text-[9px] text-text-muted mt-1 leading-snug">{situation.prochaine.nom} : {situation.manque[0]}</p>
+              )}
             </div>
           )}
         </div>
@@ -2142,6 +2279,11 @@ export default function GalaxyView({
                     </>}
 
                     <circle r={n.r} fill="url(#sph-hl)" stroke="rgba(0,0,0,0.4)" strokeWidth={1} />
+                    {n.barre?.pleine && <circle r={n.r + 9} fill="none" stroke="#ffcc55" strokeOpacity={0.7} strokeWidth={1.5} className="g-anim g-pulse" />}
+                    {n.barre && <BarreDeVieSvg barre={n.barre} r={n.r} couleur={n.color} />}
+                    {phare?.pid === n.portfolioKey && (
+                      <circle r={n.r + 10} fill="none" stroke="#b8a5ff" strokeWidth={2.5} className="g-anim g-phare" />
+                    )}
                     <AnneauProprietaires r={n.r} proprietaires={n.proprietaires} epaisseur={isExp ? 3.5 : 2.5} />
                     <EtiquettePlanete r={n.r + 3} cote={cote} titre={n.label} sous={n.sub && mask(n.sub)} couleurSous={n.isProjected ? "#c8bfff" : undefined}
                       lignes={[
@@ -2175,6 +2317,7 @@ export default function GalaxyView({
                     <circle r={n.r} fill="url(#sph-hl)" stroke="rgba(0,0,0,0.4)" strokeWidth={1} />
                     <AnneauProprietaires r={n.r} proprietaires={n.proprietaires} />
                     {(gp ?? 0) >= 1 && <circle r={n.r + 10} fill="none" stroke="#34d399" strokeOpacity={0.6} strokeWidth={1.5} strokeDasharray="3 3" />}
+                    {n.barre && <BarreDeVieSvg barre={n.barre} r={n.r} couleur={n.color} pourcentage={false} />}
                     <EtiquettePlanete r={n.r + 3} cote={cote} titre={n.label.length > 18 ? n.label.slice(0, 17) + "…" : n.label} sous={n.sub && `${n.sub} atteint`} couleurSous={(gp ?? 0) >= 1 ? "#6ee7b7" : undefined} />
                   </>;
                 })()}
@@ -2438,12 +2581,13 @@ export default function GalaxyView({
         </div>
         <div className="min-h-0 h-full">
           <NodePanel selected={selected} loans={loans} portfolios={portfolios} members={members} goals={goals} flows={flows} goalLinks={goalLinks} portfolioOwnerships={portfolioOwnerships} actions={actions} onClear={() => setSelected(null)} createMode={createMode} setCreateMode={setCreateMode} salary={salary} onUpdateSalary={onUpdateSalary} onUpdateSelf={onUpdateSelf} groups={groups.map(g => ({ key: g.key, total: g.total, valued: g.valued }))} grossTotal={grossTotal} debt={debt} ownerName={ownerName} expenseMemberId={expenseMemberId} dividends={dividends} displayCurrency={displayCurrency} ctx={ctx}
-            onPortfolioCreated={p => setSelected({ kind: "portfolio", id: p.id, name: p.name, color: p.color, skin: p.skin, total: 0, count: 0, memberId: p.memberId })} />
+            onPortfolioCreated={p => setSelected({ kind: "portfolio", id: p.id, name: p.name, color: p.color, skin: p.skin, total: 0, count: 0, memberId: p.memberId, targetAmount: p.targetAmount })}
+            onPickPortfolio={montrerPlanete} quetes={quetes} onQuete={suivreQuete} />
         </div>
       </div>
       {showPlanetModal && (
         <PlanetModal portfolios={portfolios} members={members} ownerName={ownerName}
-          onSubmit={async d => { const p = await actions.createPortfolio(d); setSelected({ kind: "portfolio", id: p.id, name: p.name, color: p.color, skin: p.skin, total: 0, count: 0, memberId: p.memberId }); }}
+          onSubmit={async d => { const p = await actions.createPortfolio(d); setSelected({ kind: "portfolio", id: p.id, name: p.name, color: p.color, skin: p.skin, total: 0, count: 0, memberId: p.memberId, targetAmount: p.targetAmount }); }}
           onClose={() => setShowPlanetModal(false)} />
       )}
     </div>

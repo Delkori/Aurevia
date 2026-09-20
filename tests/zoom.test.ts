@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { vueDOuverture, transformeDe, ECHELLE_LISIBLE } from "../src/lib/zoom.ts";
+import { vueDOuverture, vueCentreeSur, transformeDe, ECHELLE_LISIBLE } from "../src/lib/zoom.ts";
 
 /** Le repère de la galaxie détaillée. */
 const REPERE = { largeur: 1200, hauteur: 800 };
@@ -63,4 +63,17 @@ test("un cadre non mesuré laisse la vue neutre", () => {
 
 test("la transformation se lit telle quelle", () => {
   assert.equal(transformeDe({ k: 2, x: -10, y: 5 }), "translate(-10,5) scale(2)");
+});
+
+test("le phare amène la planète au milieu du cadre", () => {
+  const v = vueCentreeSur({ x: 1030, y: 640 }, { ...REPERE, k: 1 });
+  assert.equal(v.x + v.k * 1030, REPERE.largeur / 2);
+  assert.equal(v.y + v.k * 640, REPERE.hauteur / 2);
+});
+
+test("le phare garde le zoom en cours, mais ne dézoome pas", () => {
+  // Recentrer sur une planète en conservant un dézoom la montrerait minuscule :
+  // on aurait la bonne, sans pouvoir la lire.
+  assert.equal(vueCentreeSur({ x: 0, y: 0 }, { ...REPERE, k: 2.5 }).k, 2.5);
+  assert.equal(vueCentreeSur({ x: 0, y: 0 }, { ...REPERE, k: 0.4 }).k, 1);
 });
