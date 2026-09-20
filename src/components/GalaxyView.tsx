@@ -22,6 +22,7 @@ import { getNodePosition, setNodePosition, clearAllPositions } from "@/lib/nodeP
 import { getLogoUrl } from "@/lib/logos";
 import { brancherZoom, transformeDe, vueCentreeSur, vueDOuverture } from "@/lib/zoom";
 import { barreDeVie, pourcentageDe, SEGMENTS, type BarreDeVie } from "@/lib/barreDeVie";
+import { scoreDeStructure } from "@/lib/score";
 import {
   FILTRE_ETEINT, SHIP_DIMS, SHIP_IMAGES, VACANCES_IMAGE, imageDepenses, isVacationGoal,
   palierDepenses, planetSkin, salaryImage, skinImageForValue, type PlanetSkin,
@@ -1482,17 +1483,11 @@ export default function GalaxyView({
 
   // Score de structure /100 — purement organisationnel (diversification, dette,
   // concentration, taux d'épargne), aucune recommandation d'investissement.
-  const structureScore = useMemo(() => {
-    if (grossTotal <= 0) return null;
-    const savingsPart = totalRevenue > 0 ? Math.min(25, Math.max(0, tauxEpargne / 40 * 25)) : 12.5;
-    const skins = new Set(groups.filter(g => g.total > 0).map(g => planetSkin(g.portfolio.name, g.valued, g.portfolio.skin)));
-    const diversificationPart = Math.min(25, skins.size * 6);
-    const debtRatio = grossTotal > 0 ? debt / grossTotal : 0;
-    const debtPart = Math.max(0, 25 - debtRatio * 100 / 4);
-    const largestShare = grossTotal > 0 ? Math.max(0, ...groups.map(g => g.total)) / grossTotal : 0;
-    const concentrationPart = largestShare <= 0.3 ? 25 : Math.max(0, 25 - (largestShare - 0.3) / 0.7 * 25);
-    return Math.round(savingsPart + diversificationPart + debtPart + concentrationPart);
-  }, [grossTotal, totalRevenue, tauxEpargne, groups, debt]);
+  // La règle vit dans `lib/score.ts` : la fin de tour la détaille part par part.
+  const structureScore = useMemo(() => scoreDeStructure({
+    brut: grossTotal, dette: debt, revenus: totalRevenue, depenses: totalExpenseFlows,
+    planetes: groups.map(g => ({ total: g.total, skin: planetSkin(g.portfolio.name, g.valued, g.portfolio.skin) })),
+  })?.total ?? null, [grossTotal, totalRevenue, totalExpenseFlows, groups, debt]);
 
   // Alertes de trajectoire : purement factuelles (écart en €), aucun conseil d'investissement.
   const alerts = useMemo(() => {
