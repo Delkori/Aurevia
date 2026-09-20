@@ -29,6 +29,10 @@ export const portfolios = pgTable("portfolios", {
   color: text("color").notNull().default("#8a5cf5"),
   skin: text("skin"),
   memberId: integer("member_id").references(() => members.id, { onDelete: "set null" }),
+  // Le plafond que la personne se fixe pour cette planète — la barre de vie
+  // au-dessus de la sphère en découle. Nul, pas de barre : l'app ne devine
+  // jamais un objectif que personne n'a voulu.
+  targetAmount: numeric("target_amount"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [index("portfolios_member_id_idx").on(t.memberId)]);
 

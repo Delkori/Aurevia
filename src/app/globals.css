@@ -230,3 +230,9 @@ body {
   100% { opacity: 0;    transform: scale(1.35); }
 }
 .g-phare { animation: g-phare 2.6s ease-out; }
+
+/* Segment de vie perdu depuis la dernière visite : il bat une fois par
+   seconde et demie, le temps de se faire remarquer. Les animations réduites
+   le figent en rouge plein, ce qui dit la même chose. */
+@keyframes g-perte { 0%, 100% { opacity: 0.95; } 50% { opacity: 0.25; } }
+.g-perte { animation: g-perte 1.6s ease-in-out infinite; }

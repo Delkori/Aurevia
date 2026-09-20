@@ -45,7 +45,7 @@ export default function SinceLastVisit({
   data,
   disabled,
 }: {
-  data: Omit<SummaryInput, "memory">;
+  data: Omit<SummaryInput, "memory"> & { portfolioValues: Record<string, number> };
   disabled?: boolean;
 }) {
   const memory = useSyncExternalStore(
@@ -64,6 +64,10 @@ export default function SinceLastVisit({
     date: new Date().toISOString().slice(0, 10),
     netWorth: data.staleCount > 0 && memory ? memory.netWorth : data.netWorth,
     goalProgress: Object.fromEntries(data.goals.map((g) => [String(g.id), g.progress])),
+    // Même règle pour les planètes : une valeur retombée au prix de revient
+    // n'est pas un repère, et la mémoriser ferait perdre des segments de vie
+    // à la prochaine visite pour une baisse qui n'a jamais eu lieu.
+    portfolioValues: data.staleCount > 0 && memory?.portfolioValues ? memory.portfolioValues : data.portfolioValues,
   });
 
   const { daysSince, highlights } = summarizeSinceLastVisit({ ...data, memory });

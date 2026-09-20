@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useMemo, useSyncExternalStore } from 
 import { AlertTriangle, X, Eye, Sparkles, Loader2 } from "lucide-react";
 import GalaxyView from "@/components/GalaxyView";
 import SinceLastVisit from "@/components/SinceLastVisit";
+import { getVisitMemory, getVisitMemoryServer, subscribeVisitMemory } from "@/lib/sinceLastVisit";
 import MonthReview, { type Occurrence } from "@/components/MonthReview";
 import DemoIntro from "@/components/DemoIntro";
 import { monthlyEquivalent } from "@/lib/flows";
@@ -18,7 +19,7 @@ import { fetchAllDividends, type DividendInfo } from "@/lib/allDividends";
 import { etiquettesPlanetes } from "@/lib/nomsPlanetes";
 
 type Asset = { id: number; name: string; type: string; ticker: string | null; quantity: string | null; avgBuyPrice: string | null; manualValue: string | null; yieldRate: string | null; currency: string; portfolioId: number | null };
-type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null };
+type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null; targetAmount: string | null };
 type Goal = { id: number; name: string; targetAmount: string; targetDate: string | null; color: string; memberId: number | null };
 type Loan = { id: number; name: string; remainingBalance: string; principal: string; interestRate: string | null; monthlyPayment: string | null; assetId: number | null; currency: string };
 type Member = { id: number; name: string; role: string; color: string; salary: string | null; accessory: string | null };
@@ -78,6 +79,9 @@ export default function HomePage() {
   const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
   const [overdue, setOverdue] = useState(0);
   const [reviewOpen, setReviewOpen] = useState(false);
+  // La mémoire de la dernière visite : la galaxie s'en sert pour marquer les
+  // segments de vie perdus depuis, sur chaque planète et chaque projet.
+  const memory = useSyncExternalStore(subscribeVisitMemory, getVisitMemory, getVisitMemoryServer);
   const ecranEtroit = useEcranEtroit();
   /** `null` = vue d'ensemble des systèmes ; sinon on est entré dans l'un d'eux. */
   const [systeme, setSysteme] = useState<SystemeId | null>(null);
@@ -270,8 +274,13 @@ export default function HomePage() {
 
     const staleCount = assets.filter((a) => isStale(a, a.ticker ? quotes[a.ticker] : null)).length;
 
+    // La valeur de chaque planète à cette visite : c'est ce qui permettra, à
+    // la prochaine, de dire quels segments de sa barre de vie ont été perdus.
+    const portfolioValues = Object.fromEntries(portfolios.map((p) => [String(p.id), portfolioTotal(p.id)]));
+
     return {
       netWorth,
+      portfolioValues,
       goals: goalRows,
       flows: flowRows,
       dividends: dividendRows,
@@ -545,6 +554,7 @@ export default function HomePage() {
 
         {!isEmpty && !readOnly && <SinceLastVisit data={visitData} disabled={readOnly} />}
         <GalaxyView
+          memoire={memory}
           assets={assets} portfolios={portfolios} goals={goals} loans={loans}
           members={members} flows={flows} goalLinks={goalLinks} portfolioOwnerships={portfolioOwnerships} expenseShares={expenseShares} quotes={quotes} dividends={dividends} actions={actions}
           salary={Number(settings.monthly_salary) || 0}

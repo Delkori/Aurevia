@@ -9,9 +9,10 @@ import { upcomingByMonth, type FlowLike } from "@/lib/calendar";
 import { ASTRONAUT_ACCESSORIES } from "@/lib/astronautAccessories";
 import { monthsToReach } from "@/lib/projection";
 import { etiquettesPlanetes, homonymesDe } from "@/lib/nomsPlanetes";
+import { barreDeVie, pourcentageDe } from "@/lib/barreDeVie";
 
 type Asset = { id: number; name: string; type: string; ticker: string | null; quantity: string | null; avgBuyPrice: string | null; manualValue: string | null; yieldRate: string | null; currency: string; portfolioId: number | null };
-type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null };
+type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null; targetAmount: string | null };
 type Goal = { id: number; name: string; targetAmount: string; targetDate: string | null; color: string; memberId: number | null };
 type Loan = { id: number; name: string; remainingBalance: string; currency: string; assetId: number | null };
 type Member = { id: number; name: string; role: string; color: string; salary: string | null; accessory: string | null };
@@ -23,7 +24,7 @@ type DividendInfo = { ticker: string; currency: string; received: DividendEvent[
 
 export type Selection =
   | { kind: "total"; total: number; grossTotal: number; debt: number }
-  | { kind: "portfolio"; id: number | "unassigned"; name: string; color: string; skin: string | null; total: number; count: number; memberId: number | null }
+  | { kind: "portfolio"; id: number | "unassigned"; name: string; color: string; skin: string | null; total: number; count: number; memberId: number | null; targetAmount: string | null }
   | { kind: "asset"; asset: Asset; value: number; gain: number; gainPct: number; portfolioName: string }
   | { kind: "goal"; goal: Goal; progress: number; linkedPortfolioIds: number[] }
   | { kind: "member"; member: Member; total: number }
@@ -128,16 +129,17 @@ function SkinPicker({ value, onChange }: { value: string; onChange: (v: string) 
 }
 
 function PortfolioForm({ initial, portfolios, members, ownerName, onSubmit, onDelete, onCancel }:
-  { initial?: { id?: number; name: string; color: string; skin: string | null; memberId: number | null }; portfolios: Portfolio[]; members: Member[]; ownerName: string; onSubmit: (d: Record<string, unknown>) => void; onDelete?: () => void; onCancel: () => void }) {
+  { initial?: { id?: number; name: string; color: string; skin: string | null; memberId: number | null; targetAmount?: string | null }; portfolios: Portfolio[]; members: Member[]; ownerName: string; onSubmit: (d: Record<string, unknown>) => void; onDelete?: () => void; onCancel: () => void }) {
   const [name, setName] = useState(initial?.name ?? "");
   const [color, setColor] = useState(initial?.color ?? COLORS[0]);
   const [skin, setSkin] = useState(initial?.skin ?? "");
   const [memberId, setMemberId] = useState(String(initial?.memberId ?? ""));
+  const [plafond, setPlafond] = useState(initial?.targetAmount ?? "");
   // Deux PEA, c'est normal dans un couple — mais autant le dire tout de suite,
   // et rappeler à qui appartient celui qui existe déjà.
   const jumeaux = homonymesDe(name, portfolios, members, ownerName, initial?.id);
   return (
-    <form onSubmit={e => { e.preventDefault(); onSubmit({ name, color, skin: skin || null, memberId: memberId ? Number(memberId) : null }); }} className="space-y-2">
+    <form onSubmit={e => { e.preventDefault(); onSubmit({ name, color, skin: skin || null, memberId: memberId ? Number(memberId) : null, targetAmount: plafond.trim() || null }); }} className="space-y-2">
       <p className="text-[10px] text-text-muted uppercase tracking-wide">{initial ? "Planète" : "Nouvelle planète"}</p>
       <Label>Nom</Label><Inp required value={name} onChange={e => setName(e.target.value)} placeholder="PEA, CTO, Salaire…" />
       {jumeaux.length > 0 && (
@@ -149,6 +151,9 @@ function PortfolioForm({ initial, portfolios, members, ownerName, onSubmit, onDe
         </p>
       )}
       {members.length > 0 && <><Label>Propriétaire</Label><Sel value={memberId} onChange={e => setMemberId(e.target.value)}><option value="">{ownerName}</option>{members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</Sel></>}
+      <Label>Plafond</Label>
+      <Inp type="number" step="any" min="0" value={plafond} onChange={e => setPlafond(e.target.value)} placeholder="50 000" className="tabular" />
+      <p className="text-[10px] text-text-muted">La valeur que tu vises pour cette planète. Elle dessine une barre de vie au-dessus de la sphère — sans plafond, pas de barre.</p>
       <Label>Skin</Label>
       <SkinPicker value={skin} onChange={setSkin} />
       {(skin === "" || skin === "generic") && <><Label>Couleur</Label><ColorPick value={color} onChange={setColor} /></>}
@@ -817,6 +822,12 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
           </div>
           <p className="text-2xl font-[family-name:var(--font-mono-num)] tabular">{fmt(selected.total)}</p>
           <p className="text-xs text-text-muted">{selected.count} actif{selected.count > 1 ? "s" : ""} · {grossTotal > 0 ? Math.round(selected.total / grossTotal * 100) : 0}% du patrimoine</p>
+          {(() => {
+            const barre = barreDeVie({ valeur: selected.total, plafond: Number(selected.targetAmount) || null });
+            return barre
+              ? <p className={`text-xs ${barre.pleine ? "text-[#ffcc55]" : "text-text-muted"}`}>Plafond {fmt(Number(selected.targetAmount))} · <span className="tabular font-medium">{pourcentageDe(barre)}</span>{barre.pleine ? " · merveille" : ""}</p>
+              : <p className="text-[10px] text-text-muted">Pas de plafond : pas de barre de vie. « Modifier » pour en fixer un.</p>;
+          })()}
 
           {/* Quick actions */}
           <div className="flex gap-2">
@@ -831,7 +842,7 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
           )}
 
           {/* Edit form (hidden by default) */}
-          {createMode === "edit-portfolio" && <PortfolioForm initial={{ id: selected.id as number, name: selected.name, color: selected.color, skin: selected.skin, memberId: selected.memberId }} portfolios={portfolios} members={members} ownerName={ownerName}
+          {createMode === "edit-portfolio" && <PortfolioForm initial={{ id: selected.id as number, name: selected.name, color: selected.color, skin: selected.skin, memberId: selected.memberId, targetAmount: selected.targetAmount }} portfolios={portfolios} members={members} ownerName={ownerName}
             onSubmit={async d => { await actions.updatePortfolio(selected.id as number, d); clear(); }}
             onDelete={async () => {
               // Supprimer une planète ne supprimait pas ce qu'elle contenait :

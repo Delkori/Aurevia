@@ -47,6 +47,7 @@ export async function portfolioValues(req: Request) {
     color: optColor(body.color, "Couleur", "#8a5cf5"),
     skin: optString(body.skin, "Skin", 30),
     memberId: optId(body.memberId, "Membre"),
+    targetAmount: optNumeric(body.targetAmount, "Plafond", { min: 0 }),
   };
 }
 

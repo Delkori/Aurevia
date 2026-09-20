@@ -27,6 +27,8 @@ export type VisitMemory = {
   netWorth: number;
   /** Progression de chaque objectif à la dernière visite, de 0 à 1. */
   goalProgress: Record<string, number>;
+  /** Valeur de chaque planète à la dernière visite : les segments perdus de sa barre de vie en découlent. */
+  portfolioValues?: Record<string, number>;
 };
 
 export type Highlight = {
