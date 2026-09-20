@@ -481,9 +481,11 @@ export default function SystemesView({
               fontWeight={c.progression !== undefined ? 700 : 400}
               fill={c.progression === undefined ? "rgba(255,255,255,0.65)"
                 : c.progression >= 1 ? "#6ee7b7" : "rgba(255,255,255,0.9)"} style={HALO_TEXTE}>
-              {c.progression !== undefined
-                ? `${Math.round(c.progression * 100)} % de ${fmt(c.cible ?? 0)}`
-                : c.parMois ? "par mois" : c.contenu > 0 ? `${c.contenu} planète${c.contenu > 1 ? "s" : ""}` : "capital"}
+              {c.progression !== undefined && c.cible !== undefined
+                ? `${Math.round(c.progression * 100)} % de ${fmt(c.cible)}`
+                : c.progression !== undefined
+                  ? c.progression >= 1 ? (c.parMois ? "par mois · conquis" : "conquis") : `conquête ${Math.round(c.progression * 100)} %`
+                  : c.parMois ? "par mois" : c.contenu > 0 ? `${c.contenu} planète${c.contenu > 1 ? "s" : ""}` : "capital"}
             </text>
 
             {/* Toujours présent, appuyé au survol : réservé au survol, rien ne

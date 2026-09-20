@@ -95,8 +95,8 @@ export type SystemeVue = {
   /**
    * Avancement d'un projet, de 0 à 1, plafonné comme partout ailleurs
    * (`goalProgress`) : un objectif à 8 000 € couvert par une planète à 32 628 €
-   * est atteint, pas « à 408 % ». `undefined` hors projet — un patrimoine ou
-   * des dépenses ne visent aucun montant.
+   * est atteint, pas « à 408 % ». Pour les trois systèmes fixes, c'est leur
+   * conquête (`lib/conquete.ts`) ; `undefined` quand rien n'est mesuré.
    */
   progression?: number;
   /** Montant visé par un projet. */
@@ -135,6 +135,8 @@ export type EntreesSystemes = {
     depenses?: Satellite[];
     planetes?: Satellite[];
   };
+  /** Conquête des trois systèmes fixes, de 0 à 1 — voir `lib/conquete.ts`. */
+  conquete?: { revenus: number; depenses: number; investissements: number };
   projets: {
     goalId: number;
     nom: string;
@@ -183,6 +185,7 @@ export function construireSystemes(e: EntreesSystemes): {
       id: SYSTEME_REVENUS, label: "Revenus", montant: e.revenus, parMois: true,
       couleur: COULEURS_SYSTEMES[SYSTEME_REVENUS], contenu: 0,
       satellites: satellitesDe(e.contenus?.revenus),
+      progression: e.conquete?.revenus,
     });
   }
   if (e.depenses > 0 || e.lignesDepense > 0) {
@@ -190,6 +193,7 @@ export function construireSystemes(e: EntreesSystemes): {
       id: SYSTEME_DEPENSES, label: "Dépenses", montant: e.depenses, parMois: true,
       couleur: COULEURS_SYSTEMES[SYSTEME_DEPENSES], contenu: e.lignesDepense,
       satellites: satellitesDe(e.contenus?.depenses),
+      progression: e.conquete?.depenses,
     });
     if (e.revenus > 0) flux.push({ source: SYSTEME_REVENUS, cible: SYSTEME_DEPENSES, montant: e.depenses });
   }
@@ -198,6 +202,7 @@ export function construireSystemes(e: EntreesSystemes): {
       id: SYSTEME_INVESTISSEMENTS, label: "Investissements", montant: e.patrimoine, parMois: false,
       couleur: COULEURS_SYSTEMES[SYSTEME_INVESTISSEMENTS], contenu: e.planetes,
       satellites: satellitesDe(e.contenus?.planetes),
+      progression: e.conquete?.investissements,
     });
     if (e.revenus > 0 && e.versements > 0) {
       flux.push({ source: SYSTEME_REVENUS, cible: SYSTEME_INVESTISSEMENTS, montant: e.versements });

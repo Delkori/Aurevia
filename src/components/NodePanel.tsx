@@ -13,7 +13,7 @@ import { barreDeVie, pourcentageDe } from "@/lib/barreDeVie";
 import type { ActionQuete, Quete } from "@/lib/quetes";
 
 type Asset = { id: number; name: string; type: string; ticker: string | null; quantity: string | null; avgBuyPrice: string | null; manualValue: string | null; yieldRate: string | null; currency: string; portfolioId: number | null };
-type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null; targetAmount: string | null };
+type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null; targetAmount: string | null; openedAt: string | null };
 type Goal = { id: number; name: string; targetAmount: string; targetDate: string | null; color: string; memberId: number | null };
 type Loan = { id: number; name: string; remainingBalance: string; currency: string; assetId: number | null };
 type Member = { id: number; name: string; role: string; color: string; salary: string | null; accessory: string | null };
@@ -136,11 +136,13 @@ function PortfolioForm({ initial, portfolios, members, ownerName, onSubmit, onDe
   const [skin, setSkin] = useState(initial?.skin ?? "");
   const [memberId, setMemberId] = useState(String(initial?.memberId ?? ""));
   const [plafond, setPlafond] = useState(initial?.targetAmount ?? "");
+  // La date d'ouverture vit sur la planète, pas dans la sélection : on la lit là.
+  const [ouverte, setOuverte] = useState(initial?.id != null ? (portfolios.find(p => p.id === initial.id)?.openedAt ?? "") : "");
   // Deux PEA, c'est normal dans un couple — mais autant le dire tout de suite,
   // et rappeler à qui appartient celui qui existe déjà.
   const jumeaux = homonymesDe(name, portfolios, members, ownerName, initial?.id);
   return (
-    <form onSubmit={e => { e.preventDefault(); onSubmit({ name, color, skin: skin || null, memberId: memberId ? Number(memberId) : null, targetAmount: plafond.trim() || null }); }} className="space-y-2">
+    <form onSubmit={e => { e.preventDefault(); onSubmit({ name, color, skin: skin || null, memberId: memberId ? Number(memberId) : null, targetAmount: plafond.trim() || null, openedAt: ouverte || null }); }} className="space-y-2">
       <p className="text-[10px] text-text-muted uppercase tracking-wide">{initial ? "Planète" : "Nouvelle planète"}</p>
       <Label>Nom</Label><Inp required value={name} onChange={e => setName(e.target.value)} placeholder="PEA, CTO, Salaire…" />
       {jumeaux.length > 0 && (
@@ -155,6 +157,9 @@ function PortfolioForm({ initial, portfolios, members, ownerName, onSubmit, onDe
       <Label>Plafond</Label>
       <Inp type="number" step="any" min="0" value={plafond} onChange={e => setPlafond(e.target.value)} placeholder="50 000" className="tabular" />
       <p className="text-[10px] text-text-muted">La valeur que tu vises pour cette planète. Elle dessine une barre de vie au-dessus de la sphère — sans plafond, pas de barre.</p>
+      <Label>Ouverte le</Label>
+      <Inp type="date" value={ouverte} onChange={e => setOuverte(e.target.value)} className="tabular" />
+      <p className="text-[10px] text-text-muted">La date d&apos;ouverture réelle du compte — pas celle de sa saisie ici. C&apos;est elle qui dit depuis combien de temps tu tiens cette planète.</p>
       <Label>Skin</Label>
       <SkinPicker value={skin} onChange={setSkin} />
       {(skin === "" || skin === "generic") && <><Label>Couleur</Label><ColorPick value={color} onChange={setColor} /></>}
@@ -602,6 +607,9 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
   { selected: Selection; loans: Loan[]; portfolios: Portfolio[]; members: Member[]; goals: Goal[]; flows: Flow[]; goalLinks: GoalLink[]; portfolioOwnerships: PortfolioOwnership[]; actions: Actions; onClear: () => void; createMode: string | null; setCreateMode: (m: string | null) => void; salary: number; onUpdateSalary: (v: number) => Promise<void>; onUpdateSelf: (name: string, color: string, accessory: string | null) => Promise<void>; groups: { key: number | "unassigned"; total: number; valued: { asset: Asset; value: number }[] }[]; grossTotal: number; debt: number; onPortfolioCreated?: (p: Portfolio) => void; onPickPortfolio?: (id: number) => void; quetes?: Quete[]; onQuete?: (a: ActionQuete) => void; ownerName: string; expenseMemberId?: number | null; dividends: Record<string, DividendInfo | null>; displayCurrency: string; ctx: ValuationContext }) {
   const fmt = (v: number) => formatMoney(v, displayCurrency);
   const portfolioTotal = (id: number) => groups.find(g => g.key === id)?.total ?? 0;
+  // Lu une fois : un rendu doit rester pur, et « tenue depuis 7 ans » ne
+  // change pas d'un rendu à l'autre.
+  const [maintenant] = useState(() => Date.now());
   // Deux planètes peuvent porter le même nom ; on ne précise le propriétaire
   // que là où le nom seul ne suffit plus à les distinguer.
   const etiquettesPlanete = useMemo(
@@ -850,6 +858,14 @@ export default function NodePanel({ selected, loans, portfolios, members, goals,
             return barre
               ? <p className={`text-xs ${barre.pleine ? "text-[#ffcc55]" : "text-text-muted"}`}>Plafond {fmt(Number(selected.targetAmount))} · <span className="tabular font-medium">{pourcentageDe(barre)}</span>{barre.pleine ? " · merveille" : ""}</p>
               : <p className="text-[10px] text-text-muted">Pas de plafond : pas de barre de vie. « Modifier » pour en fixer un.</p>;
+          })()}
+          {(() => {
+            const ouverte = portfolios.find(p => p.id === selected.id)?.openedAt;
+            if (!ouverte) return null;
+            const [a, m, j] = ouverte.split("-").map(Number);
+            const annees = (maintenant - new Date(a, m - 1, j).getTime()) / (365.25 * 86_400_000);
+            const duree = annees >= 1 ? `${Math.floor(annees)} an${annees >= 2 ? "s" : ""}` : `${Math.max(1, Math.floor(annees * 12))} mois`;
+            return <p className="text-[10px] text-text-muted">Ouverte le {new Date(a, m - 1, j).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })} · tenue depuis {duree}</p>;
           })()}
 
           {/* Quick actions */}

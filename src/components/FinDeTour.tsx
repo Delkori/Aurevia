@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Award, Crown, Minus } from "lucide-react";
+import { ArrowDown, ArrowUp, Award, Crown, Minus, Sparkles } from "lucide-react";
 import type { BilanTour } from "@/lib/finDeTour";
 import { PART_MAX } from "@/lib/score";
 
@@ -17,7 +17,7 @@ export default function FinDeTour({ bilan, fmt, onRetour, onTourSuivant }: {
   onRetour: () => void;
   onTourSuivant: () => void;
 }) {
-  const { patrimoine, projets, planetes, score, situation } = bilan;
+  const { patrimoine, projets, planetes, score, situation, decouvertes } = bilan;
   const delta = patrimoine.avant != null ? patrimoine.apres - patrimoine.avant : null;
   const depuis = patrimoine.depuis ? dateCourte(patrimoine.depuis) : null;
 
@@ -74,6 +74,15 @@ export default function FinDeTour({ bilan, fmt, onRetour, onTourSuivant }: {
             <Ligne icone="neutre" texte={<span className="text-text-muted">Aucune planète n&apos;a de plafond : fixe-en un pour voir sa barre de vie ici</span>} valeur="" />
           )}
 
+          {/* Les découvertes du tour : une ligne chacune, une seule fois. Le
+              premier tour en constate d'un coup tout ce que le foyer avait
+              déjà — on les compte plutôt que de les énumérer. */}
+          {decouvertes.length > 3 ? (
+            <Ligne icone="decouverte" texte={<>{decouvertes.length} découvertes constatées <span className="text-text-muted">— l&apos;arbre est dans la barre latérale</span></>} valeur="découvert" ton="accent" />
+          ) : decouvertes.map(nom => (
+            <Ligne key={`d-${nom}`} icone="decouverte" texte={<>Découverte : <strong className="font-medium">{nom}</strong></>} valeur="découvert" ton="accent" />
+          ))}
+
           {/* L'ère : où en est le foyer, et ce qui le sépare de la suivante. */}
           {situation && (
             <Ligne icone="ere"
@@ -114,17 +123,18 @@ export default function FinDeTour({ bilan, fmt, onRetour, onTourSuivant }: {
 }
 
 function Ligne({ icone, texte, valeur, ton }: {
-  icone: "haut" | "bas" | "neutre" | "merveille" | "ere";
+  icone: "haut" | "bas" | "neutre" | "merveille" | "ere" | "decouverte";
   texte: React.ReactNode;
   valeur: string;
-  ton?: "positive" | "negative" | "or";
+  ton?: "positive" | "negative" | "or" | "accent";
 }) {
   const classes = {
     haut: "bg-positive/15 text-positive", bas: "bg-negative/15 text-negative",
     neutre: "bg-border text-text-muted", merveille: "bg-[#ffcc55]/15 text-[#ffcc55]", ere: "bg-[#ffcc55]/15 text-[#ffcc55]",
+    decouverte: "bg-accent/15 text-accent",
   }[icone];
-  const Icone = { haut: ArrowUp, bas: ArrowDown, neutre: Minus, merveille: Award, ere: Crown }[icone];
-  const couleur = ton === "positive" ? "text-positive" : ton === "negative" ? "text-negative" : ton === "or" ? "text-[#ffcc55]" : "text-text";
+  const Icone = { haut: ArrowUp, bas: ArrowDown, neutre: Minus, merveille: Award, ere: Crown, decouverte: Sparkles }[icone];
+  const couleur = ton === "positive" ? "text-positive" : ton === "negative" ? "text-negative" : ton === "or" ? "text-[#ffcc55]" : ton === "accent" ? "text-accent" : "text-text";
   return (
     <div className="grid grid-cols-[18px_1fr_auto] items-center gap-2.5 py-2 text-xs">
       <span className={`w-[18px] h-[18px] rounded-full grid place-items-center ${classes}`}><Icone size={10} strokeWidth={2.5} /></span>

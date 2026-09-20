@@ -14,6 +14,8 @@ import { situationDuFoyer } from "@/lib/eres";
 import { quetesDuFoyer } from "@/lib/quetes";
 import { nomDuMois } from "@/lib/finDeTour";
 import { natureOfPortfolio } from "@/lib/natures";
+import { decouvertesDuFoyer, moisEntierementPointes } from "@/lib/decouvertes";
+import { conqueteDesSystemes } from "@/lib/conquete";
 import DemoIntro from "@/components/DemoIntro";
 import { monthlyEquivalent } from "@/lib/flows";
 import { type EntreesSystemes, type SystemeId } from "@/lib/systemes";
@@ -27,7 +29,7 @@ import { fetchAllDividends, type DividendInfo } from "@/lib/allDividends";
 import { etiquettesPlanetes } from "@/lib/nomsPlanetes";
 
 type Asset = { id: number; name: string; type: string; ticker: string | null; quantity: string | null; avgBuyPrice: string | null; manualValue: string | null; yieldRate: string | null; currency: string; portfolioId: number | null };
-type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null; targetAmount: string | null };
+type Portfolio = { id: number; name: string; color: string; skin: string | null; memberId: number | null; targetAmount: string | null; openedAt: string | null };
 type Goal = { id: number; name: string; targetAmount: string; targetDate: string | null; color: string; memberId: number | null };
 type Loan = { id: number; name: string; remainingBalance: string; principal: string; interestRate: string | null; monthlyPayment: string | null; assetId: number | null; currency: string };
 type Member = { id: number; name: string; role: string; color: string; salary: string | null; accessory: string | null };
@@ -386,7 +388,18 @@ export default function HomePage() {
       memoire: memory,
       score,
       situation: jeu.situation,
+      decouvertes: jeu.decouvertes.filter(d => d.decouverte && !decouvertesVues().includes(d.id)).map(d => d.nom),
     });
+  };
+
+  // Ce que la fin de tour a déjà annoncé : une découverte ne se fête qu'une
+  // fois. Le navigateur s'en souvient, comme de la dernière visite.
+  const CLE_DECOUVERTES = "aurevia:decouvertes";
+  const decouvertesVues = (): string[] => {
+    try { return JSON.parse(localStorage.getItem(CLE_DECOUVERTES) || "[]"); } catch { return []; }
+  };
+  const retenirDecouvertes = () => {
+    try { localStorage.setItem(CLE_DECOUVERTES, JSON.stringify(jeu.decouvertes.filter(d => d.decouverte).map(d => d.id))); } catch { /* navigation privée : on refêtera, ce n'est pas grave */ }
   };
 
   const updateManyOccurrences = async (majs: { id: number; status: string; actualAmount?: string | null }[], mois: Date) => {
@@ -546,7 +559,44 @@ export default function HomePage() {
       depensesDeclarees: entreesSystemes.depenses > 0,
       versementProgramme,
     }, fmt);
-    return { situation, quetes };
+    // Les découvertes : constatées, jamais cochées.
+    const proprietairesDe = (pid: number) => {
+      const parts = portfolioOwnerships.filter(o => o.portfolioId === pid).map(o => o.memberId);
+      return parts.length > 0 ? parts : [portfolios.find(p => p.id === pid)?.memberId ?? null];
+    };
+    const maintenant = new Date();
+    const decouvertes = decouvertesDuFoyer({
+      planetes: portfolios.map(p => ({
+        id: p.id, valeur: valeurPlanete(p.id), plafond: Number(p.targetAmount) || null, ouverteLe: p.openedAt,
+        nature: natureDe(p.id), roleProprietaire: members.find(m => m.id === p.memberId)?.role ?? null, proprietaire: p.memberId,
+      })),
+      membres: members.length,
+      versementProgramme,
+      moisPointes: moisEntierementPointes(occurrences, maintenant),
+      revenusMensuels: entreesSystemes.revenus,
+      depensesMensuelles: entreesSystemes.depenses,
+      quotesParts: portfolioOwnerships.length,
+      creditsAdosses: loans.filter(l => l.assetId != null).length,
+      dividendesRecus: assets.filter(a => a.ticker && (dividends[a.ticker]?.received.length ?? 0) > 0).length,
+      projets: goals.map(g => ({
+        proprietaires: goalLinks.filter(gl => gl.goalId === g.id).flatMap(gl => proprietairesDe(gl.portfolioId)),
+      })),
+      maintenant,
+    });
+    // La conquête des systèmes de la vue d'ensemble.
+    const brut = assets.reduce((s, a) => s + valeurDe(a), 0);
+    const conquete = conqueteDesSystemes({
+      sourcesRevenus: (Number(settings.monthly_salary) > 0 ? 1 : 0)
+        + members.filter(m => Number(m.salary) > 0).length
+        + flows.filter(f => f.targetType === "income").length,
+      revenusMensuels: entreesSystemes.revenus,
+      depensesMensuelles: entreesSystemes.depenses,
+      natures: natures.size,
+      concentration: brut > 0 ? Math.max(0, ...portfolios.map(p => valeurPlanete(p.id))) / brut : 0,
+      projetsAtteints: entreesSystemes.projets.filter(p => p.cible > 0 && p.acquis >= p.cible).length,
+      projets: entreesSystemes.projets.length,
+    });
+    return { situation, quetes, decouvertes, conquete };
   })();
 
   const isEmpty =
@@ -580,7 +630,7 @@ export default function HomePage() {
       {bilan && (
         <FinDeTour bilan={bilan} fmt={(v) => formatMoney(v, settings.display_currency || "EUR")}
           onRetour={() => setBilan(null)}
-          onTourSuivant={() => { setBilan(null); setReviewOpen(false); }} />
+          onTourSuivant={() => { retenirDecouvertes(); setBilan(null); setReviewOpen(false); }} />
       )}
       {reviewOpen && (
         <MonthReview
@@ -651,7 +701,7 @@ export default function HomePage() {
 
         {!isEmpty && !readOnly && <SinceLastVisit data={visitData} disabled={readOnly} />}
         <GalaxyView
-          memoire={memory} situation={jeu.situation} quetes={jeu.quetes}
+          memoire={memory} situation={jeu.situation} quetes={jeu.quetes} decouvertes={jeu.decouvertes} conquete={jeu.conquete}
           assets={assets} portfolios={portfolios} goals={goals} loans={loans}
           members={members} flows={flows} goalLinks={goalLinks} portfolioOwnerships={portfolioOwnerships} expenseShares={expenseShares} quotes={quotes} dividends={dividends} actions={actions}
           salary={Number(settings.monthly_salary) || 0}

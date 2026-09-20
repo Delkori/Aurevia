@@ -33,6 +33,9 @@ export const portfolios = pgTable("portfolios", {
   // au-dessus de la sphère en découle. Nul, pas de barre : l'app ne devine
   // jamais un objectif que personne n'a voulu.
   targetAmount: numeric("target_amount"),
+  // La date d'ouverture réelle du compte — pas celle de sa saisie dans l'app.
+  // C'est elle qui dit depuis combien de temps on tient une planète.
+  openedAt: date("opened_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [index("portfolios_member_id_idx").on(t.memberId)]);
 
