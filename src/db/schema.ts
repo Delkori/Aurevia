@@ -157,6 +157,24 @@ export const loans = pgTable("loans", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [index("loans_asset_id_idx").on(t.assetId)]);
 
+// ── Journal des tours ────────────────────────────────────────────────────────
+// Un tour par mois pointé : ce que le bilan de fin de tour a montré, gardé.
+// C'est l'historique de la partie, et la mémoire des découvertes déjà fêtées
+// — la même sur tous les appareils, là où le navigateur seul l'était pas.
+// `decouvertes` et `quetes` sont du JSON en texte : des listes courtes, lues
+// telles quelles, qui ne méritent pas une table.
+export const tours = pgTable("tours", {
+  id: serial("id").primaryKey(),
+  mois: date("mois").notNull(),
+  pointes: integer("pointes").notNull().default(0),
+  patrimoineNet: numeric("patrimoine_net").notNull(),
+  score: integer("score"),
+  ere: integer("ere").notNull().default(1),
+  decouvertes: text("decouvertes").notNull().default("[]"),
+  quetes: text("quetes").notNull().default("[]"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [unique("tours_mois_unique").on(t.mois)]);
+
 // ── Historique patrimoine net ─────────────────────────────────────────────────
 // `date` est unique : l'instantané du jour est mis à jour, jamais dupliqué —
 // deux onglets ouverts en même temps ne peuvent plus créer deux lignes.

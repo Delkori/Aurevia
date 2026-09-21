@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Award, Crown, Minus, Sparkles } from "lucide-react";
+import { ArrowDown, ArrowUp, Award, Check, Crown, Minus, Sparkles } from "lucide-react";
 import type { BilanTour } from "@/lib/finDeTour";
 import { PART_MAX } from "@/lib/score";
 
@@ -17,7 +17,7 @@ export default function FinDeTour({ bilan, fmt, onRetour, onTourSuivant }: {
   onRetour: () => void;
   onTourSuivant: () => void;
 }) {
-  const { patrimoine, projets, planetes, score, situation, decouvertes } = bilan;
+  const { patrimoine, projets, planetes, score, situation, decouvertes, quetesAccomplies } = bilan;
   const delta = patrimoine.avant != null ? patrimoine.apres - patrimoine.avant : null;
   const depuis = patrimoine.depuis ? dateCourte(patrimoine.depuis) : null;
 
@@ -74,6 +74,13 @@ export default function FinDeTour({ bilan, fmt, onRetour, onTourSuivant }: {
             <Ligne icone="neutre" texte={<span className="text-text-muted">Aucune planète n&apos;a de plafond : fixe-en un pour voir sa barre de vie ici</span>} valeur="" />
           )}
 
+          {/* Les quêtes accomplies depuis le tour précédent : elles ne sont
+              plus proposées, donc leur condition est remplie. Le premier tour
+              n'a rien à comparer, et n'en montre jamais. */}
+          {quetesAccomplies.map(titre => (
+            <Ligne key={`q-${titre}`} icone="quete" texte={<>Accomplie : <strong className="font-medium">{titre}</strong></>} valeur="terminé" ton="positive" />
+          ))}
+
           {/* Les découvertes du tour : une ligne chacune, une seule fois. Le
               premier tour en constate d'un coup tout ce que le foyer avait
               déjà — on les compte plutôt que de les énumérer. */}
@@ -123,7 +130,7 @@ export default function FinDeTour({ bilan, fmt, onRetour, onTourSuivant }: {
 }
 
 function Ligne({ icone, texte, valeur, ton }: {
-  icone: "haut" | "bas" | "neutre" | "merveille" | "ere" | "decouverte";
+  icone: "haut" | "bas" | "neutre" | "merveille" | "ere" | "decouverte" | "quete";
   texte: React.ReactNode;
   valeur: string;
   ton?: "positive" | "negative" | "or" | "accent";
@@ -131,9 +138,9 @@ function Ligne({ icone, texte, valeur, ton }: {
   const classes = {
     haut: "bg-positive/15 text-positive", bas: "bg-negative/15 text-negative",
     neutre: "bg-border text-text-muted", merveille: "bg-[#ffcc55]/15 text-[#ffcc55]", ere: "bg-[#ffcc55]/15 text-[#ffcc55]",
-    decouverte: "bg-accent/15 text-accent",
+    decouverte: "bg-accent/15 text-accent", quete: "bg-positive/15 text-positive",
   }[icone];
-  const Icone = { haut: ArrowUp, bas: ArrowDown, neutre: Minus, merveille: Award, ere: Crown, decouverte: Sparkles }[icone];
+  const Icone = { haut: ArrowUp, bas: ArrowDown, neutre: Minus, merveille: Award, ere: Crown, decouverte: Sparkles, quete: Check }[icone];
   const couleur = ton === "positive" ? "text-positive" : ton === "negative" ? "text-negative" : ton === "or" ? "text-[#ffcc55]" : ton === "accent" ? "text-accent" : "text-text";
   return (
     <div className="grid grid-cols-[18px_1fr_auto] items-center gap-2.5 py-2 text-xs">

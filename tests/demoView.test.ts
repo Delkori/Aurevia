@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   demoAssets, demoFlows, demoGoalLinks, demoGoals, demoLoans, demoMembers,
   demoOccurrences, demoOverdue, demoOwnerships, demoPortfolios, demoSettings,
-  demoSnapshots,
+  demoSnapshots, demoTours,
 } from "../src/lib/demoView.ts";
 
 const NOW = new Date(2026, 8, 12); // 12 septembre 2026
@@ -111,5 +111,39 @@ describe("foyer de démonstration", () => {
     assert.ok(s.owner_name);
     assert.ok(s.display_currency);
     assert.ok(Number(s.monthly_salary) > 0);
+  });
+});
+
+describe("journal des tours de démonstration", () => {
+  test("trois tours déjà joués, un par mois, chronologiques", () => {
+    const t = demoTours(NOW);
+    assert.equal(t.length, 3);
+    const mois = t.map((x) => x.mois);
+    assert.deepEqual([...mois].sort(), mois, "les tours doivent déjà être dans l'ordre chronologique");
+    assert.equal(new Set(mois).size, mois.length, "un tour par mois");
+  });
+
+  test("le patrimoine progresse d'un tour à l'autre, comme le montre le journal", () => {
+    const t = demoTours(NOW);
+    for (let i = 1; i < t.length; i++) {
+      assert.ok(Number(t[i].patrimoineNet) > Number(t[i - 1].patrimoineNet), `${t[i - 1].mois} → ${t[i].mois}`);
+    }
+  });
+
+  test("le premier tour constate beaucoup de découvertes d'un coup, les suivants peu ou aucune", () => {
+    const [premier, ...reste] = demoTours(NOW);
+    assert.ok(premier.decouvertes.length >= 10, `${premier.decouvertes.length} découvertes au premier tour`);
+    for (const t of reste) assert.ok(t.decouvertes.length <= 2, `${t.mois} : ${t.decouvertes.length} découvertes`);
+  });
+
+  test("chaque tour propose au moins une quête, avec un id et un titre", () => {
+    for (const t of demoTours(NOW)) {
+      assert.ok(t.quetes.length > 0, t.mois);
+      for (const q of t.quetes) { assert.ok(q.id); assert.ok(q.titre); }
+    }
+  });
+
+  test("l'historique est identique d'un appel à l'autre", () => {
+    assert.deepEqual(demoTours(NOW), demoTours(NOW));
   });
 });
