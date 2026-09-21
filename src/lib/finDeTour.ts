@@ -41,6 +41,8 @@ export type BilanTour = {
   situation: Situation | null;
   /** Découvertes constatées depuis le dernier tour, par leur nom. */
   decouvertes: string[];
+  /** Quêtes proposées au tour précédent et qui ne le sont plus : accomplies. */
+  quetesAccomplies: string[];
 };
 
 const MOIS = [
@@ -77,6 +79,7 @@ export function bilanDuTour(e: {
   score: Score | null;
   situation?: Situation | null;
   decouvertes?: string[];
+  quetesAccomplies?: string[];
 }): BilanTour {
   const ref = instantaneDeReference(e.instantanes, e.mois);
   return {
@@ -105,5 +108,6 @@ export function bilanDuTour(e: {
     score: e.score,
     situation: e.situation ?? null,
     decouvertes: e.decouvertes ?? [],
+    quetesAccomplies: e.quetesAccomplies ?? [],
   };
 }

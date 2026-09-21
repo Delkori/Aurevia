@@ -8,6 +8,7 @@ import { getVisitMemory, getVisitMemoryServer, subscribeVisitMemory } from "@/li
 import MonthReview, { type Occurrence } from "@/components/MonthReview";
 import FinDeTour from "@/components/FinDeTour";
 import { bilanDuTour, type BilanTour, type Instantane } from "@/lib/finDeTour";
+import { decouvertesDejaFetees, dernierTour, quetesAccomplies as quetesAccompliesDepuis, tourDepuisBilan, type Tour } from "@/lib/tours";
 import { scoreDeStructure } from "@/lib/score";
 import { planetSkin } from "@/lib/skins";
 import { situationDuFoyer } from "@/lib/eres";
@@ -89,6 +90,8 @@ export default function HomePage() {
   const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
   /** L'historique du patrimoine net : le point de départ de chaque tour. */
   const [snapshots, setSnapshots] = useState<Instantane[]>([]);
+  /** Le journal des tours joués : mémoire des découvertes et des quêtes, partagée entre appareils. */
+  const [tours, setTours] = useState<Tour[]>([]);
   /** Le bilan du tour qu'on vient d'enregistrer, tant qu'il est à l'écran. */
   const [bilan, setBilan] = useState<BilanTour | null>(null);
   const [overdue, setOverdue] = useState(0);
@@ -103,13 +106,13 @@ export default function HomePage() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [a, p, g, l, m, f, s, gl, po, fx, se, dm, oc, es, sn] = await Promise.allSettled([
+      const [a, p, g, l, m, f, s, gl, po, fx, se, dm, oc, es, sn, tr] = await Promise.allSettled([
         apiFetch("/api/assets"), apiFetch("/api/portfolios"), apiFetch("/api/goals"),
         apiFetch("/api/loans"), apiFetch("/api/members"), apiFetch("/api/flows"),
         apiFetch("/api/settings"), apiFetch("/api/goal-links"), apiFetch("/api/portfolio-ownerships"),
         apiFetch("/api/exchange-rates"),
         apiFetch("/api/session"), apiFetch("/api/demo"), apiFetch("/api/occurrences"),
-        apiFetch("/api/expense-shares"), apiFetch("/api/snapshot"),
+        apiFetch("/api/expense-shares"), apiFetch("/api/snapshot"), apiFetch("/api/tours"),
       ]);
       const ad = a.status === "fulfilled" ? (a.value as Asset[]) : [];
       setAssets(ad);
@@ -123,6 +126,7 @@ export default function HomePage() {
       setPortfolioOwnerships(po.status === "fulfilled" ? (po.value as PortfolioOwnership[]) : []);
       setExpenseShares(es.status === "fulfilled" ? (es.value as ExpenseShare[]) : []);
       setSnapshots(sn.status === "fulfilled" ? (sn.value as Instantane[]) : []);
+      setTours(tr.status === "fulfilled" ? (tr.value as Tour[]) : []);
       if (fx.status === "fulfilled") setRates(fx.value as Rates);
       setRole(se.status === "fulfilled" ? (se.value as { role: "owner" | "demo" }).role : "owner");
       if (oc.status === "fulfilled") {
@@ -376,6 +380,11 @@ export default function HomePage() {
         return { total: visitData.portfolioValues[String(p.id)] ?? 0, skin: planetSkin(p.name, valued, p.skin) };
       }),
     });
+    // Ce que le tour précédent a déjà annoncé — découvertes fêtées, quêtes
+    // proposées — vit désormais dans le journal des tours, pas dans le
+    // navigateur : la partie raconte la même histoire sur tous les appareils.
+    const precedent = dernierTour(tours);
+    const dejaFetees = decouvertesDejaFetees(tours);
     return bilanDuTour({
       mois, pointes,
       patrimoineNet: visitData.netWorth,
@@ -388,18 +397,41 @@ export default function HomePage() {
       memoire: memory,
       score,
       situation: jeu.situation,
-      decouvertes: jeu.decouvertes.filter(d => d.decouverte && !decouvertesVues().includes(d.id)).map(d => d.nom),
+      decouvertes: jeu.decouvertes.filter(d => d.decouverte && !dejaFetees.has(d.id)).map(d => d.nom),
+      quetesAccomplies: quetesAccompliesDepuis(precedent, jeu.quetes.map(q => q.id)),
     });
   };
 
-  // Ce que la fin de tour a déjà annoncé : une découverte ne se fête qu'une
-  // fois. Le navigateur s'en souvient, comme de la dernière visite.
-  const CLE_DECOUVERTES = "aurevia:decouvertes";
-  const decouvertesVues = (): string[] => {
-    try { return JSON.parse(localStorage.getItem(CLE_DECOUVERTES) || "[]"); } catch { return []; }
-  };
-  const retenirDecouvertes = () => {
-    try { localStorage.setItem(CLE_DECOUVERTES, JSON.stringify(jeu.decouvertes.filter(d => d.decouverte).map(d => d.id))); } catch { /* navigation privée : on refêtera, ce n'est pas grave */ }
+  /**
+   * Écrit le tour dans le journal — le mois pointé devient l'historique de la
+   * partie. En démo, rien ne s'enregistre côté serveur : le tour rejoint
+   * l'état local, comme les autres mutations de la démonstration, et
+   * s'évapore au rechargement.
+   */
+  const ecrireTour = async (bilan: BilanTour, mois: Date) => {
+    const t = tourDepuisBilan(
+      bilan, mois,
+      jeu.decouvertes.filter(d => d.decouverte).map(d => d.id),
+      jeu.quetes.map(q => ({ id: q.id, titre: q.titre }))
+    );
+    if (readOnly) {
+      setTours(liste => [...liste.filter(x => x.mois !== t.mois), t]);
+      return;
+    }
+    try {
+      await apiFetch("/api/tours", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mois: t.mois, pointes: t.pointes, patrimoineNet: t.patrimoineNet,
+          score: t.score, ere: t.ere, decouvertes: t.decouvertes, quetes: t.quetes,
+        }),
+      });
+      setTours(liste => [...liste.filter(x => x.mois !== t.mois), t]);
+    } catch {
+      // Le bilan reste affiché même si l'écriture échoue : ne pas perdre le
+      // tour qu'on vient de jouer pour un aller-retour réseau raté.
+    }
   };
 
   const updateManyOccurrences = async (majs: { id: number; status: string; actualAmount?: string | null }[], mois: Date) => {
@@ -409,7 +441,9 @@ export default function HomePage() {
         const m = par.get(o.id);
         return m ? { ...o, status: m.status, actualAmount: m.actualAmount ?? null } : o;
       }));
-      setBilan(bilanPour(majs.length, mois));
+      const b = bilanPour(majs.length, mois);
+      setBilan(b);
+      await ecrireTour(b, mois);
       return;
     }
     await Promise.all(majs.map(m => apiFetch(`/api/occurrences/${m.id}`, {
@@ -418,8 +452,11 @@ export default function HomePage() {
       body: JSON.stringify({ status: m.status, actualAmount: m.actualAmount }),
     })));
     await rechargerEcheances();
-    // Enregistrer, c'est finir le tour : le bilan s'ouvre par-dessus le pointage.
-    setBilan(bilanPour(majs.length, mois));
+    // Enregistrer, c'est finir le tour : le bilan s'ouvre par-dessus le pointage,
+    // et le tour rejoint le journal avant d'être affiché.
+    const b = bilanPour(majs.length, mois);
+    setBilan(b);
+    await ecrireTour(b, mois);
   };
 
   /** Mouvement exceptionnel : une dépense que rien n'avait prévue. */
@@ -630,7 +667,7 @@ export default function HomePage() {
       {bilan && (
         <FinDeTour bilan={bilan} fmt={(v) => formatMoney(v, settings.display_currency || "EUR")}
           onRetour={() => setBilan(null)}
-          onTourSuivant={() => { retenirDecouvertes(); setBilan(null); setReviewOpen(false); }} />
+          onTourSuivant={() => { setBilan(null); setReviewOpen(false); }} />
       )}
       {reviewOpen && (
         <MonthReview

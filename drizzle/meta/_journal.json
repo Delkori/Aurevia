@@ -134,6 +134,13 @@
       "when": 1789932796517,
       "tag": "0018_portfolio_opened_at",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1789936644311,
+      "tag": "0019_tours",
+      "breakpoints": true
     }
   ]
 }

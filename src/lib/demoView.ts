@@ -198,6 +198,31 @@ export function demoSnapshots(maintenant = new Date()) {
  * tient ses comptes. Le mois courant est laissé en partie à faire, pour que le
  * prospect voie le travail qui l'attend — et la pastille sur la planète.
  */
+/**
+ * Les tours déjà joués par le foyer d'exemple : les trois mois qui précèdent.
+ * Le premier a constaté d'un coup ce que le foyer avait ; les suivants
+ * n'ajoutent qu'une découverte, puis aucune — c'est le rythme d'une vraie
+ * partie, et ça laisse au prospect une quête accomplie à voir en fin de tour.
+ */
+export function demoTours(maintenant = new Date()) {
+  const mois = (i: number) => {
+    const d = new Date(maintenant.getFullYear(), maintenant.getMonth() - i, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+  };
+  const plafond = { id: "plafond-6", titre: "Donner un plafond à Livret A de Jonas" };
+  const projet = { id: "projet-1", titre: "Apport résidence principale : 79 → 100 %" };
+  return [
+    { id: 1, mois: mois(3), pointes: 8, patrimoineNet: "296400.00", score: 63, ere: 4,
+      decouvertes: ["campement", "foyer", "auto", "tour", "budget", "diversification", "longue-vue", "terre", "copropriete", "levier", "heritier", "commun"],
+      quetes: [plafond, projet], createdAt: new Date(maintenant.getFullYear(), maintenant.getMonth() - 3, 12) },
+    { id: 2, mois: mois(2), pointes: 9, patrimoineNet: "299850.00", score: 64, ere: 4,
+      decouvertes: [], quetes: [plafond, projet], createdAt: new Date(maintenant.getFullYear(), maintenant.getMonth() - 2, 9) },
+    { id: 3, mois: mois(1), pointes: 9, patrimoineNet: "304827.00", score: 66, ere: 4,
+      decouvertes: ["regularite"], quetes: [plafond, { ...projet, titre: "Apport résidence principale : 80 → 100 %" }],
+      createdAt: new Date(maintenant.getFullYear(), maintenant.getMonth() - 1, 7) },
+  ];
+}
+
 export function demoOccurrences(maintenant = new Date()) {
   const flows = demoFlows(maintenant) as unknown as FlowLike[];
   const debut = new Date(maintenant.getFullYear(), maintenant.getMonth() - 3, 1);
