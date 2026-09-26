@@ -6,8 +6,12 @@ import { SESSION_COOKIE, verifySessionToken } from "@/lib/session";
 // `/demo` ouvre lui-même une session de démonstration : il doit être
 // atteignable sans cookie, sinon le lien envoyé à un prospect renverrait
 // sur l'écran de mot de passe — exactement ce qu'il sert à éviter.
-const PUBLIC_PATHS = ["/login", "/api/login", "/demo"];
-const PUBLIC_PREFIXES = ["/_next", "/favicon", "/api/cron/"];
+// Le manifeste, les icônes et le service worker n'ont rien de confidentiel :
+// un navigateur doit pouvoir les lire avant toute connexion, sinon l'app
+// n'est jamais installable depuis l'écran de connexion (redirigée en HTML
+// vers /login au lieu du JSON/PNG attendu).
+const PUBLIC_PATHS = ["/login", "/api/login", "/demo", "/manifest.webmanifest", "/sw.js", "/icon", "/apple-icon"];
+const PUBLIC_PREFIXES = ["/_next", "/favicon", "/api/cron/", "/icon-"];
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
