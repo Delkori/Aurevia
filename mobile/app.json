@@ -2,6 +2,7 @@
   "expo": {
     "name": "Aurevia",
     "slug": "aurevia",
+    "owner": "delkoris-team",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -36,6 +37,11 @@
           "backgroundColor": "#0d0d0f"
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "1259d7d7-40c5-429c-b08d-da976567bd3d"
+      }
+    }
   }
 }
