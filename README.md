@@ -1,7 +1,7 @@
 # Aurevia — Suivi de patrimoine personnel
 
-Une app inspirée de Finary : dashboard de patrimoine net, actifs avec cours en
-direct (actions/ETF/crypto via Yahoo Finance), objectifs financiers, budget
+Une app de suivi de patrimoine : dashboard de patrimoine net, actifs avec cours
+en direct (actions/ETF/crypto via Yahoo Finance), objectifs financiers, budget
 avec générateur automatique (règle 50/30/20) et diagramme de Sankey, et un
 simulateur de projection de patrimoine à long terme.
 

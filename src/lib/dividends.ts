@@ -14,8 +14,8 @@ export type DividendInfo = {
    * observée dans l'historique (mensuel/trimestriel/semestriel/annuel) et du
    * dernier montant connu. Ce n'est PAS une date officiellement annoncée par
    * l'entreprise (Yahoo Finance public ne l'expose pas de façon fiable) — donc
-   * on ne prétend pas à un 3ᵉ palier "confirmé" comme Finary, seulement
-   * "reçu" vs "estimé", pour ne jamais afficher une fausse certitude.
+   * on ne prétend pas à un 3ᵉ palier "confirmé", seulement "reçu" vs "estimé",
+   * pour ne jamais afficher une fausse certitude.
    */
   projected: DividendEvent[];
 };
