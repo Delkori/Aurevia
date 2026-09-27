@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "Aurevia",
+    "slug": "aurevia",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "aurevia",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0d0d0f",
+    "ios": {
+      "bundleIdentifier": "com.aurevia.app",
+      "supportsTablet": true,
+      "backgroundColor": "#0d0d0f"
+    },
+    "android": {
+      "package": "com.aurevia.app",
+      "backgroundColor": "#0d0d0f",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png",
+        "backgroundColor": "#0d0d0f"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 160,
+          "resizeMode": "contain",
+          "backgroundColor": "#0d0d0f"
+        }
+      ]
+    ]
+  }
+}
