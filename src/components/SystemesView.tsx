@@ -46,7 +46,7 @@ const DEBORD_ETIQUETTE = 18;
 const SECTEUR_LIBRE = 1.15;
 
 /** Contour sombre autour des lettres : lisible par-dessus un corps comme sur le fond. */
-const HALO_TEXTE = { paintOrder: "stroke", stroke: "#07070d", strokeWidth: 2.5, strokeLinejoin: "round" } as const;
+const HALO_TEXTE = { paintOrder: "stroke", stroke: "#07070d", strokeWidth: 1.5, strokeLinejoin: "round" } as const;
 
 type Corps = {
   id: SystemeId; label: string; montant: number; parMois: boolean;
