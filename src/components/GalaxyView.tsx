@@ -179,7 +179,7 @@ const STARS = Array.from({ length: 260 }, (_, i) => ({
  * ~1000 éléments de la galaxie 22 fois par seconde.
  */
 /** Contour sombre autour des lettres : lisible sur n'importe quel fond, photo comprise. */
-const HALO_TEXTE = { paintOrder: "stroke", stroke: "#07070d", strokeWidth: 3.5, strokeLinejoin: "round" } as const;
+const HALO_TEXTE = { paintOrder: "stroke", stroke: "#07070d", strokeWidth: 2, strokeLinejoin: "round" } as const;
 
 type CoteEtiquette = "bas" | "gauche" | "droite";
 
